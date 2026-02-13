@@ -9,6 +9,7 @@ from dateutil.relativedelta import relativedelta
 from database import (
     init_db, get_doctors, delete_old_schedules,
     is_admin_password_set, set_admin_password, verify_admin_password,
+    is_doctor_password_set, set_doctor_password, verify_doctor_password,
 )
 from optimizer import get_target_saturdays
 from pages import (
@@ -33,6 +34,8 @@ if "admin_authenticated" not in st.session_state:
     st.session_state.admin_authenticated = False
 if "doctor_id" not in st.session_state:
     st.session_state.doctor_id = None
+if "doctor_authenticated" not in st.session_state:
+    st.session_state.doctor_authenticated = False
 
 
 def _show_role_selection():
@@ -89,8 +92,30 @@ def _show_admin_login():
         st.rerun()
 
 
+def _show_doctor_login():
+    """医員パスワード認証画面"""
+    st.title("医員ログイン")
+    st.markdown("---")
+
+    if not is_doctor_password_set():
+        st.info("医員用パスワードが未設定です。管理者画面で設定してください。")
+    else:
+        pw = st.text_input("パスワード", type="password", key="doc_pw_login")
+        if st.button("ログイン", type="primary"):
+            if verify_doctor_password(pw):
+                st.session_state.doctor_authenticated = True
+                st.rerun()
+            else:
+                st.error("パスワードが正しくありません")
+
+    st.markdown("---")
+    if st.button("← 戻る"):
+        st.session_state.role = None
+        st.rerun()
+
+
 def _show_doctor_selection():
-    """医員選択画面"""
+    """医員選択画面（認証済み後）"""
     st.title("医員ログイン")
     st.markdown("---")
 
@@ -100,7 +125,7 @@ def _show_doctor_selection():
     else:
         doctor_names = [d["name"] for d in doctors]
         selected = st.selectbox("名前を選択してください", doctor_names)
-        if st.button("ログイン", type="primary"):
+        if st.button("選択", type="primary"):
             doctor = next(d for d in doctors if d["name"] == selected)
             st.session_state.doctor_id = doctor["id"]
             st.rerun()
@@ -108,6 +133,7 @@ def _show_doctor_selection():
     st.markdown("---")
     if st.button("← 戻る"):
         st.session_state.role = None
+        st.session_state.doctor_authenticated = False
         st.rerun()
 
 
@@ -130,6 +156,7 @@ def _logout():
     if st.sidebar.button("ログアウト", use_container_width=True):
         st.session_state.role = None
         st.session_state.admin_authenticated = False
+        st.session_state.doctor_authenticated = False
         st.session_state.doctor_id = None
         st.rerun()
 
@@ -161,19 +188,23 @@ elif st.session_state.role == "admin":
             admin_schedule.render(target_month)
 
 elif st.session_state.role == "doctor":
-    doctors = get_doctors()
-    doctor = next((d for d in doctors if d["id"] == st.session_state.doctor_id), None)
-
-    if doctor is None:
+    if not st.session_state.doctor_authenticated:
+        _show_doctor_login()
+    elif st.session_state.doctor_id is None:
         _show_doctor_selection()
     else:
-        st.sidebar.title(doctor['name'])
-        target_month, year, month = _show_month_selector()
-        _logout()
+        doctors = get_doctors()
+        doctor = next((d for d in doctors if d["id"] == st.session_state.doctor_id), None)
+        if doctor is None:
+            _show_doctor_selection()
+        else:
+            st.sidebar.title(doctor['name'])
+            target_month, year, month = _show_month_selector()
+            _logout()
 
-        tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
+            tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
 
-        with tab1:
-            doctor_input.render(doctor, target_month, year, month)
-        with tab2:
-            doctor_schedule.render(doctor, target_month)
+            with tab1:
+                doctor_input.render(doctor, target_month, year, month)
+            with tab2:
+                doctor_schedule.render(doctor, target_month)

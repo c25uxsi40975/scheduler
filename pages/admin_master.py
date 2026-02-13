@@ -6,6 +6,7 @@ from database import (
     get_clinics, add_clinic, update_clinic, delete_clinic,
     get_affinities, set_affinity,
     get_clinic_date_overrides, set_clinic_date_override,
+    is_doctor_password_set, set_doctor_password,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 
@@ -22,6 +23,24 @@ FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 
 def render(target_month, year, month):
     st.header("マスタ管理")
+
+    # ---- 医員用パスワード設定 ----
+    with st.expander("医員用パスワード設定"):
+        if is_doctor_password_set():
+            st.write("設定済み")
+        else:
+            st.warning("未設定（医員がログインできません）")
+        pw1 = st.text_input("新しいパスワード", type="password", key="doc_pw1")
+        pw2 = st.text_input("パスワード（確認）", type="password", key="doc_pw2")
+        if st.button("医員用パスワードを設定"):
+            if not pw1:
+                st.error("パスワードを入力してください")
+            elif pw1 != pw2:
+                st.error("パスワードが一致しません")
+            else:
+                set_doctor_password(pw1)
+                st.success("医員用パスワードを設定しました")
+                st.rerun()
 
     col1, col2 = st.columns(2)
 

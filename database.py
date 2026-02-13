@@ -334,6 +334,32 @@ def verify_admin_password(password: str) -> bool:
         return row["value"] == _hash_password(password)
 
 
+def is_doctor_password_set() -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='doctor_password'"
+        ).fetchone()
+        return row is not None
+
+
+def set_doctor_password(password: str):
+    with get_conn() as conn:
+        conn.execute("""
+            INSERT INTO settings (key, value) VALUES ('doctor_password', ?)
+            ON CONFLICT(key) DO UPDATE SET value=excluded.value
+        """, (_hash_password(password),))
+
+
+def verify_doctor_password(password: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key='doctor_password'"
+        ).fetchone()
+        if not row:
+            return False
+        return row["value"] == _hash_password(password)
+
+
 # ---- Clinic Date Overrides ----
 
 def get_clinic_date_overrides(year_month):
