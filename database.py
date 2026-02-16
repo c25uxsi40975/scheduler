@@ -135,10 +135,13 @@ def update_doctor(doc_id, name=None, is_active=None):
     row_idx = _find_row_index(ws, 1, doc_id)
     if not row_idx:
         return
+    headers = ws.row_values(1)
     if name is not None:
-        ws.update_cell(row_idx, 2, name)
+        col_idx = headers.index("name") + 1
+        ws.update_cell(row_idx, col_idx, name)
     if is_active is not None:
-        ws.update_cell(row_idx, 3, int(is_active))
+        col_idx = headers.index("is_active") + 1
+        ws.update_cell(row_idx, col_idx, int(is_active))
 
 
 def delete_doctor(doc_id):
