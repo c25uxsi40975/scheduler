@@ -216,7 +216,9 @@ def get_clinics(active_only=True):
         r["is_active"] = int(r.get("is_active", 1))
         # preferred_doctorsをパース
         pd_raw = r.get("preferred_doctors", "[]")
-        if isinstance(pd_raw, str) and pd_raw:
+        if isinstance(pd_raw, list):
+            r["preferred_doctors"] = pd_raw
+        elif isinstance(pd_raw, str) and pd_raw:
             try:
                 r["preferred_doctors"] = json.loads(pd_raw)
             except (json.JSONDecodeError, ValueError):
