@@ -29,7 +29,7 @@ def render(target_month, year, month):
     # ---- 医員管理 ----
     with col1:
         st.subheader("医員一覧")
-        with st.form("add_doctor_form"):
+        with st.form("add_doctor_form", clear_on_submit=True):
             new_doc = st.text_input("新規医員名")
             if st.form_submit_button("追加", use_container_width=True):
                 if new_doc.strip():
@@ -122,7 +122,7 @@ def render(target_month, year, month):
     # ---- 外勤先管理 ----
     with col2:
         st.subheader("外勤先一覧")
-        with st.form("add_clinic_form"):
+        with st.form("add_clinic_form", clear_on_submit=True):
             new_clinic = st.text_input("外勤先名")
             new_fee = st.number_input("日当（円）", min_value=0, step=10000, value=50000)
             new_freq = st.selectbox("頻度", FREQ_OPTIONS, format_func=lambda x: x[1])

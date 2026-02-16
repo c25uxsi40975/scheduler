@@ -23,14 +23,20 @@ def _get_spreadsheet():
     return gc.open(st.secrets.get("spreadsheet_name", "外勤調整データ"))
 
 
+_ws_cache = {}
+
+
 def _get_sheet(name):
-    """シートを取得。なければヘッダー付きで新規作成"""
+    """シートを取得（キャッシュ付き）。なければ新規作成"""
+    if name in _ws_cache:
+        return _ws_cache[name]
     sh = _get_spreadsheet()
     try:
-        return sh.worksheet(name)
+        ws = sh.worksheet(name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=20)
-        return ws
+    _ws_cache[name] = ws
+    return ws
 
 
 def _get_all_records(ws):
@@ -70,16 +76,22 @@ SHEET_HEADERS = {
 }
 
 
+_db_initialized = False
+
+
 def init_db():
     """全シートを初期化（ヘッダーがなければ作成、不足カラムがあれば追加）"""
-    if st.session_state.get("_db_initialized"):
+    global _db_initialized
+    if _db_initialized:
         return
     sh = _get_spreadsheet()
     existing = {ws.title: ws for ws in sh.worksheets()}
+    _ws_cache.update(existing)
     for sheet_name, headers in SHEET_HEADERS.items():
         if sheet_name not in existing:
             ws = sh.add_worksheet(title=sheet_name, rows=100, cols=len(headers))
             ws.update([headers], "A1")
+            _ws_cache[sheet_name] = ws
         else:
             ws = existing[sheet_name]
             existing_headers = ws.row_values(1)
@@ -91,7 +103,7 @@ def init_db():
                 if missing:
                     new_headers = existing_headers + missing
                     ws.update([new_headers], "A1")
-    st.session_state["_db_initialized"] = True
+    _db_initialized = True
 
 
 def _init_monthly_sheet(name, headers):
@@ -575,14 +587,18 @@ def set_clinic_date_override(clinic_id, date_str, required_doctors):
         ws.append_row([str(clinic_id), date_str, required_doctors])
 
 
+_old_schedules_cleaned = False
+
+
 def delete_old_schedules(months_to_keep=4):
-    """古い月別シートを削除（セッション中1回のみ）"""
-    if st.session_state.get("_old_schedules_cleaned"):
+    """古い月別シートを削除（プロセス中1回のみ）"""
+    global _old_schedules_cleaned
+    if _old_schedules_cleaned:
         return
     from dateutil.relativedelta import relativedelta
     cutoff = (datetime.now() - relativedelta(months=months_to_keep)).strftime("%Y-%m")
     sh = _get_spreadsheet()
-    st.session_state["_old_schedules_cleaned"] = True
+    _old_schedules_cleaned = True
     for ws in sh.worksheets():
         for prefix in ("希望_", "スケジュール_"):
             if ws.title.startswith(prefix):
