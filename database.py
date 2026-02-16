@@ -40,12 +40,12 @@ _ws_cache = {}
 
 
 def _get_sheet(name):
-    """シートを取得（キャッシュ付き）。なければ新規作成"""
+    """シートを取得（キャッシュ+リトライ付き）。なければ新規作成"""
     if name in _ws_cache:
         return _ws_cache[name]
     sh = _get_spreadsheet()
     try:
-        ws = sh.worksheet(name)
+        ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=20)
     _ws_cache[name] = ws
@@ -59,7 +59,7 @@ def _get_all_records(ws):
 
 def _find_row_index(ws, col, value):
     """指定列でvalueが一致する行番号を返す（1-indexed、ヘッダー=1行目）"""
-    col_values = ws.col_values(col)
+    col_values = _retry(ws.col_values, col)
     for i, v in enumerate(col_values):
         if i == 0:
             continue  # ヘッダー行スキップ
@@ -70,7 +70,7 @@ def _find_row_index(ws, col, value):
 
 def _next_id(ws):
     """idカラム(A列)の最大値+1を返す"""
-    col_values = ws.col_values(1)
+    col_values = _retry(ws.col_values, 1)
     if len(col_values) <= 1:
         return 1
     ids = [int(v) for v in col_values[1:] if v.isdigit()]
@@ -97,7 +97,7 @@ def init_db():
     if _db_initialized:
         return
     sh = _get_spreadsheet()
-    existing = {ws.title: ws for ws in sh.worksheets()}
+    existing = {ws.title: ws for ws in _retry(sh.worksheets)}
     _ws_cache.update(existing)
     for sheet_name, headers in SHEET_HEADERS.items():
         if sheet_name not in existing:
@@ -106,7 +106,7 @@ def init_db():
             _ws_cache[sheet_name] = ws
         else:
             ws = existing[sheet_name]
-            existing_headers = ws.row_values(1)
+            existing_headers = _retry(ws.row_values, 1)
             if not existing_headers:
                 ws.update([headers], "A1")
             else:
@@ -119,14 +119,17 @@ def init_db():
 
 
 def _init_monthly_sheet(name, headers):
-    """月別シートを初期化"""
+    """月別シートを初期化（キャッシュ+リトライ付き）"""
+    if name in _ws_cache:
+        return _ws_cache[name]
     sh = _get_spreadsheet()
     try:
-        ws = sh.worksheet(name)
+        ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=len(headers))
-    if not ws.row_values(1):
+    if not _retry(ws.row_values, 1):
         ws.update([headers], "A1")
+    _ws_cache[name] = ws
     return ws
 
 
