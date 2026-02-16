@@ -10,6 +10,20 @@ import gspread
 import streamlit as st
 
 
+def _safe_json_loads(val, default=None):
+    """gspreadが自動パースしたリスト/dictにも対応するjson.loads"""
+    if default is None:
+        default = []
+    if isinstance(val, (list, dict)):
+        return val
+    if isinstance(val, str) and val:
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, ValueError):
+            return default
+    return default
+
+
 # ---- スプレッドシート接続 ----
 
 @st.cache_resource
@@ -214,17 +228,7 @@ def get_clinics(active_only=True):
         r["id"] = int(r["id"])
         r["fee"] = int(r.get("fee", 0))
         r["is_active"] = int(r.get("is_active", 1))
-        # preferred_doctorsをパース
-        pd_raw = r.get("preferred_doctors", "[]")
-        if isinstance(pd_raw, list):
-            r["preferred_doctors"] = pd_raw
-        elif isinstance(pd_raw, str) and pd_raw:
-            try:
-                r["preferred_doctors"] = json.loads(pd_raw)
-            except (json.JSONDecodeError, ValueError):
-                r["preferred_doctors"] = []
-        else:
-            r["preferred_doctors"] = []
+        r["preferred_doctors"] = _safe_json_loads(r.get("preferred_doctors", "[]"))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -300,9 +304,9 @@ def get_preference(doctor_id, year_month):
     for r in records:
         if str(r.get("doctor_id", "")) == str(doctor_id):
             r["doctor_id"] = int(r["doctor_id"])
-            r["ng_dates"] = json.loads(r.get("ng_dates") or "[]")
-            r["avoid_dates"] = json.loads(r.get("avoid_dates") or "[]")
-            r["preferred_clinics"] = json.loads(r.get("preferred_clinics") or "[]")
+            r["ng_dates"] = _safe_json_loads(r.get("ng_dates"))
+            r["avoid_dates"] = _safe_json_loads(r.get("avoid_dates"))
+            r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
             return r
     return None
 
@@ -313,9 +317,9 @@ def get_all_preferences(year_month):
     result = []
     for r in records:
         r["doctor_id"] = int(r["doctor_id"])
-        r["ng_dates"] = json.loads(r.get("ng_dates") or "[]")
-        r["avoid_dates"] = json.loads(r.get("avoid_dates") or "[]")
-        r["preferred_clinics"] = json.loads(r.get("preferred_clinics") or "[]")
+        r["ng_dates"] = _safe_json_loads(r.get("ng_dates"))
+        r["avoid_dates"] = _safe_json_loads(r.get("avoid_dates"))
+        r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
         result.append(r)
     return result
 
@@ -408,10 +412,7 @@ def get_schedules(year_month):
         r["total_variance"] = float(r.get("total_variance", 0))
         r["satisfaction_score"] = float(r.get("satisfaction_score", 0))
         r["is_confirmed"] = int(r.get("is_confirmed", 0))
-        try:
-            r["assignments"] = json.loads(r.get("assignments", "[]"))
-        except (json.JSONDecodeError, TypeError):
-            r["assignments"] = []
+        r["assignments"] = _safe_json_loads(r.get("assignments"))
         result.append(r)
     return result
 
@@ -472,10 +473,7 @@ def get_all_confirmed_schedules():
             if int(r.get("is_confirmed", 0)):
                 r["id"] = int(r["id"])
                 r["year_month"] = year_month
-                try:
-                    r["assignments"] = json.loads(r.get("assignments", "[]"))
-                except (json.JSONDecodeError, TypeError):
-                    r["assignments"] = []
+                r["assignments"] = _safe_json_loads(r.get("assignments"))
                 result.append(r)
     result.sort(key=lambda x: x.get("year_month", ""))
     return result
