@@ -576,10 +576,13 @@ def set_clinic_date_override(clinic_id, date_str, required_doctors):
 
 
 def delete_old_schedules(months_to_keep=4):
-    """古い月別シートを削除"""
+    """古い月別シートを削除（セッション中1回のみ）"""
+    if st.session_state.get("_old_schedules_cleaned"):
+        return
     from dateutil.relativedelta import relativedelta
     cutoff = (datetime.now() - relativedelta(months=months_to_keep)).strftime("%Y-%m")
     sh = _get_spreadsheet()
+    st.session_state["_old_schedules_cleaned"] = True
     for ws in sh.worksheets():
         for prefix in ("希望_", "スケジュール_"):
             if ws.title.startswith(prefix):
