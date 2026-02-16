@@ -20,7 +20,7 @@ def render(target_month):
             st.download_button(
                 "CSVダウンロード",
                 csv,
-                file_name=f"gakin_schedule_{target_month}.csv",
+                file_name=f"gaikin_schedule_{target_month}.csv",
                 mime="text/csv"
             )
     else:

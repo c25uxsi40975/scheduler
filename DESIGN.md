@@ -6,7 +6,8 @@
 管理者が外勤先・医員を管理し、医員が希望を入力、PuLP（線形計画法）で最適な割り当てを自動生成する。
 
 - **フレームワーク:** Streamlit
-- **DB:** SQLite（`gakin.db`）
+- **ホスティング:** Streamlit Cloud
+- **DB:** SQLite（`gaikin.db`）※ Google Sheets移行予定（後述）
 - **最適化:** PuLP（CBC Solver、タイムリミット30秒）
 - **祝日判定:** jpholiday
 
@@ -65,6 +66,8 @@ app.py
 │   └── 2回目以降: パスワード入力画面
 │       └── 認証成功 → 管理者タブ画面
 └── 「医員としてログイン」
+    ├── パスワード入力画面（管理者が設定した共通パスワード）
+    │   └── 認証成功 → 名前選択画面
     └── 名前選択画面
         └── 選択 → 医員タブ画面
 ```
@@ -72,8 +75,10 @@ app.py
 ### 認証方式
 
 - **管理者**: 共通パスワード1つ（SHA-256ハッシュ化してDBの`settings`テーブルに保存）
-- **医員**: 名前選択のみ（パスワード不要）
-- セッション管理: `st.session_state` で `role`, `admin_authenticated`, `doctor_id` を保持
+- **医員**: 共通パスワード1つ（同上） + 名前選択
+  - パスワードは管理者がマスタ管理画面で設定
+  - 未設定時は医員ログイン不可（設定を促すメッセージ表示）
+- セッション管理: `st.session_state` で `role`, `admin_authenticated`, `doctor_authenticated`, `doctor_id` を保持
 - ログアウト: サイドバーのボタンでロール選択画面に戻る
 
 ---
@@ -186,7 +191,7 @@ app.py
 - DB初期化、古いデータの自動削除（4ヶ月保持）
 - ロール選択画面（管理者 / 医員）
 - 管理者パスワード認証（初回は設定画面、以降はログイン画面）
-- 医員の名前選択画面
+- 医員パスワード認証 + 名前選択画面
 - 認証後：サイドバーに対象月選択・ログアウトボタン、メインにタブ表示
 
 ### database.py - データベース層
@@ -194,7 +199,7 @@ app.py
 - SQLite接続管理（WALモード、外部キー有効）
 - 7テーブルのCRUD操作
 - JSON列の自動シリアライズ/デシリアライズ（ng_dates, avoid_dates, preferred_clinics, assignments等）
-- 管理者パスワード管理（SHA-256ハッシュ化、settingsテーブル）
+- 管理者・医員パスワード管理（SHA-256ハッシュ化、settingsテーブル）
 - 既存DBへのマイグレーション対応（avoid_datesカラム追加）
 - 古いデータの自動クリーンアップ
 
@@ -216,6 +221,7 @@ app.py
 
 ### pages/admin_master.py - マスタ管理
 
+- 医員用パスワードの設定（expanderで折りたたみ）
 - 医員の追加・有効/無効切替・名前変更・削除
 - 外勤先の追加・有効/無効切替・編集（日当・頻度の変更）
 - 外勤先ごとの指名医員設定（multiselect）
@@ -284,3 +290,142 @@ app.py
 ### その他
 
 - [ ] 隔週判定の改善（月内インデックスベース → 実際の週番号ベース）
+
+---
+
+## Google Sheets 移行計画
+
+### 背景
+
+Streamlit Cloudではファイルシステムがエフェメラル（再起動でリセット）のため、SQLiteではデータが永続化できない。
+Google Sheetsをデータベースとして使用することで、無料かつ複数ユーザーでのデータ共有を実現する。
+
+### 目標構成
+
+```
+Google ドライブ
+└── Google スプレッドシート（データベース）
+    ├── 医員マスタ
+    ├── 外勤先マスタ
+    ├── 優先度マスタ（◎○×）
+    ├── 日別設定（clinic_date_overrides）
+    ├── 設定（パスワード等）
+    ├── 希望_YYYY-MM（月ごと）
+    └── スケジュール_YYYY-MM（月ごと）
+         ↑ Google Sheets API（gspread）
+         │
+Streamlit Cloud アプリ（既存コード）
+```
+
+### 使用サービス
+
+| サービス | 用途 | 費用 |
+|---|---|---|
+| Google スプレッドシート | データベース（保管・閲覧） | 無料 |
+| GCP（Google Sheets API） | スプレッドシートへのAPI接続 | 無料枠内 |
+| Streamlit Cloud | アプリのホスティング | 無料（1アプリ） |
+| gspread | Python → スプレッドシート接続ライブラリ | OSS 無料 |
+
+### シート構成
+
+#### 「医員マスタ」
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: id | 連番 | 1 |
+| B: name | 医員名 | 田中太郎 |
+| C: is_active | 有効フラグ | TRUE |
+
+#### 「外勤先マスタ」
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: id | 連番 | 1 |
+| B: name | 外勤先名 | A総合病院 |
+| C: fee | 日当（円） | 80000 |
+| D: frequency | 頻度 | weekly |
+| E: preferred_doctors | 指名医員ID（カンマ区切り） | 1,3,5 |
+| F: is_active | 有効フラグ | TRUE |
+
+#### 「優先度マスタ」（doctor_clinic_affinity）
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: doctor_id | 医員ID | 1 |
+| B: clinic_id | 外勤先ID | 3 |
+| C: weight | 優先度（◎=2.0 / ○=1.0 / ×=0.0） | 2.0 |
+
+#### 「日別設定」（clinic_date_overrides）
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: clinic_id | 外勤先ID | 1 |
+| B: date | 日付（ISO形式） | 2026-03-07 |
+| C: required_doctors | 必要人数（0=休診/1=通常/2=2人体制） | 2 |
+
+#### 「設定」
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: key | 設定キー | admin_password |
+| B: value | 値 | (SHA-256ハッシュ) |
+
+#### 「希望_YYYY-MM」（月ごとに自動作成）
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: doctor_id | 医員ID | 1 |
+| B: doctor_name | 医員名 | 田中太郎 |
+| C: ng_dates | ×日（カンマ区切り） | 2026-03-07,2026-03-21 |
+| D: avoid_dates | △日（カンマ区切り） | 2026-03-14 |
+| E: preferred_clinics | 希望外勤先ID（カンマ区切り） | 1,4 |
+| F: updated_at | 更新日時 | 2026-02-16 10:30:00 |
+
+#### 「スケジュール_YYYY-MM」（月ごとに自動作成）
+| 列 | 内容 | 例 |
+|---|---|---|
+| A: id | 連番 | 1 |
+| B: plan_name | プラン名 | 案A: 給与均等重視 |
+| C: assignments | 割当JSON | [{"date":"...","clinic_id":1,...}] |
+| D: total_variance | 報酬分散 | 15000 |
+| E: satisfaction_score | 満足度 | 85.5 |
+| F: is_confirmed | 確定フラグ | FALSE |
+| G: created_at | 作成日時 | 2026-02-16 10:30:00 |
+
+### 実装方針
+
+`database.py` を gspread 版に差し替え。app.py / optimizer.py / pages/ は変更不要。
+
+```python
+import gspread
+import streamlit as st
+
+@st.cache_resource
+def get_spreadsheet():
+    credentials = st.secrets["gcp_service_account"]
+    gc = gspread.service_account_from_dict(dict(credentials))
+    return gc.open("外勤調整データ")
+```
+
+### GCP設定手順
+
+1. GCP プロジェクト作成（https://console.cloud.google.com/）
+2. Google Sheets API / Google Drive API を有効化
+3. サービスアカウント作成 → JSONキー発行
+4. スプレッドシート作成 → サービスアカウントを「編集者」として共有
+5. Streamlit Cloud の Secrets にJSONキー内容を登録
+
+```toml
+[gcp_service_account]
+type = "service_account"
+project_id = "gaikin-scheduler"
+private_key_id = "xxxx"
+private_key = "-----BEGIN PRIVATE KEY-----\nxxxx\n-----END PRIVATE KEY-----\n"
+client_email = "gaikin-app@gaikin-scheduler.iam.gserviceaccount.com"
+client_id = "xxxx"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+
+spreadsheet_key = "（スプレッドシートURLの /d/ と /edit の間の文字列）"
+```
+
+### セキュリティ
+
+- スプレッドシートの共有は特定のGoogleアカウントのみに限定
+- GCPのJSONキーをGitHubにpushしない
+- Streamlit CloudのSecrets機能でキー情報を管理
+- 扱うデータは医員名・希望・報酬額程度（患者情報は含まない）
