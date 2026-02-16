@@ -21,7 +21,13 @@ from pages import (
 st.set_page_config(
     page_title="外勤調整システム",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
+)
+
+# サイドバーを完全に非表示
+st.markdown(
+    "<style>[data-testid='stSidebar']{display:none}</style>",
+    unsafe_allow_html=True,
 )
 
 init_db()
@@ -43,19 +49,12 @@ def _show_role_selection():
     st.title("外勤調整システム")
     st.markdown("---")
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("管理者")
-        st.write("マスタ管理・スケジュール生成")
-        if st.button("管理者としてログイン", use_container_width=True, type="primary"):
-            st.session_state.role = "admin"
-            st.rerun()
-    with col2:
-        st.subheader("医員")
-        st.write("希望入力・スケジュール確認")
-        if st.button("医員としてログイン", use_container_width=True, type="primary"):
-            st.session_state.role = "doctor"
-            st.rerun()
+    if st.button("管理者としてログイン", use_container_width=True, type="primary"):
+        st.session_state.role = "admin"
+        st.rerun()
+    if st.button("医員としてログイン", use_container_width=True, type="primary"):
+        st.session_state.role = "doctor"
+        st.rerun()
 
 
 def _show_admin_login():
@@ -137,28 +136,30 @@ def _show_doctor_selection():
         st.rerun()
 
 
-def _show_month_selector():
-    """サイドバーの対象月セレクタ（共通）"""
+def _show_header(title):
+    """ヘッダー：タイトル・対象月セレクタ・ログアウト"""
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
-    target_month = st.sidebar.selectbox("対象月", months)
+
+    col_title, col_month, col_logout = st.columns([3, 2, 1])
+    with col_title:
+        st.markdown(f"**{title}**")
+    with col_month:
+        target_month = st.selectbox(
+            "対象月", months, label_visibility="collapsed",
+        )
+    with col_logout:
+        if st.button("ログアウト", use_container_width=True):
+            st.session_state.role = None
+            st.session_state.admin_authenticated = False
+            st.session_state.doctor_authenticated = False
+            st.session_state.doctor_id = None
+            st.rerun()
+
     year, month = map(int, target_month.split("-"))
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(
-        f"**対象土曜日数:** {len(get_target_saturdays(year, month))}日"
-    )
+    st.caption(f"対象土曜日数: {len(get_target_saturdays(year, month))}日")
+    st.markdown("---")
     return target_month, year, month
-
-
-def _logout():
-    """サイドバーのログアウトボタン"""
-    st.sidebar.markdown("---")
-    if st.sidebar.button("ログアウト", use_container_width=True):
-        st.session_state.role = None
-        st.session_state.admin_authenticated = False
-        st.session_state.doctor_authenticated = False
-        st.session_state.doctor_id = None
-        st.rerun()
 
 
 # ---- メインルーティング ----
@@ -169,9 +170,7 @@ elif st.session_state.role == "admin":
     if not st.session_state.admin_authenticated:
         _show_admin_login()
     else:
-        st.sidebar.title("管理者メニュー")
-        target_month, year, month = _show_month_selector()
-        _logout()
+        target_month, year, month = _show_header("管理者メニュー")
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "マスタ管理", "希望状況一覧",
@@ -198,9 +197,7 @@ elif st.session_state.role == "doctor":
         if doctor is None:
             _show_doctor_selection()
         else:
-            st.sidebar.title(doctor['name'])
-            target_month, year, month = _show_month_selector()
-            _logout()
+            target_month, year, month = _show_header(doctor['name'])
 
             tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
 
