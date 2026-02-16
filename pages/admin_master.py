@@ -6,7 +6,7 @@ from database import (
     get_clinics, add_clinic, update_clinic, delete_clinic,
     get_affinities, set_affinity,
     get_clinic_date_overrides, set_clinic_date_override,
-    is_doctor_individual_password_set, set_doctor_individual_password,
+    set_doctor_individual_password,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 
@@ -40,7 +40,7 @@ def render(target_month, year, month):
         doctors_all = get_doctors(active_only=False)
         if doctors_all:
             for d in doctors_all:
-                has_pw = is_doctor_individual_password_set(d['id'])
+                has_pw = bool(d.get("password_hash"))
                 pw_icon = "🔑" if has_pw else "⚠️"
                 c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
                 with c1:
