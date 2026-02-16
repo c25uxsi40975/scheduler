@@ -20,7 +20,8 @@ __pycache__/
 .venv/
 venv/
 
-# IDE
+# IDE / Tools
+.claude/
 .vscode/
 .idea/
 
