@@ -23,7 +23,7 @@ FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 def render(target_month, year, month):
     st.header("マスタ管理")
 
-    # 行レベルの背景色CSS
+    # 行レベルの背景色CSS + スマホ向けコンパクト化
     st.markdown("""<style>
     [data-testid="stVerticalBlockBorderWrapper"]:has(.row-active) {
         background-color: #e8f5e9 !important;
@@ -32,6 +32,27 @@ def render(target_month, year, month):
         background-color: #ffebee !important;
     }
     .row-active, .row-inactive { display: none; }
+
+    /* スマホ向けコンパクト化 */
+    @media (max-width: 768px) {
+        .stMainBlockContainer { padding: 0.5rem !important; }
+        h2 { font-size: 1.2rem !important; }
+        h3 { font-size: 1rem !important; }
+        p, .stMarkdown, .stText { font-size: 0.85rem !important; }
+        .stButton > button {
+            font-size: 0.75rem !important;
+            padding: 0.2rem 0.5rem !important;
+            min-height: 1.8rem !important;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 0.3rem !important;
+        }
+        [data-testid="stFormSubmitButton"] > button {
+            font-size: 0.8rem !important;
+        }
+        .stRadio label { font-size: 0.8rem !important; }
+        .stSelectbox label, .stTextInput label { font-size: 0.8rem !important; }
+    }
     </style>""", unsafe_allow_html=True)
 
     col1, col2 = st.columns(2)
@@ -56,27 +77,26 @@ def render(target_month, year, month):
                 status_label = "有効" if d['is_active'] else "無効"
                 with st.container(border=True):
                     st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                    c1, c2, c3, c4, c5 = st.columns([3, 1, 1, 1, 1])
-                    with c1:
-                        st.write(f"{status_label} | {d['name']} {pw_icon}")
-                    with c2:
+                    st.markdown(f"**{d['name']}**　{status_label} {pw_icon}")
+                    b1, b2, b3, b4 = st.columns(4)
+                    with b1:
                         if d['is_active']:
-                            if st.button("無効化", key=f"deact_{d['id']}", type="secondary"):
+                            if st.button("無効化", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
                                 update_doctor(d['id'], is_active=0)
                                 st.rerun()
                         else:
-                            if st.button("有効化", key=f"act_{d['id']}"):
+                            if st.button("有効化", key=f"act_{d['id']}", use_container_width=True):
                                 update_doctor(d['id'], is_active=1)
                                 st.rerun()
-                    with c3:
-                        if st.button("名前変更", key=f"rename_{d['id']}"):
+                    with b2:
+                        if st.button("名前変更", key=f"rename_{d['id']}", use_container_width=True):
                             st.session_state[f"editing_doc_{d['id']}"] = True
-                    with c4:
-                        btn_label = "PW再設定" if has_pw else "初期PW設定"
-                        if st.button(btn_label, key=f"setpw_{d['id']}"):
+                    with b3:
+                        btn_label = "PW再設定" if has_pw else "PW設定"
+                        if st.button(btn_label, key=f"setpw_{d['id']}", use_container_width=True):
                             st.session_state[f"setting_pw_{d['id']}"] = True
-                    with c5:
-                        if st.button("削除", key=f"del_doc_{d['id']}", type="secondary"):
+                    with b4:
+                        if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                             st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
                 # 名前変更フォーム
@@ -153,23 +173,22 @@ def render(target_month, year, month):
                 status_label = "有効" if c['is_active'] else "無効"
                 with st.container(border=True):
                     st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                    cc1, cc2, cc3 = st.columns([4, 1, 1])
-                    with cc1:
-                        st.write(
-                            f"{status_label} | **{c['name']}** "
-                            f"| ¥{c['fee']:,} | {FREQ_LABELS.get(c['frequency'], c['frequency'])}"
-                        )
-                    with cc2:
+                    st.markdown(
+                        f"**{c['name']}**　{status_label} | ¥{c['fee']:,} | "
+                        f"{FREQ_LABELS.get(c['frequency'], c['frequency'])}"
+                    )
+                    bc1, bc2, bc3 = st.columns(3)
+                    with bc1:
                         if c['is_active']:
-                            if st.button("無効化", key=f"deact_cli_{c['id']}", type="secondary"):
+                            if st.button("無効化", key=f"deact_cli_{c['id']}", type="secondary", use_container_width=True):
                                 update_clinic(c['id'], is_active=0)
                                 st.rerun()
                         else:
-                            if st.button("有効化", key=f"act_cli_{c['id']}"):
+                            if st.button("有効化", key=f"act_cli_{c['id']}", use_container_width=True):
                                 update_clinic(c['id'], is_active=1)
                                 st.rerun()
-                    with cc3:
-                        if st.button("編集", key=f"edit_cli_{c['id']}"):
+                    with bc2:
+                        if st.button("編集", key=f"edit_cli_{c['id']}", use_container_width=True):
                             st.session_state[f"editing_cli_{c['id']}"] = True
 
                 # 外勤先編集フォーム

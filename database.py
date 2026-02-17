@@ -131,6 +131,18 @@ def init_db():
                     ws.update([new_headers], "A1")
     _db_initialized = True
 
+    # 既存医員でパスワード未設定の場合、初期パスワード「1111」を設定
+    ws = _get_sheet("医員マスタ")
+    headers = ws.row_values(1)
+    if "password_hash" in headers:
+        col_idx = headers.index("password_hash") + 1
+        records = ws.get_all_values()
+        default_pw_hash = _hash_password("1111")
+        for i, row in enumerate(records[1:], start=2):
+            pw_val = row[col_idx - 1] if len(row) >= col_idx else ""
+            if not pw_val:
+                ws.update_cell(i, col_idx, default_pw_hash)
+
 
 def _init_monthly_sheet(name, headers):
     """月別シートを初期化（キャッシュ+リトライ付き）"""
@@ -173,7 +185,8 @@ def add_doctor(name):
         return
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append_row([new_id, name, "", "", 1, now])
+    default_pw_hash = _hash_password("1111")
+    ws.append_row([new_id, name, "", default_pw_hash, 1, now])
 
 
 def update_doctor(doc_id, name=None, is_active=None):
