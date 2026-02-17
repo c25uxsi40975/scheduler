@@ -57,8 +57,6 @@ def render(target_month, year, month):
 
     col1, col2 = st.columns(2)
 
-    STATUS_FILTER_OPTIONS = ["すべて", "有効", "無効"]
-
     # ---- 医員管理 ----
     with col1:
         st.subheader("医員一覧")
@@ -70,23 +68,26 @@ def render(target_month, year, month):
                     st.success(f"「{new_doc}」を追加しました")
                     st.rerun()
 
-        doc_status_filter = st.selectbox(
-            "ステータス", STATUS_FILTER_OPTIONS, key="doc_status_filter"
-        )
         doctors_all = get_doctors(active_only=False)
-        if doc_status_filter == "有効":
-            doctors_all = [d for d in doctors_all if d["is_active"]]
-        elif doc_status_filter == "無効":
-            doctors_all = [d for d in doctors_all if not d["is_active"]]
         if doctors_all:
-            for d in doctors_all:
+            def _doc_label(d):
+                s = "有効" if d["is_active"] else "無効"
+                pw = "🔑" if d.get("password_hash") else "⚠️"
+                return f"{d['name']}（{s}）{pw}"
+
+            selected_doc = st.selectbox(
+                "医員を選択", doctors_all,
+                format_func=_doc_label, key="select_doctor"
+            )
+
+            if selected_doc:
+                d = selected_doc
                 has_pw = bool(d.get("password_hash"))
-                pw_icon = "🔑" if has_pw else "⚠️"
                 marker = "row-active" if d['is_active'] else "row-inactive"
                 status_label = "有効" if d['is_active'] else "無効"
                 with st.container(border=True):
                     st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                    st.markdown(f"**{d['name']}**　{status_label} {pw_icon}")
+                    st.markdown(f"**{d['name']}**　{status_label}")
                     b1, b2, b3, b4 = st.columns(4)
                     with b1:
                         if d['is_active']:
@@ -175,16 +176,19 @@ def render(target_month, year, month):
                     st.success(f"「{new_clinic}」を追加しました")
                     st.rerun()
 
-        cli_status_filter = st.selectbox(
-            "ステータス", STATUS_FILTER_OPTIONS, key="cli_status_filter"
-        )
         clinics_all = get_clinics(active_only=False)
-        if cli_status_filter == "有効":
-            clinics_all = [c for c in clinics_all if c["is_active"]]
-        elif cli_status_filter == "無効":
-            clinics_all = [c for c in clinics_all if not c["is_active"]]
         if clinics_all:
-            for c in clinics_all:
+            def _cli_label(c):
+                s = "有効" if c["is_active"] else "無効"
+                return f"{c['name']}（{s}）"
+
+            selected_cli = st.selectbox(
+                "外勤先を選択", clinics_all,
+                format_func=_cli_label, key="select_clinic"
+            )
+
+            if selected_cli:
+                c = selected_cli
                 marker = "row-active" if c['is_active'] else "row-inactive"
                 status_label = "有効" if c['is_active'] else "無効"
                 with st.container(border=True):
@@ -193,7 +197,7 @@ def render(target_month, year, month):
                         f"**{c['name']}**　{status_label} | ¥{c['fee']:,} | "
                         f"{FREQ_LABELS.get(c['frequency'], c['frequency'])}"
                     )
-                    bc1, bc2, bc3 = st.columns(3)
+                    bc1, bc2 = st.columns(2)
                     with bc1:
                         if c['is_active']:
                             if st.button("無効化", key=f"deact_cli_{c['id']}", type="secondary", use_container_width=True):
