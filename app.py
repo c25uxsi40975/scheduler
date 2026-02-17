@@ -11,6 +11,7 @@ from database import (
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, update_doctor_email,
+    get_open_month, get_confirmed_months,
 )
 from optimizer import get_target_saturdays
 from pages import (
@@ -32,7 +33,6 @@ st.markdown(
 )
 
 init_db()
-delete_old_schedules(months_to_keep=4)
 
 # ---- セッション状態初期化 ----
 if "role" not in st.session_state:
@@ -123,38 +123,25 @@ def _show_doctor_login():
         st.rerun()
 
 
-def _show_header(title, doctor=None):
-    """ヘッダー：タイトル・対象月セレクタ・設定・ログアウト"""
+def _show_admin_header():
+    """管理者用ヘッダー：タイトル・対象月セレクタ・ログアウト"""
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
 
-    if doctor:
-        col_title, col_month, col_settings, col_logout = st.columns([3, 2, 1, 1])
-    else:
-        col_title, col_month, col_logout = st.columns([3, 2, 1])
-        col_settings = None
+    col_title, col_month, col_logout = st.columns([3, 2, 1])
     with col_title:
-        st.markdown(f"**{title}**")
+        st.markdown("**管理者メニュー**")
     with col_month:
         target_month = st.selectbox(
             "対象月", months, label_visibility="collapsed",
         )
-    if col_settings and doctor:
-        with col_settings:
-            if st.button("⚙ 設定", use_container_width=True):
-                st.session_state.show_doctor_settings = True
     with col_logout:
         if st.button("ログアウト", use_container_width=True):
             st.session_state.role = None
             st.session_state.admin_authenticated = False
             st.session_state.doctor_authenticated = False
             st.session_state.doctor_id = None
-            st.session_state.pop("show_doctor_settings", None)
             st.rerun()
-
-    # 医員設定ダイアログ（パスワード変更・メールアドレス設定）
-    if doctor and st.session_state.get("show_doctor_settings"):
-        _show_doctor_settings(doctor)
 
     year, month = map(int, target_month.split("-"))
     st.caption(f"対象土曜日数: {len(get_target_saturdays(year, month))}日")
@@ -209,7 +196,7 @@ elif st.session_state.role == "admin":
     if not st.session_state.admin_authenticated:
         _show_admin_login()
     else:
-        target_month, year, month = _show_header("管理者メニュー")
+        target_month, year, month = _show_admin_header()
 
         tab1, tab2, tab3, tab4 = st.tabs([
             "マスタ管理", "希望状況一覧",
@@ -236,11 +223,45 @@ elif st.session_state.role == "doctor":
             st.session_state.doctor_id = None
             st.rerun()
         else:
-            target_month, year, month = _show_header(doctor['name'], doctor=doctor)
+            # 医員用ヘッダー（対象月セレクタなし）
+            col_title, col_settings, col_logout = st.columns([4, 1, 1])
+            with col_title:
+                st.markdown(f"**{doctor['name']}**")
+            with col_settings:
+                if st.button("⚙ 設定", use_container_width=True):
+                    st.session_state.show_doctor_settings = True
+            with col_logout:
+                if st.button("ログアウト", use_container_width=True):
+                    st.session_state.role = None
+                    st.session_state.admin_authenticated = False
+                    st.session_state.doctor_authenticated = False
+                    st.session_state.doctor_id = None
+                    st.session_state.pop("show_doctor_settings", None)
+                    st.rerun()
+
+            if st.session_state.get("show_doctor_settings"):
+                _show_doctor_settings(doctor)
+
+            st.markdown("---")
 
             tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
 
             with tab1:
-                doctor_input.render(doctor, target_month, year, month)
+                open_month = get_open_month()
+                if open_month:
+                    year, month = map(int, open_month.split("-"))
+                    st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日")
+                    doctor_input.render(doctor, open_month, year, month)
+                else:
+                    st.info("管理者が対象月を設定するまでお待ちください。")
+
             with tab2:
-                doctor_schedule.render(doctor, target_month)
+                confirmed_months = get_confirmed_months()
+                if confirmed_months:
+                    view_month = st.selectbox(
+                        "月を選択", confirmed_months,
+                        label_visibility="collapsed",
+                    )
+                    doctor_schedule.render(doctor, view_month)
+                else:
+                    st.info("確定済みのスケジュールはまだありません。")
