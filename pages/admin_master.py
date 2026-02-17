@@ -57,6 +57,8 @@ def render(target_month, year, month):
 
     col1, col2 = st.columns(2)
 
+    STATUS_FILTER_OPTIONS = ["すべて", "有効", "無効"]
+
     # ---- 医員管理 ----
     with col1:
         st.subheader("医員一覧")
@@ -68,7 +70,14 @@ def render(target_month, year, month):
                     st.success(f"「{new_doc}」を追加しました")
                     st.rerun()
 
+        doc_status_filter = st.selectbox(
+            "ステータス", STATUS_FILTER_OPTIONS, key="doc_status_filter"
+        )
         doctors_all = get_doctors(active_only=False)
+        if doc_status_filter == "有効":
+            doctors_all = [d for d in doctors_all if d["is_active"]]
+        elif doc_status_filter == "無効":
+            doctors_all = [d for d in doctors_all if not d["is_active"]]
         if doctors_all:
             for d in doctors_all:
                 has_pw = bool(d.get("password_hash"))
@@ -166,7 +175,14 @@ def render(target_month, year, month):
                     st.success(f"「{new_clinic}」を追加しました")
                     st.rerun()
 
+        cli_status_filter = st.selectbox(
+            "ステータス", STATUS_FILTER_OPTIONS, key="cli_status_filter"
+        )
         clinics_all = get_clinics(active_only=False)
+        if cli_status_filter == "有効":
+            clinics_all = [c for c in clinics_all if c["is_active"]]
+        elif cli_status_filter == "無効":
+            clinics_all = [c for c in clinics_all if not c["is_active"]]
         if clinics_all:
             for c in clinics_all:
                 marker = "row-active" if c['is_active'] else "row-inactive"
