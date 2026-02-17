@@ -5,9 +5,40 @@ from database import (
     get_clinics, add_clinic, update_clinic, delete_clinic,
     get_affinities, set_affinity,
     get_clinic_date_overrides, set_clinic_date_override,
-    set_doctor_individual_password,
+    set_doctor_individual_password, update_doctor_email,
+    get_open_month, set_open_month,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
+from datetime import date
+from dateutil.relativedelta import relativedelta
+
+
+def _render_open_month_setting():
+    """希望入力の対象月を設定するUI"""
+    st.subheader("希望入力 対象月設定")
+    current = get_open_month()
+    if current:
+        st.write(f"現在の対象月: **{current}**")
+    else:
+        st.warning("対象月が未設定です。医員は希望入力できません。")
+
+    today = date.today()
+    month_options = [
+        (today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)
+    ]
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected = st.selectbox(
+            "対象月を選択", month_options,
+            index=month_options.index(current) if current in month_options else 0,
+            key="open_month_select",
+            label_visibility="collapsed",
+        )
+    with col2:
+        if st.button("設定", key="set_open_month", use_container_width=True):
+            set_open_month(selected)
+            st.success(f"対象月を {selected} に設定しました")
+            st.rerun()
 
 
 FREQ_OPTIONS = [
@@ -22,6 +53,10 @@ FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 
 def render(target_month, year, month):
     st.header("マスタ管理")
+
+    # ---- 希望入力 対象月設定 ----
+    _render_open_month_setting()
+    st.markdown("---")
 
     # 行レベルの背景色CSS + スマホ向けコンパクト化
     st.markdown("""<style>
@@ -84,12 +119,14 @@ def render(target_month, year, month):
                 if selected_doc:
                     d = selected_doc
                     has_pw = bool(d.get("password_hash"))
+                    has_email = bool(d.get("email"))
                     marker = "row-active" if d['is_active'] else "row-inactive"
                     status_label = "有効" if d['is_active'] else "無効"
+                    email_display = d.get("email", "") or "未設定"
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(f"**{d['name']}**　{status_label}")
-                        b1, b2, b3, b4 = st.columns(4)
+                        st.markdown(f"**{d['name']}**　{status_label}　📧 {email_display}")
+                        b1, b2, b3, b4, b5 = st.columns(5)
                         with b1:
                             if d['is_active']:
                                 if st.button("無効化", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
@@ -107,6 +144,10 @@ def render(target_month, year, month):
                             if st.button(btn_label, key=f"setpw_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_pw_{d['id']}"] = True
                         with b4:
+                            email_btn = "📧変更" if has_email else "📧設定"
+                            if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_email_{d['id']}"] = True
+                        with b5:
                             if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                                 st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
@@ -147,6 +188,23 @@ def render(target_month, year, month):
                             with fc2:
                                 if st.form_submit_button("キャンセル"):
                                     st.session_state.pop(f"setting_pw_{d['id']}", None)
+                                    st.rerun()
+
+                    # メールアドレス設定フォーム
+                    if st.session_state.get(f"setting_email_{d['id']}"):
+                        with st.form(f"setemail_form_{d['id']}"):
+                            current_email = d.get("email", "") or ""
+                            new_email = st.text_input("メールアドレス", value=current_email, key=f"email_{d['id']}")
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_doctor_email(d['id'], new_email.strip())
+                                    st.success(f"「{d['name']}」のメールアドレスを保存しました")
+                                    st.session_state.pop(f"setting_email_{d['id']}", None)
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"setting_email_{d['id']}", None)
                                     st.rerun()
 
                     # 削除確認

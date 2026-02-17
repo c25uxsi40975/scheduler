@@ -1,6 +1,7 @@
 """
 データベース管理モジュール
 Google スプレッドシートで医員・外勤先・希望・スケジュールを永続化
+マスタ用と運用データ用の2スプレッドシート対応
 """
 import json
 import hashlib
@@ -24,18 +25,43 @@ def _safe_json_loads(val, default=None):
     return default
 
 
-# ---- スプレッドシート接続 ----
+# ---- スプレッドシート接続（2系統） ----
+
+_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_")
+
+
+def _is_operational_sheet(name: str) -> bool:
+    """運用データ用スプレッドシートに属するシートか判定"""
+    return any(name.startswith(p) for p in _OPERATIONAL_PREFIXES)
+
 
 @st.cache_resource
-def _get_spreadsheet():
-    """Google スプレッドシートに接続（認証キャッシュ付き）"""
+def _get_master_spreadsheet():
+    """マスタ用スプレッドシートに接続（認証キャッシュ付き）"""
     credentials = st.secrets["gcp_service_account"]
     gc = gspread.service_account_from_dict(dict(credentials))
-    # スプレッドシートキーで接続（名前検索より確実）
     spreadsheet_key = st.secrets.get("spreadsheet_key", "")
     if spreadsheet_key:
         return gc.open_by_key(spreadsheet_key)
     return gc.open(st.secrets.get("spreadsheet_name", "外勤調整データ"))
+
+
+@st.cache_resource
+def _get_operational_spreadsheet():
+    """運用データ用スプレッドシートに接続（未設定時はマスタにフォールバック）"""
+    op_key = st.secrets.get("spreadsheet_key_operational", "")
+    if op_key:
+        credentials = st.secrets["gcp_service_account"]
+        gc = gspread.service_account_from_dict(dict(credentials))
+        return gc.open_by_key(op_key)
+    return _get_master_spreadsheet()
+
+
+def _get_spreadsheet_for(sheet_name: str):
+    """シート名から適切なスプレッドシートを返す"""
+    if _is_operational_sheet(sheet_name):
+        return _get_operational_spreadsheet()
+    return _get_master_spreadsheet()
 
 
 def _retry(func, *args, max_retries=3, **kwargs):
@@ -50,19 +76,28 @@ def _retry(func, *args, max_retries=3, **kwargs):
                 raise
 
 
-_ws_cache = {}
+_ws_cache_master = {}
+_ws_cache_operational = {}
+
+
+def _get_ws_cache(sheet_name: str) -> dict:
+    """シート名に対応するキャッシュを返す"""
+    if _is_operational_sheet(sheet_name):
+        return _ws_cache_operational
+    return _ws_cache_master
 
 
 def _get_sheet(name):
     """シートを取得（キャッシュ+リトライ付き）。なければ新規作成"""
-    if name in _ws_cache:
-        return _ws_cache[name]
-    sh = _get_spreadsheet()
+    cache = _get_ws_cache(name)
+    if name in cache:
+        return cache[name]
+    sh = _get_spreadsheet_for(name)
     try:
         ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=20)
-    _ws_cache[name] = ws
+    cache[name] = ws
     return ws
 
 
@@ -110,16 +145,30 @@ def init_db():
     global _db_initialized
     if _db_initialized:
         return
-    sh = _get_spreadsheet()
-    existing = {ws.title: ws for ws in _retry(sh.worksheets)}
-    _ws_cache.update(existing)
-    for sheet_name, headers in SHEET_HEADERS.items():
-        if sheet_name not in existing:
-            ws = sh.add_worksheet(title=sheet_name, rows=100, cols=len(headers))
-            ws.update([headers], "A1")
-            _ws_cache[sheet_name] = ws
+
+    # マスタスプレッドシートのキャッシュ構築
+    sh_master = _get_master_spreadsheet()
+    master_existing = {ws.title: ws for ws in _retry(sh_master.worksheets)}
+    for name, ws in master_existing.items():
+        if _is_operational_sheet(name):
+            _ws_cache_operational[name] = ws
         else:
-            ws = existing[sheet_name]
+            _ws_cache_master[name] = ws
+
+    # 運用スプレッドシートが別の場合、そちらもキャッシュ構築
+    sh_op = _get_operational_spreadsheet()
+    if sh_op is not sh_master:
+        op_existing = {ws.title: ws for ws in _retry(sh_op.worksheets)}
+        _ws_cache_operational.update(op_existing)
+
+    # マスタシートのヘッダー初期化
+    for sheet_name, headers in SHEET_HEADERS.items():
+        if sheet_name not in _ws_cache_master:
+            ws = sh_master.add_worksheet(title=sheet_name, rows=100, cols=len(headers))
+            ws.update([headers], "A1")
+            _ws_cache_master[sheet_name] = ws
+        else:
+            ws = _ws_cache_master[sheet_name]
             existing_headers = _retry(ws.row_values, 1)
             if not existing_headers:
                 ws.update([headers], "A1")
@@ -146,16 +195,17 @@ def init_db():
 
 def _init_monthly_sheet(name, headers):
     """月別シートを初期化（キャッシュ+リトライ付き）"""
-    if name in _ws_cache:
-        return _ws_cache[name]
-    sh = _get_spreadsheet()
+    cache = _get_ws_cache(name)
+    if name in cache:
+        return cache[name]
+    sh = _get_spreadsheet_for(name)
     try:
         ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=len(headers))
     if not _retry(ws.row_values, 1):
         ws.update([headers], "A1")
-    _ws_cache[name] = ws
+    cache[name] = ws
     return ws
 
 
@@ -204,7 +254,7 @@ def update_doctor(doc_id, name=None, is_active=None):
 
 
 def delete_doctor(doc_id):
-    # 優先度マスタから削除
+    # 優先度マスタから削除（マスタ）
     ws_aff = _get_sheet("優先度マスタ")
     records = _get_all_records(ws_aff)
     rows_to_delete = []
@@ -214,9 +264,9 @@ def delete_doctor(doc_id):
     for row in sorted(rows_to_delete, reverse=True):
         ws_aff.delete_rows(row)
 
-    # 希望シートから削除（全月）
-    sh = _get_spreadsheet()
-    for ws in sh.worksheets():
+    # 希望シートから削除（全月）（運用データ）
+    sh_op = _get_operational_spreadsheet()
+    for ws in sh_op.worksheets():
         if ws.title.startswith("希望_"):
             recs = _get_all_records(ws)
             for i, r in enumerate(recs):
@@ -224,7 +274,7 @@ def delete_doctor(doc_id):
                     ws.delete_rows(i + 2)
                     break
 
-    # 医員マスタから削除
+    # 医員マスタから削除（マスタ）
     ws_doc = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws_doc, 1, doc_id)
     if row_idx:
@@ -431,8 +481,8 @@ def get_schedules(year_month):
 
 
 def confirm_schedule(schedule_id):
-    # 現在のシートを特定する必要がある → 全スケジュールシートを走査
-    sh = _get_spreadsheet()
+    """スケジュールを確定（運用データスプレッドシートを走査）"""
+    sh = _get_operational_spreadsheet()
     for ws in sh.worksheets():
         if not ws.title.startswith("スケジュール_"):
             continue
@@ -448,7 +498,7 @@ def confirm_schedule(schedule_id):
 
 
 def delete_schedule(schedule_id):
-    sh = _get_spreadsheet()
+    sh = _get_operational_spreadsheet()
     for ws in sh.worksheets():
         if not ws.title.startswith("スケジュール_"):
             continue
@@ -460,7 +510,7 @@ def delete_schedule(schedule_id):
 
 
 def update_schedule_assignments(schedule_id, assignments):
-    sh = _get_spreadsheet()
+    sh = _get_operational_spreadsheet()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for ws in sh.worksheets():
         if not ws.title.startswith("スケジュール_"):
@@ -475,7 +525,7 @@ def update_schedule_assignments(schedule_id, assignments):
 
 def get_all_confirmed_schedules():
     """全月の確定スケジュールを取得（累計報酬計算用）"""
-    sh = _get_spreadsheet()
+    sh = _get_operational_spreadsheet()
     result = []
     for ws in sh.worksheets():
         if not ws.title.startswith("スケジュール_"):
@@ -490,6 +540,23 @@ def get_all_confirmed_schedules():
                 result.append(r)
     result.sort(key=lambda x: x.get("year_month", ""))
     return result
+
+
+def get_confirmed_months():
+    """確定済みスケジュールが存在する月のリストを返す"""
+    sh = _get_operational_spreadsheet()
+    months = []
+    for ws in sh.worksheets():
+        if not ws.title.startswith("スケジュール_"):
+            continue
+        year_month = ws.title.replace("スケジュール_", "")
+        records = _get_all_records(ws)
+        for r in records:
+            if int(r.get("is_confirmed", 0)):
+                months.append(year_month)
+                break
+    months.sort(reverse=True)
+    return months
 
 
 # ---- Settings / Auth ----
@@ -583,6 +650,18 @@ def update_doctor_email(doctor_id, email: str):
     ws.update_cell(row_idx, col_idx, email)
 
 
+# ---- Open Month (対象月制御) ----
+
+def get_open_month():
+    """医員が希望入力可能な月を取得"""
+    return _get_setting("open_month")
+
+
+def set_open_month(year_month: str):
+    """医員が希望入力可能な月を設定"""
+    _set_setting("open_month", year_month)
+
+
 # ---- Clinic Date Overrides ----
 
 def get_clinic_date_overrides(year_month):
@@ -615,22 +694,16 @@ def set_clinic_date_override(clinic_id, date_str, required_doctors):
         ws.append_row([str(clinic_id), date_str, required_doctors])
 
 
-_old_schedules_cleaned = False
-
-
 def delete_old_schedules(months_to_keep=4):
-    """古い月別シートを削除（プロセス中1回のみ、キャッシュ利用）"""
-    global _old_schedules_cleaned
-    if _old_schedules_cleaned:
-        return
-    _old_schedules_cleaned = True
+    """古い月別シートを削除（運用データスプレッドシート）"""
     from dateutil.relativedelta import relativedelta
     cutoff = (datetime.now() - relativedelta(months=months_to_keep)).strftime("%Y-%m")
-    sh = _get_spreadsheet()
-    for name, ws in list(_ws_cache.items()):
+    sh_op = _get_operational_spreadsheet()
+    all_sheets = sh_op.worksheets()
+    for ws in all_sheets:
         for prefix in ("希望_", "スケジュール_"):
-            if name.startswith(prefix):
-                ym = name.replace(prefix, "")
+            if ws.title.startswith(prefix):
+                ym = ws.title.replace(prefix, "")
                 if ym < cutoff:
-                    sh.del_worksheet(ws)
-                    _ws_cache.pop(name, None)
+                    sh_op.del_worksheet(ws)
+                    _ws_cache_operational.pop(ws.title, None)

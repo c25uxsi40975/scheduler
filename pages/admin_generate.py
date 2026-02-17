@@ -1,15 +1,32 @@
 """管理者: スケジュール生成タブ"""
 import streamlit as st
 import pandas as pd
+import requests
 from datetime import date
 from database import (
     get_doctors, get_clinics, get_all_preferences,
     get_affinities, get_schedules, save_schedule, confirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_clinic_date_overrides, get_all_confirmed_schedules,
+    delete_old_schedules,
 )
 from optimizer import get_target_saturdays, generate_multiple_plans
 from components.schedule_table import render_schedule_table
+
+
+def _send_confirmation_notification(target_month, sched):
+    """GAS Web App経由で確定通知メールを送信"""
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "schedule_confirmed",
+            "year_month": target_month,
+            "plan_name": sched["plan_name"],
+        }, timeout=10)
+    except requests.RequestException:
+        st.warning("メール通知の送信に失敗しました。スケジュールは確定済みです。")
 
 
 def _calc_previous_earnings(clinics, target_year, target_month):
@@ -135,6 +152,8 @@ def render(target_month, year, month):
                             if st.button("確定する", key=f"confirm_{sched['id']}",
                                          type="primary"):
                                 confirm_schedule(sched["id"])
+                                delete_old_schedules(months_to_keep=4)
+                                _send_confirmation_notification(target_month, sched)
                                 st.success("確定しました！")
                                 st.rerun()
                         else:
