@@ -120,20 +120,21 @@ def _show_doctor_login():
             "医員名", doctor_names,
             index=None, placeholder="名前を選択してください",
         )
+        pw = st.text_input("パスワード", type="password", key="doc_pw_login")
 
-        if selected:
-            doctor = next(d for d in doctors if d["name"] == selected)
-            if not is_doctor_individual_password_set(doctor["id"]):
-                st.info("パスワードが未設定です。管理者に初期パスワードの設定を依頼してください。")
+        if st.button("ログイン", type="primary"):
+            if not selected:
+                st.error("医員名を選択してください")
             else:
-                pw = st.text_input("パスワード", type="password", key="doc_pw_login")
-                if st.button("ログイン", type="primary"):
-                    if verify_doctor_individual_password(doctor["id"], pw):
-                        st.session_state.doctor_authenticated = True
-                        st.session_state.doctor_id = doctor["id"]
-                        st.rerun()
-                    else:
-                        st.error("パスワードが正しくありません")
+                doctor = next(d for d in doctors if d["name"] == selected)
+                if not is_doctor_individual_password_set(doctor["id"]):
+                    st.error("パスワードが未設定です。管理者に初期パスワードの設定を依頼してください。")
+                elif verify_doctor_individual_password(doctor["id"], pw):
+                    st.session_state.doctor_authenticated = True
+                    st.session_state.doctor_id = doctor["id"]
+                    st.rerun()
+                else:
+                    st.error("パスワードが正しくありません")
 
     st.markdown("---")
     if st.button("← 戻る"):
