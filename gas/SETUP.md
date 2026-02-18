@@ -39,8 +39,9 @@
    ※ スプレッドシートIDはURLの `https://docs.google.com/spreadsheets/d/【ここがID】/edit` の部分
 6. `ADMIN_EMAIL` に管理者のメールアドレスを設定（全員完了通知・期限超過通知に必要）
    ```javascript
-   var ADMIN_EMAIL = "admin@example.com";
+   var ADMIN_EMAIL = "admin1@example.com, admin2@example.com";
    ```
+   ※ カンマ区切りで複数アドレスを指定可能
    ※ 未設定の場合、管理者向け通知は送信されない（医員向け通知には影響なし）
 7. 本番運用時は `TEST_MODE` を `false` に変更
    ```javascript

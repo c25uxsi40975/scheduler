@@ -21,7 +21,8 @@ var SENDER_NAME = "外勤調整システム";
 // マスタデータ用スプレッドシートID（必須）
 var MASTER_SPREADSHEET_ID = "";
 
-// 管理者メールアドレス（希望入力通知の送信先）
+// 管理者メールアドレス（カンマ区切りで複数指定可）
+// 例: "admin1@example.com, admin2@example.com"
 var ADMIN_EMAIL = "";
 
 // テストモード（本番運用時は false に変更してください）
@@ -185,7 +186,7 @@ function sendDoctorConfirmation(yearMonth, doctorName, doctorEmail, dateSummary,
  * 全医員の希望入力が完了した際に管理者へ通知
  */
 function sendAllCompleteNotification(yearMonth, doctorCount) {
-  if (!ADMIN_EMAIL) {
+  if (getAdminEmails().length === 0) {
     Logger.log("ADMIN_EMAIL が未設定のため全員完了通知をスキップ");
     return;
   }
@@ -198,12 +199,8 @@ function sendAllCompleteNotification(yearMonth, doctorCount) {
     + "スケジュール生成に進んでください。\n\n"
     + "※このメールは外勤調整システムから自動送信されています。";
 
-  try {
-    GmailApp.sendEmail(ADMIN_EMAIL, subject, body, { name: SENDER_NAME });
-    Logger.log("全員完了通知 送信成功: " + ADMIN_EMAIL);
-  } catch (e) {
-    Logger.log("全員完了通知 送信失敗: " + e.message);
-  }
+  var sent = sendToAdmins(subject, body);
+  Logger.log("全員完了通知 送信完了: " + sent + " 件");
 }
 
 // ---- 毎週金曜リマインダー ----
@@ -391,7 +388,7 @@ function checkDeadline() {
 
   } else if (isDayAfter) {
     // ---- 期限日翌日: 管理者に未入力者リストを通知 ----
-    if (!ADMIN_EMAIL) {
+    if (getAdminEmails().length === 0) {
       Logger.log("ADMIN_EMAIL が未設定のため未入力者通知をスキップ");
       return;
     }
@@ -421,16 +418,37 @@ function checkDeadline() {
       + "※医員は期限後も入力可能です。必要に応じて個別にご連絡ください。\n\n"
       + "※このメールは外勤調整システムから自動送信されています。";
 
-    try {
-      GmailApp.sendEmail(ADMIN_EMAIL, subjectAdmin, bodyAdmin, { name: SENDER_NAME });
-      Logger.log("未入力者通知 送信成功: " + missing.length + " 名未入力 → " + ADMIN_EMAIL);
-    } catch (e) {
-      Logger.log("未入力者通知 送信失敗: " + e.message);
-    }
+    var sent = sendToAdmins(subjectAdmin, bodyAdmin);
+    Logger.log("未入力者通知 送信完了: " + sent + " 件 (" + missing.length + " 名未入力)");
   }
 }
 
 // ---- ヘルパー関数 ----
+
+/**
+ * ADMIN_EMAIL をパースして有効なメールアドレスの配列を返す
+ */
+function getAdminEmails() {
+  if (!ADMIN_EMAIL) return [];
+  return ADMIN_EMAIL.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e.length > 0; });
+}
+
+/**
+ * 全管理者にメールを送信
+ */
+function sendToAdmins(subject, body) {
+  var emails = getAdminEmails();
+  var sentCount = 0;
+  for (var i = 0; i < emails.length; i++) {
+    try {
+      GmailApp.sendEmail(emails[i], subject, body, { name: SENDER_NAME });
+      sentCount++;
+    } catch (e) {
+      Logger.log("管理者メール送信失敗: " + emails[i] + " - " + e.message);
+    }
+  }
+  return sentCount;
+}
 
 /**
  * シートを名前で取得（存在しなければ null）
