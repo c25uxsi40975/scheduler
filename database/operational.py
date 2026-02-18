@@ -18,21 +18,29 @@ from database.master import get_doctors
 # ---- Preferences ----
 
 _pref_headers_checked = set()
+_pref_header_order = {}  # {year_month: [実際のヘッダー順]}
+
+_PREF_HEADERS = ["doctor_id", "doctor_name", "ng_dates", "avoid_dates",
+                 "preferred_clinics", "date_clinic_requests", "free_text", "updated_at"]
 
 
 def _get_pref_sheet(year_month):
     """月別希望シートを取得/作成"""
     name = f"希望_{year_month}"
-    headers = ["doctor_id", "doctor_name", "ng_dates", "avoid_dates",
-               "preferred_clinics", "date_clinic_requests", "free_text", "updated_at"]
-    ws = _init_monthly_sheet(name, headers)
+    ws = _init_monthly_sheet(name, _PREF_HEADERS)
     # 新カラム対応: 既存シートのヘッダー補完（セッション中1回のみ）
     if name not in _pref_headers_checked:
         existing = _retry(ws.row_values, 1)
         if existing:
-            missing = [h for h in headers if h not in existing]
+            missing = [h for h in _PREF_HEADERS if h not in existing]
             if missing:
-                ws.update([existing + missing], "A1")
+                actual = existing + missing
+                ws.update([actual], "A1")
+            else:
+                actual = existing
+        else:
+            actual = list(_PREF_HEADERS)
+        _pref_header_order[year_month] = actual
         _pref_headers_checked.add(name)
     return ws
 
@@ -67,21 +75,26 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
                       preferred_clinics=None, date_clinic_requests=None, free_text=None):
     ws = _get_pref_sheet(year_month)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ng = json.dumps(ng_dates or [])
-    av = json.dumps(avoid_dates or [])
-    pc = json.dumps(preferred_clinics or [])
-    dcr = json.dumps(date_clinic_requests or {})
-    ft = free_text or ""
 
     # 医員名を取得（キャッシュ済み）
     doctors = get_doctors(active_only=False)
-    doc_name = ""
-    for d in doctors:
-        if d["id"] == doctor_id:
-            doc_name = d["name"]
-            break
+    doc_name = next((d["name"] for d in doctors if d["id"] == doctor_id), "")
 
-    row_data = [str(doctor_id), doc_name, ng, av, pc, dcr, ft, now]
+    # 値マップ（ヘッダー名 → 値）
+    data_map = {
+        "doctor_id": str(doctor_id),
+        "doctor_name": doc_name,
+        "ng_dates": json.dumps(ng_dates or []),
+        "avoid_dates": json.dumps(avoid_dates or []),
+        "preferred_clinics": json.dumps(preferred_clinics or []),
+        "date_clinic_requests": json.dumps(date_clinic_requests or {}),
+        "free_text": free_text or "",
+        "updated_at": now,
+    }
+
+    # シートの実際のヘッダー順に合わせてデータを配置
+    actual_headers = _pref_header_order.get(year_month, _PREF_HEADERS)
+    row_data = [data_map.get(h, "") for h in actual_headers]
 
     # 既存行を探す
     row_idx = _find_row_index(ws, 1, doctor_id)
