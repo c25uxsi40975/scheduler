@@ -67,8 +67,32 @@ def render(doctor, target_month, year, month):
             date_clinic_requests=existing_dcr,
             free_text=free_text,
         )
-        st.success("保存しました！")
+        st.session_state["_doc_saved"] = True
         st.rerun()
 
+    # ---- 保存済み内容の表示 ----
     if existing:
-        st.info(f"最終更新: {existing['updated_at']}")
+        if st.session_state.pop("_doc_saved", False):
+            st.success("保存しました！")
+
+        st.markdown("---")
+        st.subheader("現在の入力内容")
+        st.caption(f"最終更新: {existing['updated_at']}")
+
+        # 日程サマリー
+        sat_strs = []
+        for s in saturdays:
+            ds = s.isoformat()
+            label = s.strftime("%m/%d")
+            if ds in existing_ng:
+                sat_strs.append(f"**{label}** × NG")
+            elif ds in existing_avoid:
+                sat_strs.append(f"**{label}** △")
+            else:
+                sat_strs.append(f"**{label}** ○")
+        st.write("　".join(sat_strs))
+
+        # 備考
+        ft = existing.get("free_text", "")
+        if ft:
+            st.write(f"備考: {ft}")
