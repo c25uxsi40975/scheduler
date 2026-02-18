@@ -21,6 +21,9 @@ var SENDER_NAME = "外勤調整システム";
 // マスタデータ用スプレッドシートID（必須）
 var MASTER_SPREADSHEET_ID = "";
 
+// 管理者メールアドレス（希望入力通知の送信先）
+var ADMIN_EMAIL = "";
+
 // ---- スプレッドシート取得 ----
 
 /**
@@ -50,6 +53,8 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     if (data.action === "schedule_confirmed") {
       sendConfirmationEmails(data.year_month, data.plan_name);
+    } else if (data.action === "preference_submitted") {
+      sendPreferenceNotification(data.year_month, data.doctor_name);
     }
     return ContentService.createTextOutput(
       JSON.stringify({ status: "ok" })
@@ -133,6 +138,30 @@ function sendConfirmationEmails(yearMonth, planName) {
   }
 
   Logger.log("確定通知完了: " + sentCount + " 件送信");
+}
+
+// ---- 希望入力通知 ----
+
+/**
+ * 医員が希望を入力した際に管理者へ通知メールを送信
+ */
+function sendPreferenceNotification(yearMonth, doctorName) {
+  if (!ADMIN_EMAIL) {
+    Logger.log("ADMIN_EMAIL が未設定のため希望入力通知をスキップ");
+    return;
+  }
+
+  var subject = "【希望入力】" + doctorName + " - " + yearMonth;
+  var body = doctorName + " 先生が " + yearMonth + " の希望を入力しました。\n\n"
+    + "管理画面の「希望状況一覧」タブから内容をご確認ください。\n\n"
+    + "※このメールは外勤調整システムから自動送信されています。";
+
+  try {
+    GmailApp.sendEmail(ADMIN_EMAIL, subject, body, { name: SENDER_NAME });
+    Logger.log("希望入力通知 送信成功: " + doctorName + " → " + ADMIN_EMAIL);
+  } catch (e) {
+    Logger.log("希望入力通知 送信失敗: " + e.message);
+  }
 }
 
 // ---- 毎週金曜リマインダー ----

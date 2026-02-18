@@ -1,7 +1,23 @@
 """医員: 希望入力タブ"""
 import streamlit as st
+import requests
 from database import get_preference, upsert_preference
 from optimizer import get_target_saturdays
+
+
+def _send_preference_notification(doctor_name, target_month):
+    """GAS Web App経由で希望入力通知メールを管理者に送信"""
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "preference_submitted",
+            "year_month": target_month,
+            "doctor_name": doctor_name,
+        }, timeout=10)
+    except requests.RequestException:
+        pass  # 通知失敗は医員側に表示しない
 
 
 DAY_STATUS_OPTIONS = ["○ 可能", "△ できれば避けたい", "× NG"]
@@ -67,6 +83,7 @@ def render(doctor, target_month, year, month):
             date_clinic_requests=existing_dcr,
             free_text=free_text,
         )
+        _send_preference_notification(doctor["name"], target_month)
         st.session_state["_doc_saved"] = True
         st.rerun()
 
