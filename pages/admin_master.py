@@ -7,6 +7,7 @@ from database import (
     get_clinic_date_overrides, set_clinic_date_overrides_batch,
     set_doctor_individual_password, update_doctor_email,
     get_open_month, set_open_month,
+    get_all_preferences, upsert_preference,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 from datetime import date
@@ -342,7 +343,7 @@ def render(target_month, year, month):
         _msg_area.success(st.session_state.pop("_save_msg"))
 
     if clinics and doctors:
-        pri_tab1, pri_tab2 = st.tabs(["外勤先から設定", "医員から設定"])
+        pri_tab1, pri_tab2 = st.tabs(["外勤先 優先度", "日別外勤先希望"])
 
         all_affinities = get_affinities()
 
@@ -410,55 +411,77 @@ def render(target_month, year, month):
                         st.session_state["_save_msg"] = "変更はありませんでした"
                     st.rerun()
 
-        # ---- タブ2: 医員別（医員を選んで各外勤先の優先度を設定）----
+        # ---- タブ2: 日別外勤先希望（医員が特定日に行きたい外勤先）----
         with pri_tab2:
-            selected_doctor = st.selectbox(
+            st.caption("医員の「この日にこの外勤先に行きたい」という希望を管理者側から設定できます")
+
+            selected_doctor_dcr = st.selectbox(
                 "医員を選択",
                 doctors,
                 format_func=lambda doc: doc["name"],
-                key="affinity_doctor"
+                key="dcr_doctor"
             )
 
-            if selected_doctor:
-                st.write(f"**{selected_doctor['name']}** の各外勤先への優先度:")
-                st.caption("◎ 月1回以上必ず行く ／ ○ 行くときもある ／ × まったく行かない")
-                doc_affinities = {
-                    a["clinic_id"]: a["weight"]
-                    for a in all_affinities
-                    if a["doctor_id"] == selected_doctor["id"]
-                }
+            if selected_doctor_dcr:
+                saturdays = get_target_saturdays(year, month)
+                if not saturdays:
+                    st.info("対象月に土曜日がありません")
+                else:
+                    prefs = get_all_preferences(target_month)
+                    pref = next((p for p in prefs if p["doctor_id"] == selected_doctor_dcr["id"]), None)
 
-                with st.form(f"affinity_form_doc_{selected_doctor['id']}"):
-                    n_cols = min(len(clinics), 4)
-                    aff_cols2 = st.columns(n_cols)
-                    for i, cli in enumerate(clinics):
-                        with aff_cols2[i % n_cols]:
-                            current_w = doc_affinities.get(cli["id"], 1.0)
-                            current_label = WEIGHT_TO_LABEL.get(current_w, "○ 行くときもある")
-                            st.radio(
-                                cli["name"],
-                                list(PRIORITY_OPTIONS.keys()),
-                                index=list(PRIORITY_OPTIONS.keys()).index(current_label),
-                                key=f"pri_doc_{selected_doctor['id']}_{cli['id']}",
-                                horizontal=True,
+                    existing_ng = set(pref.get("ng_dates", [])) if pref else set()
+                    existing_avoid = set(pref.get("avoid_dates", [])) if pref else set()
+                    existing_dcr = pref.get("date_clinic_requests", {}) if pref else {}
+
+                    clinic_options = [0] + [cli["id"] for cli in clinics]
+
+                    def _dcr_clinic_label(cid):
+                        if cid == 0:
+                            return "指定なし"
+                        return next((cli["name"] for cli in clinics if cli["id"] == cid), str(cid))
+
+                    with st.form(f"dcr_form_{selected_doctor_dcr['id']}"):
+                        n_cols = min(len(saturdays), 5)
+                        dcr_cols = st.columns(n_cols)
+                        for i, s in enumerate(saturdays):
+                            ds = s.isoformat()
+                            with dcr_cols[i % n_cols]:
+                                if ds in existing_ng:
+                                    st.caption(s.strftime("%m/%d") + " ×NG")
+                                    continue
+                                status = "△" if ds in existing_avoid else "○"
+                                existing_cid = existing_dcr.get(ds, 0)
+                                if isinstance(existing_cid, str):
+                                    existing_cid = int(existing_cid) if existing_cid.isdigit() else 0
+                                default_idx = clinic_options.index(existing_cid) if existing_cid in clinic_options else 0
+                                st.selectbox(
+                                    s.strftime(f"%m/%d({status})"),
+                                    clinic_options,
+                                    index=default_idx,
+                                    format_func=_dcr_clinic_label,
+                                    key=f"adm_dcr_{selected_doctor_dcr['id']}_{ds}",
+                                )
+
+                        if st.form_submit_button("日別希望を保存", type="primary"):
+                            new_dcr = {}
+                            for s in saturdays:
+                                ds = s.isoformat()
+                                if ds in existing_ng:
+                                    continue
+                                val = st.session_state.get(f"adm_dcr_{selected_doctor_dcr['id']}_{ds}", 0)
+                                if val != 0:
+                                    new_dcr[ds] = val
+                            upsert_preference(
+                                selected_doctor_dcr["id"], target_month,
+                                ng_dates=list(existing_ng),
+                                avoid_dates=list(existing_avoid),
+                                preferred_clinics=pref.get("preferred_clinics", []) if pref else [],
+                                date_clinic_requests=new_dcr,
+                                free_text=pref.get("free_text", "") if pref else "",
                             )
-
-                    if st.form_submit_button("優先度を保存", type="primary"):
-                        changed = 0
-                        for cli in clinics:
-                            sel_label = st.session_state.get(f"pri_doc_{selected_doctor['id']}_{cli['id']}")
-                            if sel_label is None:
-                                continue
-                            new_w = PRIORITY_OPTIONS[sel_label]
-                            old_w = doc_affinities.get(cli["id"], 1.0)
-                            if new_w != old_w:
-                                set_affinity(selected_doctor["id"], cli["id"], new_w)
-                                changed += 1
-                        if changed:
-                            st.session_state["_save_msg"] = f"「{selected_doctor['name']}」の優先度を保存しました（{changed}件変更）"
-                        else:
-                            st.session_state["_save_msg"] = "変更はありませんでした"
-                        st.rerun()
+                            st.session_state["_save_msg"] = f"「{selected_doctor_dcr['name']}」の日別外勤先希望を保存しました"
+                            st.rerun()
 
     # ---- 外勤先の日別設定 ----
     st.markdown("---")
