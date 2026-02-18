@@ -4,7 +4,7 @@ from database import (
     get_doctors, add_doctor, update_doctor, delete_doctor,
     get_clinics, add_clinic, update_clinic, delete_clinic,
     get_affinities, set_affinity,
-    get_clinic_date_overrides, set_clinic_date_override,
+    get_clinic_date_overrides, set_clinic_date_overrides_batch,
     set_doctor_individual_password, update_doctor_email,
     get_open_month, set_open_month,
 )
@@ -401,7 +401,6 @@ def render(target_month, year, month):
                             changes[(override_clinic["id"], ds)] = new_req
 
                 if st.button("日別設定を保存", type="primary", key="save_overrides"):
-                    for (cid, ds), req in changes.items():
-                        set_clinic_date_override(cid, ds, req)
+                    set_clinic_date_overrides_batch(changes)
                     st.success("保存しました")
                     st.rerun()

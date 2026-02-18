@@ -25,13 +25,11 @@
 
 ## ステップ2: Google Apps Scriptを設定
 
-1. **運用データ用スプレッドシート**を開く
-   - スプレッドシートを分割している場合: 月別シート（希望_・スケジュール_）がある方
-   - 分割していない場合: 外勤調整データのスプレッドシート
+1. **運用データ用スプレッドシート**（月別シート: 希望_・スケジュール_ がある方）を開く
 2. メニューから **「拡張機能」→「Apps Script」** をクリック
 3. エディタが開いたら、既存のコードをすべて削除
 4. `gas/reminder.gs` の内容をすべてコピーして貼り付ける
-5. **スプレッドシートを分割している場合のみ**: `MASTER_SPREADSHEET_ID` にマスタ用スプレッドシートのIDを設定
+5. `MASTER_SPREADSHEET_ID` にマスタ用スプレッドシートのIDを設定（必須）
    ```javascript
    var MASTER_SPREADSHEET_ID = "ここにマスタ用スプレッドシートのIDを貼り付け";
    ```
@@ -96,13 +94,11 @@
 ## Streamlit secrets 設定項目一覧
 
 ```toml
-# 既存
+# 必須
 spreadsheet_key = "..."
+spreadsheet_key_operational = "..."
 [gcp_service_account]
 # ...
-
-# スプレッドシート分割時のみ追加
-spreadsheet_key_operational = "..."
 
 # 確定通知メール機能を使う場合に追加
 gas_webapp_url = "https://script.google.com/macros/s/.../exec"

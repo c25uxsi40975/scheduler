@@ -7,7 +7,7 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 
 from database import (
-    init_db, get_doctors, delete_old_schedules,
+    init_db, get_doctors,
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, update_doctor_email,
@@ -31,6 +31,20 @@ st.markdown(
     "<style>[data-testid='stSidebar']{display:none}</style>",
     unsafe_allow_html=True,
 )
+
+# 2スプレッドシート構成の必須チェック
+_missing = []
+if not st.secrets.get("spreadsheet_key", ""):
+    _missing.append("spreadsheet_key")
+if not st.secrets.get("spreadsheet_key_operational", ""):
+    _missing.append("spreadsheet_key_operational")
+if _missing:
+    st.error(
+        f"Secrets に以下のキーが未設定です: {', '.join(_missing)}\n\n"
+        "マスタ用 (spreadsheet_key) と運用データ用 (spreadsheet_key_operational) の"
+        "2つのスプレッドシートキーが必要です。"
+    )
+    st.stop()
 
 init_db()
 

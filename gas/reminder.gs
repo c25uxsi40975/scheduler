@@ -8,7 +8,7 @@
  * セットアップ:
  *   1. 運用データ用スプレッドシートで「拡張機能 > Apps Script」を開く
  *   2. このファイルの内容を貼り付ける
- *   3. MASTER_SPREADSHEET_ID を設定（マスタと運用が同じなら空文字のまま）
+ *   3. MASTER_SPREADSHEET_ID を設定（必須）
  *   4. sendFridayReminder をトリガーに登録（毎週金曜 18:00-19:00）
  *   5. Web Appとしてデプロイ（確定通知用）
  */
@@ -18,7 +18,7 @@
 // 送信者として表示する名前
 var SENDER_NAME = "外勤調整システム";
 
-// マスタデータ用スプレッドシートID（運用データと同じ場合は空文字）
+// マスタデータ用スプレッドシートID（必須）
 var MASTER_SPREADSHEET_ID = "";
 
 // ---- スプレッドシート取得 ----
@@ -31,13 +31,13 @@ function getOperationalSpreadsheet() {
 }
 
 /**
- * マスタ用スプレッドシート（分割時はIDで別スプレッドシートを開く）
+ * マスタ用スプレッドシート（IDで別スプレッドシートを開く）
  */
 function getMasterSpreadsheet() {
-  if (MASTER_SPREADSHEET_ID) {
-    return SpreadsheetApp.openById(MASTER_SPREADSHEET_ID);
+  if (!MASTER_SPREADSHEET_ID) {
+    throw new Error("MASTER_SPREADSHEET_ID が未設定です。マスタ用スプレッドシートのIDを設定してください。");
   }
-  return SpreadsheetApp.getActiveSpreadsheet();
+  return SpreadsheetApp.openById(MASTER_SPREADSHEET_ID);
 }
 
 // ---- Web App エンドポイント（確定通知） ----

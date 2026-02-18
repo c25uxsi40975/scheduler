@@ -103,8 +103,11 @@ def render(target_month, year, month):
         st.markdown("---")
         st.subheader("生成済みスケジュール案")
 
-        fee_map = {c["id"]: c["fee"] for c in get_clinics()}
-        clinic_map = {c["id"]: c for c in get_clinics()}
+        # データを一度だけ取得してローカル変数に保持（冗長なAPI呼出を排除）
+        _clinics = get_clinics()
+        _doctors = get_doctors()
+        fee_map = {c["id"]: c["fee"] for c in _clinics}
+        clinic_map = {c["id"]: c for c in _clinics}
 
         for sched in schedules:
             confirmed = "[確定]" if sched["is_confirmed"] else ""
@@ -119,9 +122,9 @@ def render(target_month, year, month):
                 is_editing = st.session_state.get(editing_key, False)
 
                 if is_editing:
-                    _render_edit_mode(sched, doctors, clinic_map, editing_key)
+                    _render_edit_mode(sched, _doctors, clinic_map, editing_key)
                 else:
-                    render_schedule_table(sched, get_doctors(), get_clinics())
+                    render_schedule_table(sched, _doctors, _clinics)
 
                     # 医員別統計
                     st.write("**医員別統計:**")
@@ -134,7 +137,7 @@ def render(target_month, year, month):
                         doc_stats[did]["報酬合計"] += fee_map.get(a["clinic_id"], 0)
 
                     stat_rows = []
-                    for d in get_doctors():
+                    for d in _doctors:
                         s = doc_stats.get(d["id"], {"回数": 0, "報酬合計": 0})
                         stat_rows.append({
                             "医員": d["name"],
