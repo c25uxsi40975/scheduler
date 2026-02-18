@@ -116,20 +116,24 @@ def _show_doctor_login():
         st.warning("医員が登録されていません。管理者にお問い合わせください。")
     else:
         doctor_names = [d["name"] for d in doctors]
-        selected = st.selectbox("名前を選択してください", doctor_names)
-        doctor = next(d for d in doctors if d["name"] == selected)
+        selected = st.selectbox(
+            "医員名", doctor_names,
+            index=None, placeholder="名前を選択してください",
+        )
 
-        if not is_doctor_individual_password_set(doctor["id"]):
-            st.info("パスワードが未設定です。管理者に初期パスワードの設定を依頼してください。")
-        else:
-            pw = st.text_input("パスワード", type="password", key="doc_pw_login")
-            if st.button("ログイン", type="primary"):
-                if verify_doctor_individual_password(doctor["id"], pw):
-                    st.session_state.doctor_authenticated = True
-                    st.session_state.doctor_id = doctor["id"]
-                    st.rerun()
-                else:
-                    st.error("パスワードが正しくありません")
+        if selected:
+            doctor = next(d for d in doctors if d["name"] == selected)
+            if not is_doctor_individual_password_set(doctor["id"]):
+                st.info("パスワードが未設定です。管理者に初期パスワードの設定を依頼してください。")
+            else:
+                pw = st.text_input("パスワード", type="password", key="doc_pw_login")
+                if st.button("ログイン", type="primary"):
+                    if verify_doctor_individual_password(doctor["id"], pw):
+                        st.session_state.doctor_authenticated = True
+                        st.session_state.doctor_id = doctor["id"]
+                        st.rerun()
+                    else:
+                        st.error("パスワードが正しくありません")
 
     st.markdown("---")
     if st.button("← 戻る"):
