@@ -333,12 +333,13 @@ def render(target_month, year, month):
     clinics = get_clinics()
     doctors = get_doctors()
 
-    PRIORITY_OPTIONS = {"○ 行くときもある": 1.0, "◎ 必ず行く": 2.0, "× 行かない": 0.0}
+    PRIORITY_OPTIONS = {"◎ 必ず行く": 2.0, "○ 行くときもある": 1.0, "× 行かない": 0.0}
     WEIGHT_TO_LABEL = {2.0: "◎ 必ず行く", 1.0: "○ 行くときもある", 0.0: "× 行かない"}
 
     # 保存成功メッセージ（前回の保存結果を表示）
+    _msg_area = st.empty()
     if st.session_state.get("_save_msg"):
-        st.success(st.session_state.pop("_save_msg"))
+        _msg_area.success(st.session_state.pop("_save_msg"))
 
     if clinics and doctors:
         pri_tab1, pri_tab2 = st.tabs(["外勤先から設定", "医員から設定"])
@@ -414,7 +415,7 @@ def render(target_month, year, month):
             selected_doctor = st.selectbox(
                 "医員を選択",
                 doctors,
-                format_func=lambda d: d["name"],
+                format_func=lambda doc: doc["name"],
                 key="affinity_doctor"
             )
 
@@ -427,35 +428,37 @@ def render(target_month, year, month):
                     if a["doctor_id"] == selected_doctor["id"]
                 }
 
-                aff_cols2 = st.columns(4)
-                for i, c in enumerate(clinics):
-                    with aff_cols2[i % 4]:
-                        current_w = doc_affinities.get(c["id"], 1.0)
-                        current_label = WEIGHT_TO_LABEL.get(current_w, "○ 行くときもある")
-                        st.radio(
-                            c["name"],
-                            list(PRIORITY_OPTIONS.keys()),
-                            index=list(PRIORITY_OPTIONS.keys()).index(current_label),
-                            key=f"pri_doc_{selected_doctor['id']}_{c['id']}",
-                            horizontal=True,
-                        )
+                with st.form(f"affinity_form_doc_{selected_doctor['id']}"):
+                    n_cols = min(len(clinics), 4)
+                    aff_cols2 = st.columns(n_cols)
+                    for i, cli in enumerate(clinics):
+                        with aff_cols2[i % n_cols]:
+                            current_w = doc_affinities.get(cli["id"], 1.0)
+                            current_label = WEIGHT_TO_LABEL.get(current_w, "○ 行くときもある")
+                            st.radio(
+                                cli["name"],
+                                list(PRIORITY_OPTIONS.keys()),
+                                index=list(PRIORITY_OPTIONS.keys()).index(current_label),
+                                key=f"pri_doc_{selected_doctor['id']}_{cli['id']}",
+                                horizontal=True,
+                            )
 
-                if st.button("優先度を保存", type="primary", key="save_affinity_by_doctor"):
-                    changed = 0
-                    for c in clinics:
-                        sel_label = st.session_state.get(f"pri_doc_{selected_doctor['id']}_{c['id']}")
-                        if sel_label is None:
-                            continue
-                        new_w = PRIORITY_OPTIONS[sel_label]
-                        old_w = doc_affinities.get(c["id"], 1.0)
-                        if new_w != old_w:
-                            set_affinity(selected_doctor["id"], c["id"], new_w)
-                            changed += 1
-                    if changed:
-                        st.session_state["_save_msg"] = f"「{selected_doctor['name']}」の優先度を保存しました（{changed}件変更）"
-                    else:
-                        st.session_state["_save_msg"] = "変更はありませんでした"
-                    st.rerun()
+                    if st.form_submit_button("優先度を保存", type="primary"):
+                        changed = 0
+                        for cli in clinics:
+                            sel_label = st.session_state.get(f"pri_doc_{selected_doctor['id']}_{cli['id']}")
+                            if sel_label is None:
+                                continue
+                            new_w = PRIORITY_OPTIONS[sel_label]
+                            old_w = doc_affinities.get(cli["id"], 1.0)
+                            if new_w != old_w:
+                                set_affinity(selected_doctor["id"], cli["id"], new_w)
+                                changed += 1
+                        if changed:
+                            st.session_state["_save_msg"] = f"「{selected_doctor['name']}」の優先度を保存しました（{changed}件変更）"
+                        else:
+                            st.session_state["_save_msg"] = "変更はありませんでした"
+                        st.rerun()
 
     # ---- 外勤先の日別設定 ----
     st.markdown("---")
