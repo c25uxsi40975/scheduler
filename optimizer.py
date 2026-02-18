@@ -94,6 +94,15 @@ def solve_schedule(
         avoid_map[p["doctor_id"]] = set(p.get("avoid_dates", []))
         pref_clinics_map[p["doctor_id"]] = set(p.get("preferred_clinics", []))
 
+    # 日別外勤先希望マップ: {doctor_id: {date_str: clinic_id}}
+    date_clinic_req_map = {}
+    for p in preferences:
+        dcr = p.get("date_clinic_requests", {})
+        if dcr:
+            date_clinic_req_map[p["doctor_id"]] = {
+                ds: int(cid) for ds, cid in dcr.items()
+            }
+
     # 外勤先の希望医員マップ
     clinic_preferred = {}
     for c in clinic_list:
@@ -175,6 +184,15 @@ def solve_schedule(
                     f"must_{doc_id}_{cid}"
                 )
 
+    # 6. 月回数上限（max_assignments > 0 の場合）
+    for doc in doctors:
+        max_a = doc.get("max_assignments", 0)
+        if max_a > 0:
+            prob += (
+                pulp.lpSum(x[(doc["id"], cid, ds)] for (cid, ds) in slots) <= max_a,
+                f"max_assign_{doc['id']}"
+            )
+
     # ---- 目的関数 ----
 
     # 各医員の報酬合計
@@ -251,6 +269,14 @@ def solve_schedule(
         prob += count_per_doc[doc_id] - avg_count == count_dev_p[doc_id] - count_dev_m[doc_id]
     count_variance = pulp.lpSum(count_dev_p[d] + count_dev_m[d] for d in doc_ids)
 
+    # 日別外勤先希望ボーナス（特定日に特定外勤先を希望した場合のプラス）
+    date_clinic_bonus = pulp.lpSum(
+        x[(doc_id, cid, ds)]
+        for doc_id in doc_ids
+        for (cid, ds) in slots
+        if date_clinic_req_map.get(doc_id, {}).get(ds) == cid
+    )
+
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
@@ -258,14 +284,15 @@ def solve_schedule(
     #   w_pri:  優先度(◎○×)
     #   w_avoid: △日ペナルティ
     #   w_cnt:  回数均等
+    #   w_dcr:  日別外勤先希望
     if mode == "balanced":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt = 10.0, -1.0, -2.0, -1.0, 3.0, 5.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 10.0, -1.0, -2.0, -1.0, 3.0, 5.0, -3.0
     elif mode == "preference":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt = 2.0, -5.0, -3.0, -2.0, 3.0, 3.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 2.0, -5.0, -3.0, -2.0, 3.0, 3.0, -5.0
     elif mode == "affinity":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt = 2.0, -2.0, -2.0, -5.0, 3.0, 3.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 2.0, -2.0, -2.0, -5.0, 3.0, 3.0, -3.0
     else:
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt = 5.0, -2.0, -2.0, -2.0, 3.0, 5.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 5.0, -2.0, -2.0, -2.0, 3.0, 5.0, -3.0
 
     # 報酬が0の場合は回数均等をメインにする
     if all(fee_map.get(cid, 0) == 0 for cid in fee_map):
@@ -278,6 +305,7 @@ def solve_schedule(
         + w_pri * priority_term
         + w_avoid * avoid_penalty
         + w_cnt * count_variance
+        + w_dcr * date_clinic_bonus
     )
 
     # ---- 求解 ----

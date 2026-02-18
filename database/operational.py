@@ -17,11 +17,24 @@ from database.master import get_doctors
 
 # ---- Preferences ----
 
+_pref_headers_checked = set()
+
+
 def _get_pref_sheet(year_month):
     """月別希望シートを取得/作成"""
     name = f"希望_{year_month}"
-    headers = ["doctor_id", "doctor_name", "ng_dates", "avoid_dates", "preferred_clinics", "updated_at"]
-    return _init_monthly_sheet(name, headers)
+    headers = ["doctor_id", "doctor_name", "ng_dates", "avoid_dates",
+               "preferred_clinics", "date_clinic_requests", "free_text", "updated_at"]
+    ws = _init_monthly_sheet(name, headers)
+    # 新カラム対応: 既存シートのヘッダー補完（セッション中1回のみ）
+    if name not in _pref_headers_checked:
+        existing = _retry(ws.row_values, 1)
+        if existing:
+            missing = [h for h in headers if h not in existing]
+            if missing:
+                ws.update([existing + missing], "A1")
+        _pref_headers_checked.add(name)
+    return ws
 
 
 def get_preference(doctor_id, year_month):
@@ -44,16 +57,21 @@ def get_all_preferences(year_month):
         r["ng_dates"] = _safe_json_loads(r.get("ng_dates"))
         r["avoid_dates"] = _safe_json_loads(r.get("avoid_dates"))
         r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
+        r["date_clinic_requests"] = _safe_json_loads(r.get("date_clinic_requests"), default={})
+        r["free_text"] = str(r.get("free_text", "") or "")
         result.append(r)
     return result
 
 
-def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None, preferred_clinics=None):
+def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
+                      preferred_clinics=None, date_clinic_requests=None, free_text=None):
     ws = _get_pref_sheet(year_month)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     ng = json.dumps(ng_dates or [])
     av = json.dumps(avoid_dates or [])
     pc = json.dumps(preferred_clinics or [])
+    dcr = json.dumps(date_clinic_requests or {})
+    ft = free_text or ""
 
     # 医員名を取得（キャッシュ済み）
     doctors = get_doctors(active_only=False)
@@ -63,12 +81,14 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None, pr
             doc_name = d["name"]
             break
 
+    row_data = [str(doctor_id), doc_name, ng, av, pc, dcr, ft, now]
+
     # 既存行を探す
     row_idx = _find_row_index(ws, 1, doctor_id)
     if row_idx:
-        ws.update([[str(doctor_id), doc_name, ng, av, pc, now]], f"A{row_idx}")
+        ws.update([row_data], f"A{row_idx}")
     else:
-        ws.append_row([str(doctor_id), doc_name, ng, av, pc, now])
+        ws.append_row(row_data)
     _clear_data_cache()
 
 

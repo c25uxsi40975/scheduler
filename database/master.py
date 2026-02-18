@@ -27,6 +27,7 @@ def get_doctors(active_only=True):
         r["email"] = str(r.get("email", ""))
         r["password_hash"] = str(r.get("password_hash", ""))
         r["is_active"] = int(r.get("is_active", 1))
+        r["max_assignments"] = int(r.get("max_assignments", 0) or 0)
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -43,11 +44,11 @@ def add_doctor(name):
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     default_pw_hash = _hash_password("1111")
-    ws.append_row([new_id, name, "", default_pw_hash, 1, now])
+    ws.append_row([new_id, name, "", default_pw_hash, 1, now, 0])
     _clear_data_cache()
 
 
-def update_doctor(doc_id, name=None, is_active=None):
+def update_doctor(doc_id, name=None, is_active=None, max_assignments=None):
     ws = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws, 1, doc_id)
     if not row_idx:
@@ -60,6 +61,9 @@ def update_doctor(doc_id, name=None, is_active=None):
     if is_active is not None:
         col = headers.index("is_active") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(is_active)]]})
+    if max_assignments is not None:
+        col = headers.index("max_assignments") + 1
+        updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(max_assignments)]]})
     if updates:
         _retry(ws.batch_update, updates)
     _clear_data_cache()

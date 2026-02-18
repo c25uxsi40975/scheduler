@@ -45,6 +45,41 @@ def render(doctor, target_month, year, month):
             elif status == "△ できれば避けたい":
                 avoid_dates.append(ds)
 
+    # 日別外勤先希望
+    st.subheader("日別外勤先希望")
+    st.caption("特定の日に行きたい外勤先がある場合に選択してください（任意）")
+
+    existing_dcr = existing.get("date_clinic_requests", {}) if existing else {}
+    date_clinic_requests = {}
+
+    clinic_options = [0] + [c["id"] for c in clinics]
+
+    def _clinic_label(cid):
+        if cid == 0:
+            return "指定なし"
+        return next((c["name"] for c in clinics if c["id"] == cid), str(cid))
+
+    dcr_cols = st.columns(min(len(saturdays), 5)) if saturdays else []
+    for i, s in enumerate(saturdays):
+        ds = s.isoformat()
+        with dcr_cols[i % len(dcr_cols)]:
+            if ds in ng_dates:
+                st.caption(s.strftime("%m/%d") + " ×")
+                continue
+            existing_cid = existing_dcr.get(ds, 0)
+            if isinstance(existing_cid, str):
+                existing_cid = int(existing_cid) if existing_cid.isdigit() else 0
+            default_idx = clinic_options.index(existing_cid) if existing_cid in clinic_options else 0
+            selected_cid = st.selectbox(
+                s.strftime("%m/%d(%a)"),
+                clinic_options,
+                index=default_idx,
+                format_func=_clinic_label,
+                key=f"dcr_{ds}",
+            )
+            if selected_cid != 0:
+                date_clinic_requests[ds] = selected_cid
+
     # 希望外勤先
     st.subheader("希望外勤先（行きたい外勤先）")
     pref_clinics = st.multiselect(
@@ -57,12 +92,26 @@ def render(doctor, target_month, year, month):
         label_visibility="collapsed"
     )
 
+    # 自由入力欄
+    st.subheader("自由入力欄")
+    st.caption("スケジュールに関する希望や備考があれば自由にご記入ください")
+    existing_free_text = existing.get("free_text", "") if existing else ""
+    free_text = st.text_area(
+        "自由入力",
+        value=existing_free_text,
+        placeholder="例: 3月は学会のため第2週は避けたいです",
+        key="free_text_input",
+        label_visibility="collapsed",
+    )
+
     if st.button("保存", type="primary", use_container_width=True):
         upsert_preference(
             doctor["id"], target_month,
             ng_dates=ng_dates,
             avoid_dates=avoid_dates,
             preferred_clinics=pref_clinics,
+            date_clinic_requests=date_clinic_requests,
+            free_text=free_text,
         )
         st.success("保存しました！")
         st.rerun()

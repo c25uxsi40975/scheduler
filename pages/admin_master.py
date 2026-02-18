@@ -123,10 +123,12 @@ def render(target_month, year, month):
                     marker = "row-active" if d['is_active'] else "row-inactive"
                     status_label = "有効" if d['is_active'] else "無効"
                     email_display = d.get("email", "") or "未設定"
+                    max_a = d.get("max_assignments", 0)
+                    limit_display = f"{max_a}回/月" if max_a > 0 else "制限なし"
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(f"**{d['name']}**　{status_label}　📧 {email_display}")
-                        b1, b2, b3, b4, b5 = st.columns(5)
+                        st.markdown(f"**{d['name']}**　{status_label}　📧 {email_display}　上限: {limit_display}")
+                        b1, b2, b3, b4, b5, b6 = st.columns(6)
                         with b1:
                             if d['is_active']:
                                 if st.button("無効化", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
@@ -148,6 +150,9 @@ def render(target_month, year, month):
                             if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_email_{d['id']}"] = True
                         with b5:
+                            if st.button("回数上限", key=f"setlimit_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_limit_{d['id']}"] = True
+                        with b6:
                             if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                                 st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
@@ -221,6 +226,27 @@ def render(target_month, year, month):
                             if st.button("キャンセル", key=f"cancel_del_doc_{d['id']}"):
                                 st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
                                 st.rerun()
+
+                    # 回数上限設定フォーム
+                    if st.session_state.get(f"setting_limit_{d['id']}"):
+                        with st.form(f"setlimit_form_{d['id']}"):
+                            new_limit = st.number_input(
+                                "月回数上限（0 = 制限なし）",
+                                min_value=0, max_value=20, value=max_a,
+                                key=f"limit_val_{d['id']}"
+                            )
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_doctor(d['id'], max_assignments=new_limit)
+                                    lbl = "制限なし" if new_limit == 0 else f"{new_limit}回/月"
+                                    st.success(f"回数上限を{lbl}に設定しました")
+                                    st.session_state.pop(f"setting_limit_{d['id']}", None)
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"setting_limit_{d['id']}", None)
+                                    st.rerun()
 
     # ---- 外勤先管理 ----
     with col2:
