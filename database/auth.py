@@ -119,3 +119,17 @@ def get_open_month():
 def set_open_month(year_month: str):
     """医員が希望入力可能な月を設定"""
     _set_setting("open_month", year_month)
+
+
+# ---- Input Deadline (入力期限) ----
+
+@_register_cached
+@st.cache_data(ttl=120)
+def get_input_deadline():
+    """希望入力の期限日を取得（YYYY-MM-DD形式 or None）"""
+    return _get_setting("input_deadline")
+
+
+def set_input_deadline(deadline_date: str):
+    """希望入力の期限日を設定（YYYY-MM-DD形式）"""
+    _set_setting("input_deadline", deadline_date)

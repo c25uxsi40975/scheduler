@@ -1,23 +1,57 @@
 """医員: 希望入力タブ"""
 import streamlit as st
 import requests
-from database import get_preference, upsert_preference
+from database import get_preference, get_all_preferences, get_doctors, upsert_preference
 from optimizer import get_target_saturdays
 
 
-def _send_preference_notification(doctor_name, target_month):
-    """GAS Web App経由で希望入力通知メールを管理者に送信"""
+def _send_notifications(doctor_name, doctor_email, target_month,
+                        ng_dates, avoid_dates, free_text, saturdays):
+    """GAS Web App経由で通知メールを送信"""
     gas_url = st.secrets.get("gas_webapp_url", "")
     if not gas_url:
         return
+    # 日程サマリー作成
+    ng_set = set(ng_dates)
+    avoid_set = set(avoid_dates)
+    date_summary = []
+    for s in saturdays:
+        ds = s.isoformat()
+        label = s.strftime("%m/%d")
+        if ds in ng_set:
+            date_summary.append(f"{label}: × NG")
+        elif ds in avoid_set:
+            date_summary.append(f"{label}: △")
+        else:
+            date_summary.append(f"{label}: ○")
+
+    # 1. 医員への確認メール
     try:
         requests.post(gas_url, json={
-            "action": "preference_submitted",
+            "action": "preference_confirmed_to_doctor",
             "year_month": target_month,
             "doctor_name": doctor_name,
+            "doctor_email": doctor_email,
+            "date_summary": "\n".join(date_summary),
+            "free_text": free_text or "",
         }, timeout=10)
     except requests.RequestException:
-        pass  # 通知失敗は医員側に表示しない
+        pass
+
+    # 2. 全員完了チェック → 管理者通知
+    try:
+        doctors = get_doctors()
+        prefs = get_all_preferences(target_month)
+        submitted_ids = {p["doctor_id"] for p in prefs}
+        all_ids = {d["id"] for d in doctors}
+        if all_ids and all_ids <= submitted_ids:
+            requests.post(gas_url, json={
+                "action": "all_preferences_complete",
+                "year_month": target_month,
+                "doctor_count": len(all_ids),
+            }, timeout=10)
+    except requests.RequestException:
+        pass
 
 
 DAY_STATUS_OPTIONS = ["○ 可能", "△ できれば避けたい", "× NG"]
@@ -83,7 +117,10 @@ def render(doctor, target_month, year, month):
             date_clinic_requests=existing_dcr,
             free_text=free_text,
         )
-        _send_preference_notification(doctor["name"], target_month)
+        _send_notifications(
+            doctor["name"], doctor.get("email", ""), target_month,
+            ng_dates, avoid_dates, free_text, saturdays,
+        )
         st.session_state["_doc_saved"] = True
         st.rerun()
 

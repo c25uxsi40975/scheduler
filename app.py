@@ -11,7 +11,7 @@ from database import (
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, update_doctor_email,
-    get_open_month, get_confirmed_months,
+    get_open_month, get_input_deadline, get_confirmed_months,
 )
 from optimizer import get_target_saturdays
 from pages import (
@@ -269,7 +269,9 @@ elif st.session_state.role == "doctor":
                 open_month = get_open_month()
                 if open_month:
                     year, month = map(int, open_month.split("-"))
-                    st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日")
+                    deadline = get_input_deadline()
+                    deadline_text = f"　|　入力期限: {deadline}" if deadline else ""
+                    st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日{deadline_text}")
                     doctor_input.render(doctor, open_month, year, month)
                 else:
                     st.info("管理者が対象月を設定するまでお待ちください。")
