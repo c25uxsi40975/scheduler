@@ -24,6 +24,8 @@ def get_doctors(active_only=True):
     result = []
     for r in records:
         r["id"] = int(r["id"])
+        r["account"] = str(r.get("account", ""))
+        r["account_name"] = str(r.get("account_name", "") or r.get("account", ""))
         r["email"] = str(r.get("email", ""))
         r["password_hash"] = str(r.get("password_hash", ""))
         r["is_active"] = int(r.get("is_active", 1))
@@ -35,34 +37,43 @@ def get_doctors(active_only=True):
     return result
 
 
-def add_doctor(name):
+def add_doctor(name, account="", initial_password="1111"):
     ws = _get_sheet("医員マスタ")
-    # 重複チェック
+    # 重複チェック（ID）
     records = _get_all_records(ws)
+    if account and any(str(r.get("account", "")) == account for r in records):
+        return "duplicate_account"
     if any(r["name"] == name for r in records):
-        return
+        return "duplicate_name"
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    default_pw_hash = _hash_password("1111")
-    ws.append_row([new_id, name, "", default_pw_hash, 1, now, 0])
+    pw_hash = _hash_password(initial_password)
+    # 実際のヘッダー順序に基づいて行を構築（カラム追加時のずれ防止）
+    actual_headers = _retry(ws.row_values, 1)
+    values = {
+        "id": new_id, "name": name, "account": account,
+        "account_name": account, "email": "",
+        "password_hash": pw_hash, "is_active": 1,
+        "created_at": now, "max_assignments": 0,
+    }
+    row = [values.get(h, "") for h in actual_headers]
+    ws.append_row(row)
     _clear_data_cache()
+    return None
 
 
-def update_doctor(doc_id, name=None, is_active=None, max_assignments=None):
+def update_doctor(doc_id, is_active=None, max_assignments=None):
     ws = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws, 1, doc_id)
     if not row_idx:
         return
-    headers = SHEET_HEADERS["医員マスタ"]
+    actual_headers = _retry(ws.row_values, 1)
     updates = []
-    if name is not None:
-        col = headers.index("name") + 1
-        updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[name]]})
     if is_active is not None:
-        col = headers.index("is_active") + 1
+        col = actual_headers.index("is_active") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(is_active)]]})
     if max_assignments is not None:
-        col = headers.index("max_assignments") + 1
+        col = actual_headers.index("max_assignments") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(max_assignments)]]})
     if updates:
         _retry(ws.batch_update, updates)
@@ -110,6 +121,7 @@ def get_clinics(active_only=True):
         r["fee"] = int(r.get("fee", 0))
         r["is_active"] = int(r.get("is_active", 1))
         r["preferred_doctors"] = _safe_json_loads(r.get("preferred_doctors", "[]"))
+        r["fixed_doctors"] = _safe_json_loads(r.get("fixed_doctors", "[]"))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -117,15 +129,23 @@ def get_clinics(active_only=True):
     return result
 
 
-def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None):
+def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_doctors=None):
     ws = _get_sheet("外勤先マスタ")
     records = _get_all_records(ws)
     if any(r["name"] == name for r in records):
         return
     new_id = _next_id(ws)
     pref = json.dumps(preferred_doctors or [])
+    fixed = json.dumps(fixed_doctors or [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ws.append_row([new_id, name, fee, frequency, pref, 1, now])
+    actual_headers = _retry(ws.row_values, 1)
+    values = {
+        "id": new_id, "name": name, "fee": fee, "frequency": frequency,
+        "preferred_doctors": pref, "fixed_doctors": fixed,
+        "is_active": 1, "created_at": now,
+    }
+    row = [values.get(h, "") for h in actual_headers]
+    ws.append_row(row)
     _clear_data_cache()
 
 
@@ -137,7 +157,7 @@ def update_clinic(clinic_id, **kwargs):
     headers = SHEET_HEADERS["外勤先マスタ"]
     updates = []
     for key, val in kwargs.items():
-        if key == "preferred_doctors":
+        if key in ("preferred_doctors", "fixed_doctors"):
             val = json.dumps(val)
         if key in headers:
             col = headers.index(key) + 1

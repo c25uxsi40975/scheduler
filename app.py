@@ -10,7 +10,8 @@ from database import (
     init_db, get_doctors,
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
-    verify_doctor_individual_password, update_doctor_email,
+    verify_doctor_individual_password, verify_doctor_by_account,
+    update_doctor_email, update_doctor_account_name,
     get_open_month, get_input_deadline, get_confirmed_months,
 )
 from optimizer import get_target_saturdays
@@ -107,34 +108,26 @@ def _show_admin_login():
 
 
 def _show_doctor_login():
-    """医員ログイン画面（名前選択 → 個別パスワード入力）"""
+    """医員ログイン画面（アカウント＋パスワード入力）"""
     st.title("医員ログイン")
     st.markdown("---")
 
-    doctors = get_doctors()
-    if not doctors:
-        st.warning("医員が登録されていません。管理者にお問い合わせください。")
-    else:
-        doctor_names = [d["name"] for d in doctors]
-        selected = st.selectbox(
-            "医員名", doctor_names,
-            index=None, placeholder="名前を選択してください",
-        )
-        pw = st.text_input("パスワード", type="password", key="doc_pw_login")
+    account = st.text_input("アカウント名", key="doc_account_login")
+    pw = st.text_input("パスワード", type="password", key="doc_pw_login")
 
-        if st.button("ログイン", type="primary"):
-            if not selected:
-                st.error("医員名を選択してください")
+    if st.button("ログイン", type="primary"):
+        if not account:
+            st.error("アカウント名を入力してください")
+        elif not pw:
+            st.error("パスワードを入力してください")
+        else:
+            doctor = verify_doctor_by_account(account.strip(), pw)
+            if doctor:
+                st.session_state.doctor_authenticated = True
+                st.session_state.doctor_id = doctor["id"]
+                st.rerun()
             else:
-                doctor = next(d for d in doctors if d["name"] == selected)
-                if not is_doctor_individual_password_set(doctor["id"]):
-                    st.error("パスワードが未設定です。管理者に初期パスワードの設定を依頼してください。")
-                elif verify_doctor_individual_password(doctor["id"], pw):
-                    st.session_state.doctor_authenticated = True
-                    st.session_state.doctor_id = doctor["id"]
-                    st.rerun()
-                else:
-                    st.error("パスワードが正しくありません")
+                st.error("アカウント名またはパスワードが正しくありません")
 
     st.markdown("---")
     if st.button("← 戻る"):
@@ -169,9 +162,28 @@ def _show_admin_header():
 
 
 def _show_doctor_settings(doctor):
-    """医員設定: パスワード変更・メールアドレス設定"""
+    """医員設定: アカウント名変更・パスワード変更・メールアドレス設定"""
     with st.expander("アカウント設定", expanded=True):
-        tab_pw, tab_email = st.tabs(["パスワード変更", "メールアドレス設定"])
+        st.caption(f"ID: {doctor.get('account', '')}　|　アカウント名: {doctor.get('account_name', '')}")
+
+        tab_acc, tab_pw, tab_email = st.tabs(["アカウント名変更", "パスワード変更", "メールアドレス設定"])
+
+        with tab_acc:
+            with st.form("change_account_name_form"):
+                current_aname = doctor.get("account_name", "")
+                new_aname = st.text_input("新しいアカウント名", value=current_aname)
+                if st.form_submit_button("アカウント名を変更"):
+                    if not new_aname.strip():
+                        st.error("アカウント名を入力してください")
+                    elif new_aname.strip() == current_aname:
+                        st.info("変更はありません")
+                    else:
+                        err = update_doctor_account_name(doctor["id"], new_aname.strip())
+                        if err == "duplicate":
+                            st.error(f"アカウント名「{new_aname}」は既に使用されています")
+                        else:
+                            st.success("アカウント名を変更しました")
+                            st.rerun()
 
         with tab_pw:
             with st.form("change_password_form"):

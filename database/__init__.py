@@ -22,6 +22,8 @@ from database.auth import (
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password,
+    get_doctor_by_account, verify_doctor_by_account,
+    update_doctor_account_name,
     update_doctor_email, get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
 )

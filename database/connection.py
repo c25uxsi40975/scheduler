@@ -158,8 +158,8 @@ def _hash_password(password: str) -> str:
 # ---- 初期化 ----
 
 SHEET_HEADERS = {
-    "医員マスタ": ["id", "name", "email", "password_hash", "is_active", "created_at", "max_assignments"],
-    "外勤先マスタ": ["id", "name", "fee", "frequency", "preferred_doctors", "is_active", "created_at"],
+    "医員マスタ": ["id", "name", "account", "account_name", "email", "password_hash", "is_active", "created_at", "max_assignments"],
+    "外勤先マスタ": ["id", "name", "fee", "frequency", "preferred_doctors", "fixed_doctors", "is_active", "created_at"],
     "優先度マスタ": ["doctor_id", "clinic_id", "weight"],
     "日別設定": ["clinic_id", "date", "required_doctors"],
     "設定": ["key", "value"],
@@ -207,18 +207,53 @@ def init_db():
     # 既存医員でパスワード未設定の場合、初期パスワード「1111」を設定（バッチ更新）
     ws = _get_sheet("医員マスタ")
     headers = ws.row_values(1)
+    records = ws.get_all_values()
+    updates = []
+
     if "password_hash" in headers:
         col_idx = headers.index("password_hash") + 1
-        records = ws.get_all_values()
         default_pw_hash = _hash_password("1111")
-        updates = []
         col_l = _col_letter(col_idx)
         for i, row in enumerate(records[1:], start=2):
             pw_val = row[col_idx - 1] if len(row) >= col_idx else ""
             if not pw_val:
                 updates.append({'range': f'{col_l}{i}', 'values': [[default_pw_hash]]})
-        if updates:
-            _retry(ws.batch_update, updates)
+
+    # 既存医員で account (ID) 未設定の場合、仮の入局年度を設定
+    if "account" in headers:
+        acc_idx = headers.index("account") + 1
+        acc_col_l = _col_letter(acc_idx)
+        existing_accounts = set()
+        for row in records[1:]:
+            acc_val = row[acc_idx - 1] if len(row) >= acc_idx else ""
+            if acc_val:
+                existing_accounts.add(str(acc_val))
+        base_year = 2020
+        for i, row in enumerate(records[1:], start=2):
+            acc_val = row[acc_idx - 1] if len(row) >= acc_idx else ""
+            if not acc_val:
+                candidate = str(base_year)
+                while candidate in existing_accounts:
+                    base_year += 1
+                    candidate = str(base_year)
+                existing_accounts.add(candidate)
+                base_year += 1
+                updates.append({'range': f'{acc_col_l}{i}', 'values': [[candidate]]})
+
+    # 既存医員で account_name 未設定の場合、account (ID) と同じ値を設定
+    if "account_name" in headers and "account" in headers:
+        aname_idx = headers.index("account_name") + 1
+        acc_idx = headers.index("account") + 1
+        aname_col_l = _col_letter(aname_idx)
+        for i, row in enumerate(records[1:], start=2):
+            aname_val = row[aname_idx - 1] if len(row) >= aname_idx else ""
+            if not aname_val:
+                acc_val = row[acc_idx - 1] if len(row) >= acc_idx else ""
+                if acc_val:
+                    updates.append({'range': f'{aname_col_l}{i}', 'values': [[str(acc_val)]]})
+
+    if updates:
+        _retry(ws.batch_update, updates)
 
 
 def _init_monthly_sheet(name, headers):

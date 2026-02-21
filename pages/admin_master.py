@@ -124,19 +124,35 @@ def render(target_month, year, month):
         st.subheader("医員一覧")
         with st.expander("医員の追加・編集", expanded=False):
             with st.form("add_doctor_form", clear_on_submit=True):
-                new_doc = st.text_input("新規医員名")
+                new_doc = st.text_input("医員名")
+                new_account = st.text_input("医員ID（入局年度）", placeholder="例: 2024")
+                new_init_pw = st.text_input("初期パスワード", value="1111")
+                st.caption("初期アカウント名 = 医員ID。アカウント名はユーザーが後から変更可能です。")
                 if st.form_submit_button("追加", use_container_width=True):
-                    if new_doc.strip():
-                        add_doctor(new_doc.strip())
-                        st.success(f"「{new_doc}」を追加しました")
-                        st.rerun()
+                    if not new_doc.strip():
+                        st.error("医員名を入力してください")
+                    elif not new_account.strip():
+                        st.error("医員IDを入力してください")
+                    elif not new_init_pw.strip():
+                        st.error("初期パスワードを入力してください")
+                    else:
+                        err = add_doctor(new_doc.strip(), account=new_account.strip(), initial_password=new_init_pw.strip())
+                        if err == "duplicate_account":
+                            st.error(f"医員ID「{new_account}」は既に使用されています")
+                        elif err == "duplicate_name":
+                            st.error(f"医員名「{new_doc}」は既に登録されています")
+                        else:
+                            st.success(f"「{new_doc}」を追加しました（ID: {new_account}）")
+                            st.rerun()
 
             doctors_all = get_doctors(active_only=False)
             if doctors_all:
                 def _doc_label(d):
                     s = "有効" if d["is_active"] else "無効"
                     pw = "🔑" if d.get("password_hash") else "⚠️"
-                    return f"{d['name']}（{s}）{pw}"
+                    acc = d.get("account", "")
+                    acc_str = f" [ID:{acc}]" if acc else ""
+                    return f"{d['name']}{acc_str}（{s}）{pw}"
 
                 selected_doc = st.selectbox(
                     "医員を選択", doctors_all,
@@ -149,13 +165,15 @@ def render(target_month, year, month):
                     has_email = bool(d.get("email"))
                     marker = "row-active" if d['is_active'] else "row-inactive"
                     status_label = "有効" if d['is_active'] else "無効"
+                    id_display = d.get("account", "") or "未設定"
+                    aname_display = d.get("account_name", "") or id_display
                     email_display = d.get("email", "") or "未設定"
                     max_a = d.get("max_assignments", 0)
                     limit_display = f"{max_a}回/月" if max_a > 0 else "制限なし"
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(f"**{d['name']}**　{status_label}　📧 {email_display}　上限: {limit_display}")
-                        b1, b2, b3, b4, b5, b6 = st.columns(6)
+                        st.markdown(f"**{d['name']}**　{status_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}")
+                        b1, b2, b3, b4, b5 = st.columns(5)
                         with b1:
                             if d['is_active']:
                                 if st.button("無効化", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
@@ -166,39 +184,19 @@ def render(target_month, year, month):
                                     update_doctor(d['id'], is_active=1)
                                     st.rerun()
                         with b2:
-                            if st.button("名前変更", key=f"rename_{d['id']}", use_container_width=True):
-                                st.session_state[f"editing_doc_{d['id']}"] = True
-                        with b3:
                             btn_label = "PW再設定" if has_pw else "PW設定"
                             if st.button(btn_label, key=f"setpw_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_pw_{d['id']}"] = True
-                        with b4:
+                        with b3:
                             email_btn = "📧変更" if has_email else "📧設定"
                             if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_email_{d['id']}"] = True
-                        with b5:
+                        with b4:
                             if st.button("回数上限", key=f"setlimit_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_limit_{d['id']}"] = True
-                        with b6:
+                        with b5:
                             if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                                 st.session_state[f"confirm_del_doc_{d['id']}"] = True
-
-                    # 名前変更フォーム
-                    if st.session_state.get(f"editing_doc_{d['id']}"):
-                        with st.form(f"rename_form_{d['id']}"):
-                            new_name = st.text_input("新しい名前", value=d["name"])
-                            fc1, fc2 = st.columns(2)
-                            with fc1:
-                                if st.form_submit_button("保存"):
-                                    if new_name.strip() and new_name.strip() != d["name"]:
-                                        update_doctor(d['id'], name=new_name.strip())
-                                        st.success("名前を変更しました")
-                                    st.session_state.pop(f"editing_doc_{d['id']}", None)
-                                    st.rerun()
-                            with fc2:
-                                if st.form_submit_button("キャンセル"):
-                                    st.session_state.pop(f"editing_doc_{d['id']}", None)
-                                    st.rerun()
 
                     # パスワード設定フォーム
                     if st.session_state.get(f"setting_pw_{d['id']}"):
@@ -382,6 +380,7 @@ def render(target_month, year, month):
             # 指名医員
             pref_docs = selected_clinic.get("preferred_doctors", [])
             st.write("**指名医員（この外勤先が希望する医員）:**")
+            st.caption("ソフト制約: 指名医員が優先的に割り当てられます")
             new_pref = st.multiselect(
                 "指名医員",
                 [d["id"] for d in doctors],
@@ -392,6 +391,23 @@ def render(target_month, year, month):
             if st.button("指名を保存", type="primary", key="save_nomination"):
                 update_clinic(selected_clinic["id"], preferred_doctors=new_pref)
                 st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の指名医員を保存しました"
+                st.rerun()
+
+            # 固定メンバー
+            fixed_docs = selected_clinic.get("fixed_doctors", [])
+            st.write("**固定メンバー（必ず割り当てる医員）:**")
+            st.caption("ハード制約: 固定メンバーはNG日を除き必ずこの外勤先に割り当てられます")
+            new_fixed = st.multiselect(
+                "固定メンバー",
+                [d["id"] for d in doctors],
+                default=[did for did in fixed_docs if did in [d["id"] for d in doctors]],
+                format_func=lambda did: next((d["name"] for d in doctors if d["id"] == did), str(did)),
+                label_visibility="collapsed",
+                key="fixed_doctors_select",
+            )
+            if st.button("固定メンバーを保存", type="primary", key="save_fixed"):
+                update_clinic(selected_clinic["id"], fixed_doctors=new_fixed)
+                st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の固定メンバーを保存しました"
                 st.rerun()
 
             # 優先度（外勤先 → 各医員）

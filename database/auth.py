@@ -6,7 +6,7 @@ import streamlit as st
 from database.connection import (
     _get_sheet, _get_all_records, _clear_data_cache,
     _register_cached, _find_row_index, _hash_password,
-    SHEET_HEADERS,
+    _retry,
 )
 from database.master import get_doctors
 
@@ -75,8 +75,8 @@ def set_doctor_individual_password(doctor_id, password: str):
     row_idx = _find_row_index(ws, 1, doctor_id)
     if not row_idx:
         return
-    headers = SHEET_HEADERS["医員マスタ"]
-    col_idx = headers.index("password_hash") + 1
+    actual_headers = _retry(ws.row_values, 1)
+    col_idx = actual_headers.index("password_hash") + 1
     ws.update_cell(row_idx, col_idx, _hash_password(password))
     _clear_data_cache()
 
@@ -93,6 +93,46 @@ def verify_doctor_individual_password(doctor_id, password: str) -> bool:
     return False
 
 
+def get_doctor_by_account(account_name: str):
+    """アカウント名で医員を検索。有効な医員のみ。"""
+    doctors = get_doctors(active_only=True)
+    for d in doctors:
+        if d.get("account_name") == account_name:
+            return d
+    return None
+
+
+def verify_doctor_by_account(account_name: str, password: str):
+    """アカウント名とパスワードで認証。成功時は医員dictを返す。"""
+    doctor = get_doctor_by_account(account_name)
+    if not doctor:
+        return None
+    stored = doctor.get("password_hash", "")
+    if not stored:
+        return None
+    if stored == _hash_password(password):
+        return doctor
+    return None
+
+
+def update_doctor_account_name(doctor_id, account_name: str):
+    """医員のアカウント名を更新（ユーザー自身で変更可能）"""
+    # 重複チェック
+    doctors = get_doctors(active_only=False)
+    for d in doctors:
+        if d["id"] != doctor_id and d.get("account_name") == account_name:
+            return "duplicate"
+    ws = _get_sheet("医員マスタ")
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if not row_idx:
+        return
+    actual_headers = _retry(ws.row_values, 1)
+    col_idx = actual_headers.index("account_name") + 1
+    ws.update_cell(row_idx, col_idx, account_name)
+    _clear_data_cache()
+    return None
+
+
 # ---- Doctor Email ----
 
 def update_doctor_email(doctor_id, email: str):
@@ -101,8 +141,8 @@ def update_doctor_email(doctor_id, email: str):
     row_idx = _find_row_index(ws, 1, doctor_id)
     if not row_idx:
         return
-    headers = SHEET_HEADERS["医員マスタ"]
-    col_idx = headers.index("email") + 1
+    actual_headers = _retry(ws.row_values, 1)
+    col_idx = actual_headers.index("email") + 1
     ws.update_cell(row_idx, col_idx, email)
     _clear_data_cache()
 

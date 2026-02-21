@@ -111,6 +111,14 @@ def solve_schedule(
             pref = json.loads(pref)
         clinic_preferred[c["id"]] = set(pref)
 
+    # 外勤先の固定メンバーマップ
+    clinic_fixed = {}
+    for c in clinic_list:
+        fixed = c.get("fixed_doctors", [])
+        if isinstance(fixed, str):
+            fixed = json.loads(fixed)
+        clinic_fixed[c["id"]] = set(fixed)
+
     # 優先度マップ (weight: ◎=2.0, ○=1.0, ×=0.0)
     priority_map = {}
     for a in affinities:
@@ -184,7 +192,13 @@ def solve_schedule(
                     f"must_{doc_id}_{cid}"
                 )
 
-    # 6. 月回数上限（max_assignments > 0 の場合）
+    # 6. 固定メンバーは必ず割り当て（NG日を除く）
+    for (cid, ds) in slots:
+        for doc_id in clinic_fixed.get(cid, set()):
+            if doc_id in doc_ids and ds not in ng_map.get(doc_id, set()):
+                prob += x[(doc_id, cid, ds)] == 1, f"fixed_{doc_id}_{cid}_{ds}"
+
+    # 7. 月回数上限（max_assignments > 0 の場合）
     for doc in doctors:
         max_a = doc.get("max_assignments", 0)
         if max_a > 0:
