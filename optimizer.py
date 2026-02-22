@@ -2,6 +2,8 @@
 スケジューリング最適化モジュール
 PuLPを使用した制約付き最適化で外勤割り当てを生成
 """
+from __future__ import annotations
+
 import json
 from datetime import date, timedelta
 import jpholiday
