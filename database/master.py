@@ -30,6 +30,7 @@ def get_doctors(active_only=True):
         r["password_hash"] = str(r.get("password_hash", ""))
         r["is_active"] = int(r.get("is_active", 1))
         r["max_assignments"] = int(r.get("max_assignments", 0) or 0)
+        r["job_rank"] = int(r.get("job_rank", 0) or 0)
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -62,7 +63,7 @@ def add_doctor(name, account="", initial_password="1111"):
     return None
 
 
-def update_doctor(doc_id, is_active=None, max_assignments=None):
+def update_doctor(doc_id, is_active=None, max_assignments=None, job_rank=None):
     ws = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws, 1, doc_id)
     if not row_idx:
@@ -75,6 +76,9 @@ def update_doctor(doc_id, is_active=None, max_assignments=None):
     if max_assignments is not None:
         col = actual_headers.index("max_assignments") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(max_assignments)]]})
+    if job_rank is not None:
+        col = actual_headers.index("job_rank") + 1
+        updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(job_rank)]]})
     if updates:
         _retry(ws.batch_update, updates)
     _clear_data_cache()
@@ -120,6 +124,10 @@ def get_clinics(active_only=True):
         r["id"] = int(r["id"])
         r["fee"] = int(r.get("fee", 0))
         r["is_active"] = int(r.get("is_active", 1))
+        r["effort_cost"] = float(r.get("effort_cost", 0) or 0)
+        r["work_hours"] = float(r.get("work_hours", 0) or 0)
+        r["time_slot"] = str(r.get("time_slot", "") or "")
+        r["location"] = str(r.get("location", "") or "")
         r["preferred_doctors"] = _safe_json_loads(r.get("preferred_doctors", "[]"))
         r["fixed_doctors"] = _safe_json_loads(r.get("fixed_doctors", "[]"))
         if active_only and not r["is_active"]:
@@ -129,7 +137,8 @@ def get_clinics(active_only=True):
     return result
 
 
-def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_doctors=None):
+def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_doctors=None,
+               effort_cost=0, work_hours=0, time_slot="", location=""):
     ws = _get_sheet("外勤先マスタ")
     records = _get_all_records(ws)
     if any(r["name"] == name for r in records):
@@ -143,6 +152,8 @@ def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_do
         "id": new_id, "name": name, "fee": fee, "frequency": frequency,
         "preferred_doctors": pref, "fixed_doctors": fixed,
         "is_active": 1, "created_at": now,
+        "effort_cost": effort_cost, "work_hours": work_hours,
+        "time_slot": time_slot, "location": location,
     }
     row = [values.get(h, "") for h in actual_headers]
     ws.append_row(row)
@@ -154,13 +165,13 @@ def update_clinic(clinic_id, **kwargs):
     row_idx = _find_row_index(ws, 1, clinic_id)
     if not row_idx:
         return
-    headers = SHEET_HEADERS["外勤先マスタ"]
+    actual_headers = _retry(ws.row_values, 1)
     updates = []
     for key, val in kwargs.items():
         if key in ("preferred_doctors", "fixed_doctors"):
             val = json.dumps(val)
-        if key in headers:
-            col = headers.index(key) + 1
+        if key in actual_headers:
+            col = actual_headers.index(key) + 1
             updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[val]]})
     if updates:
         _retry(ws.batch_update, updates)

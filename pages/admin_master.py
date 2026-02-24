@@ -77,6 +77,22 @@ FREQ_OPTIONS = [
 ]
 FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 
+# 外勤先テンプレート（Excel③出張先マスタの定義値）
+CLINIC_TEMPLATES = {
+    "KamoH":    {"fee": 75000,  "effort_cost": 1,  "work_hours": 2.5, "time_slot": "AM",  "location": "鴨川市"},
+    "AsuCL":    {"fee": 60000,  "effort_cost": 2,  "work_hours": 3.0, "time_slot": "AM",  "location": "千葉市"},
+    "NaraH":    {"fee": 50000,  "effort_cost": 3,  "work_hours": 3.5, "time_slot": "AM",  "location": "習志野市"},
+    "AriCL":    {"fee": 60000,  "effort_cost": 4,  "work_hours": 3.0, "time_slot": "AM",  "location": "市川市"},
+    "DoCL":     {"fee": 70000,  "effort_cost": 5,  "work_hours": 3.5, "time_slot": "AM",  "location": "船橋市"},
+    "SyoCL":    {"fee": 100000, "effort_cost": 6,  "work_hours": 5.0, "time_slot": "ALL", "location": "柏市"},
+    "InaCL_PM": {"fee": 60002,  "effort_cost": 6,  "work_hours": 3.0, "time_slot": "PM",  "location": "千葉市"},
+    "WadCL":    {"fee": 80000,  "effort_cost": 7,  "work_hours": 5.0, "time_slot": "PM",  "location": "市原市"},
+    "FutaCL":   {"fee": 100000, "effort_cost": 8,  "work_hours": 5.0, "time_slot": "ALL", "location": "千葉市"},
+    "MihaCL":   {"fee": 100000, "effort_cost": 9,  "work_hours": 6.0, "time_slot": "ALL", "location": "千葉市"},
+    "InaCL":    {"fee": 120000, "effort_cost": 10, "work_hours": 7.0, "time_slot": "ALL", "location": "千葉市"},
+    "NaCL":     {"fee": 60001,  "effort_cost": 10, "work_hours": 6.0, "time_slot": "ALL", "location": "浦安市"},
+}
+
 
 def render(target_month, year, month):
     st.header("マスタ管理")
@@ -170,9 +186,11 @@ def render(target_month, year, month):
                     email_display = d.get("email", "") or "未設定"
                     max_a = d.get("max_assignments", 0)
                     limit_display = f"{max_a}回/月" if max_a > 0 else "制限なし"
+                    rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
+                    rank_display = rank_labels.get(d.get("job_rank", 0), "未設定")
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(f"**{d['name']}**　{status_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}")
+                        st.markdown(f"**{d['name']}**　{status_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}　役職: {rank_display}")
                         b1, b2, b3, b4, b5 = st.columns(5)
                         with b1:
                             if d['is_active']:
@@ -195,6 +213,10 @@ def render(target_month, year, month):
                             if st.button("回数上限", key=f"setlimit_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_limit_{d['id']}"] = True
                         with b5:
+                            if st.button("役職", key=f"setrank_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_rank_{d['id']}"] = True
+                        b6, _, _, _, _ = st.columns(5)
+                        with b6:
                             if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                                 st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
@@ -273,17 +295,67 @@ def render(target_month, year, month):
                                     st.session_state.pop(f"setting_limit_{d['id']}", None)
                                     st.rerun()
 
+                    # 役職ランク設定フォーム
+                    if st.session_state.get(f"setting_rank_{d['id']}"):
+                        with st.form(f"setrank_form_{d['id']}"):
+                            rank_options = [
+                                (0, "未設定"), (1, "レジデント"),
+                                (2, "大学院生"), (3, "フェロー"),
+                            ]
+                            current_rank = d.get("job_rank", 0)
+                            new_rank = st.selectbox(
+                                "役職ランク",
+                                rank_options,
+                                index=current_rank,
+                                format_func=lambda x: x[1],
+                                key=f"rank_val_{d['id']}",
+                            )
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_doctor(d['id'], job_rank=new_rank[0])
+                                    st.success(f"役職を{new_rank[1]}に設定しました")
+                                    st.session_state.pop(f"setting_rank_{d['id']}", None)
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"setting_rank_{d['id']}", None)
+                                    st.rerun()
+
     # ---- 外勤先管理 ----
     with col2:
         st.subheader("外勤先一覧")
         with st.expander("外勤先の追加・編集", expanded=False):
+            # テンプレート選択（フォーム外で選択→session_stateで値を渡す）
+            template_keys = ["（手動入力）"] + list(CLINIC_TEMPLATES.keys())
+            selected_tpl = st.selectbox(
+                "テンプレートから選択", template_keys,
+                key="clinic_template_select",
+                help="既知の外勤先を選ぶと日当・労力コスト等が自動入力されます",
+            )
+            tpl = CLINIC_TEMPLATES.get(selected_tpl, {})
+
             with st.form("add_clinic_form", clear_on_submit=True):
-                new_clinic = st.text_input("外勤先名")
-                new_fee = st.number_input("日当（円）", min_value=0, step=10000, value=50000)
+                new_clinic = st.text_input("外勤先名", value=selected_tpl if tpl else "")
+                new_fee = st.number_input("日当（円）", min_value=0, step=10000,
+                                          value=tpl.get("fee", 50000))
                 new_freq = st.selectbox("頻度", FREQ_OPTIONS, format_func=lambda x: x[1])
+                new_effort = st.number_input("労力コスト (1-10)", min_value=0, max_value=10,
+                                             step=1, value=tpl.get("effort_cost", 0))
+                new_hours = st.number_input("勤務時間 (h)", min_value=0.0, max_value=12.0,
+                                            step=0.5, value=float(tpl.get("work_hours", 0)))
+                tslot_options = ["", "AM", "PM", "ALL"]
+                tpl_tslot = tpl.get("time_slot", "")
+                new_tslot = st.selectbox("時間帯", tslot_options,
+                                         index=tslot_options.index(tpl_tslot) if tpl_tslot in tslot_options else 0)
+                new_loc = st.text_input("勤務地", value=tpl.get("location", ""))
                 if st.form_submit_button("追加", use_container_width=True):
                     if new_clinic.strip():
-                        add_clinic(new_clinic.strip(), new_fee, new_freq[0])
+                        add_clinic(
+                            new_clinic.strip(), new_fee, new_freq[0],
+                            effort_cost=new_effort, work_hours=new_hours,
+                            time_slot=new_tslot, location=new_loc,
+                        )
                         st.success(f"「{new_clinic}」を追加しました")
                         st.rerun()
 
@@ -302,12 +374,26 @@ def render(target_month, year, month):
                     c = selected_cli
                     marker = "row-active" if c['is_active'] else "row-inactive"
                     status_label = "有効" if c['is_active'] else "無効"
+                    effort = c.get("effort_cost", 0)
+                    hours = c.get("work_hours", 0)
+                    tslot = c.get("time_slot", "")
+                    loc = c.get("location", "")
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(
-                            f"**{c['name']}**　{status_label} | ¥{c['fee']:,} | "
-                            f"{FREQ_LABELS.get(c['frequency'], c['frequency'])}"
-                        )
+                        info_parts = [
+                            f"**{c['name']}**　{status_label}",
+                            f"¥{c['fee']:,}",
+                            FREQ_LABELS.get(c['frequency'], c['frequency']),
+                        ]
+                        if effort:
+                            info_parts.append(f"労力:{effort:.0f}")
+                        if hours:
+                            info_parts.append(f"{hours:.1f}h")
+                        if tslot:
+                            info_parts.append(tslot)
+                        if loc:
+                            info_parts.append(loc)
+                        st.markdown(" | ".join(info_parts))
                         bc1, bc2 = st.columns(2)
                         with bc1:
                             if c['is_active']:
@@ -339,10 +425,36 @@ def render(target_month, year, month):
                                 format_func=lambda x: x[1],
                                 key=f"freq_{c['id']}"
                             )
+                            edit_effort = st.number_input(
+                                "労力コスト (1-10)", min_value=0, max_value=10, step=1,
+                                value=int(c.get("effort_cost", 0)),
+                                key=f"effort_{c['id']}"
+                            )
+                            edit_hours = st.number_input(
+                                "勤務時間 (h)", min_value=0.0, max_value=12.0, step=0.5,
+                                value=float(c.get("work_hours", 0)),
+                                key=f"hours_{c['id']}"
+                            )
+                            time_slot_options = ["", "AM", "PM", "ALL"]
+                            current_tslot = c.get("time_slot", "")
+                            tslot_idx = time_slot_options.index(current_tslot) if current_tslot in time_slot_options else 0
+                            edit_tslot = st.selectbox(
+                                "時間帯", time_slot_options,
+                                index=tslot_idx,
+                                key=f"tslot_{c['id']}"
+                            )
+                            edit_loc = st.text_input(
+                                "勤務地", value=c.get("location", ""),
+                                key=f"loc_{c['id']}"
+                            )
                             fc1, fc2 = st.columns(2)
                             with fc1:
                                 if st.form_submit_button("保存"):
-                                    update_clinic(c['id'], fee=edit_fee, frequency=edit_freq[0])
+                                    update_clinic(
+                                        c['id'], fee=edit_fee, frequency=edit_freq[0],
+                                        effort_cost=edit_effort, work_hours=edit_hours,
+                                        time_slot=edit_tslot, location=edit_loc,
+                                    )
                                     st.session_state.pop(f"editing_cli_{c['id']}", None)
                                     st.success("保存しました")
                                     st.rerun()

@@ -1,15 +1,12 @@
-# Database
-gaikin.db
-gaikin.db-wal
-gaikin.db-shm
-
 # Credentials
 admin_password.txt
 *.json
 credentials/
 
-# Backup
-database_sqlite.py
+# ML model & reference data
+model.pkl
+model_integration_guide.md
+data_format_templates_modified.xlsx
 
 # Python
 __pycache__/
