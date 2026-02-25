@@ -198,10 +198,13 @@ def predict_effort_costs(doctors, clinics, confirmed_schedules, target_month):
 
 def _solve_single_date(saturday, available_doctors, active_clinics,
                        predictions, ng_map, never_pairs,
-                       pre_assigned, slot_required_map):
+                       pre_assigned, slot_required_map,
+                       fixed_members=None, excluded_members=None):
     """1日分の割当をlinear_sum_assignmentで最適化。"""
     date_str = saturday.isoformat()
     assignments = list(pre_assigned)
+    fixed_members = fixed_members or {}
+    excluded_members = excluded_members or {}
 
     used_doctors = {a["doctor_id"] for a in pre_assigned}
     clinic_remaining = {}
@@ -243,6 +246,13 @@ def _solve_single_date(saturday, available_doctors, active_clinics,
         doc_never = set(never_pairs.get(doc["id"], []))
         for j, cid in enumerate(clinic_slots):
             if cid in doc_never:
+                continue
+            # 固定メンバー制約: リスト外の医員は割り当て不可
+            fixed = fixed_members.get(cid, set())
+            if fixed and doc["id"] not in fixed:
+                continue
+            # 除外メンバー制約: 除外メンバーは割り当て不可
+            if doc["id"] in excluded_members.get(cid, set()):
                 continue
             cost_matrix[i][j] = abs(doc_pred - clinic_effort.get(cid, 5.0))
 
@@ -291,6 +301,14 @@ def ml_readjust(target_month, year, month, doctors, clinics,
         if fixed:
             fixed_members[c["id"]] = set(fixed)
 
+    excluded_members = {}
+    for c in clinics:
+        excluded = c.get("excluded_doctors", [])
+        if isinstance(excluded, str):
+            excluded = json.loads(excluded)
+        if excluded:
+            excluded_members[c["id"]] = set(excluded)
+
     # ML予測の実行
     predictions = predict_effort_costs(doctors, clinics, confirmed_schedules, target_month)
 
@@ -318,31 +336,10 @@ def ml_readjust(target_month, year, month, doctors, clinics,
             active_clinics.append(c)
             slot_req_map[c["id"]] = req
 
-        # 固定メンバーを事前割当
-        pre_assigned = []
-        for c in active_clinics:
-            for doc_id in fixed_members.get(c["id"], set()):
-                if doc_id not in [d["id"] for d in doctors]:
-                    continue
-                if date_str in ng_map.get(doc_id, set()):
-                    continue
-                if max_assign[doc_id] > 0 and doc_assign_count[doc_id] >= max_assign[doc_id]:
-                    continue
-                if any(a["doctor_id"] == doc_id for a in pre_assigned):
-                    continue
-                pre_assigned.append({
-                    "date": date_str,
-                    "clinic_id": c["id"],
-                    "doctor_id": doc_id,
-                })
-                doc_assign_count[doc_id] += 1
-
         # ML割当に利用可能な医員
-        assigned_today = {a["doctor_id"] for a in pre_assigned}
         available = [
             d for d in doctors
-            if d["id"] not in assigned_today
-            and date_str not in ng_map.get(d["id"], set())
+            if date_str not in ng_map.get(d["id"], set())
             and (max_assign[d["id"]] == 0 or doc_assign_count[d["id"]] < max_assign[d["id"]])
         ]
 
@@ -350,13 +347,13 @@ def ml_readjust(target_month, year, month, doctors, clinics,
         date_assignments = _solve_single_date(
             saturday, available, active_clinics,
             predictions, ng_map, never_pairs,
-            pre_assigned, slot_req_map,
+            [], slot_req_map,
+            fixed_members, excluded_members,
         )
 
-        # カウント更新（事前割当済みは除外）
+        # カウント更新
         for a in date_assignments:
-            if a not in pre_assigned:
-                doc_assign_count[a["doctor_id"]] += 1
+            doc_assign_count[a["doctor_id"]] += 1
 
         all_assignments.extend(date_assignments)
 

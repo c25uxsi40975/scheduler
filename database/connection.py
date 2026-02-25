@@ -159,7 +159,7 @@ def _hash_password(password: str) -> str:
 
 SHEET_HEADERS = {
     "医員マスタ": ["id", "name", "account", "account_name", "email", "password_hash", "is_active", "created_at", "max_assignments", "job_rank"],
-    "外勤先マスタ": ["id", "name", "fee", "frequency", "preferred_doctors", "fixed_doctors", "is_active", "created_at", "effort_cost", "work_hours", "time_slot", "location"],
+    "外勤先マスタ": ["id", "name", "fee", "frequency", "preferred_doctors", "fixed_doctors", "excluded_doctors", "is_active", "created_at", "effort_cost", "work_hours", "time_slot", "location"],
     "優先度マスタ": ["doctor_id", "clinic_id", "weight"],
     "日別設定": ["clinic_id", "date", "required_doctors"],
     "設定": ["key", "value"],

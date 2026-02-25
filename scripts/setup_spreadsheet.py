@@ -24,7 +24,7 @@ MASTER_SHEETS = {
     "外勤先マスタ": {
         "headers": [
             "id", "name", "fee", "frequency", "preferred_doctors",
-            "fixed_doctors", "is_active", "created_at",
+            "fixed_doctors", "excluded_doctors", "is_active", "created_at",
             "effort_cost", "work_hours", "time_slot", "location",
         ],
     },

@@ -131,6 +131,7 @@ def get_clinics(active_only=True):
         r["location"] = str(r.get("location", "") or "")
         r["preferred_doctors"] = _safe_json_loads(r.get("preferred_doctors", "[]"))
         r["fixed_doctors"] = _safe_json_loads(r.get("fixed_doctors", "[]"))
+        r["excluded_doctors"] = _safe_json_loads(r.get("excluded_doctors", "[]"))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -139,7 +140,7 @@ def get_clinics(active_only=True):
 
 
 def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_doctors=None,
-               effort_cost=0, work_hours=0, time_slot="", location=""):
+               excluded_doctors=None, effort_cost=0, work_hours=0, time_slot="", location=""):
     ws = _get_sheet("外勤先マスタ")
     records = _get_all_records(ws)
     if any(r["name"] == name for r in records):
@@ -147,11 +148,13 @@ def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_do
     new_id = _next_id(ws)
     pref = json.dumps(preferred_doctors or [])
     fixed = json.dumps(fixed_doctors or [])
+    excluded = json.dumps(excluded_doctors or [])
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     actual_headers = _retry(ws.row_values, 1)
     values = {
         "id": new_id, "name": name, "fee": fee, "frequency": frequency,
         "preferred_doctors": pref, "fixed_doctors": fixed,
+        "excluded_doctors": excluded,
         "is_active": 1, "created_at": now,
         "effort_cost": effort_cost, "work_hours": work_hours,
         "time_slot": time_slot, "location": location,
@@ -169,7 +172,7 @@ def update_clinic(clinic_id, **kwargs):
     actual_headers = _retry(ws.row_values, 1)
     updates = []
     for key, val in kwargs.items():
-        if key in ("preferred_doctors", "fixed_doctors"):
+        if key in ("preferred_doctors", "fixed_doctors", "excluded_doctors"):
             val = json.dumps(val)
         if key in actual_headers:
             col = actual_headers.index(key) + 1

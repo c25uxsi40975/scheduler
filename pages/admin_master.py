@@ -507,8 +507,8 @@ def render(target_month, year, month):
 
             # 固定メンバー
             fixed_docs = selected_clinic.get("fixed_doctors", [])
-            st.write("**固定メンバー（必ず割り当てる医員）:**")
-            st.caption("ハード制約: 固定メンバーはNG日を除き必ずこの外勤先に割り当てられます")
+            st.write("**固定メンバー（この外勤先を担当する医員）:**")
+            st.caption("ハード制約: この外勤先にはこのメンバーのみ割り当てられます（未設定の場合は制限なし）")
             new_fixed = st.multiselect(
                 "固定メンバー",
                 [d["id"] for d in doctors],
@@ -520,6 +520,23 @@ def render(target_month, year, month):
             if st.button("固定メンバーを保存", type="primary", key="save_fixed"):
                 update_clinic(selected_clinic["id"], fixed_doctors=new_fixed)
                 st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の固定メンバーを保存しました"
+                st.rerun()
+
+            # 除外メンバー
+            excluded_docs = selected_clinic.get("excluded_doctors", [])
+            st.write("**除外メンバー（この外勤先に割り当てない医員）:**")
+            st.caption("ハード制約: この外勤先には除外メンバーは割り当てられません")
+            new_excluded = st.multiselect(
+                "除外メンバー",
+                [d["id"] for d in doctors],
+                default=[did for did in excluded_docs if did in [d["id"] for d in doctors]],
+                format_func=lambda did: next((d["name"] for d in doctors if d["id"] == did), str(did)),
+                label_visibility="collapsed",
+                key="excluded_doctors_select",
+            )
+            if st.button("除外メンバーを保存", type="primary", key="save_excluded"):
+                update_clinic(selected_clinic["id"], excluded_doctors=new_excluded)
+                st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の除外メンバーを保存しました"
                 st.rerun()
 
             # 優先度（外勤先 → 各医員）
