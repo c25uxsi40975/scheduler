@@ -1,6 +1,7 @@
 """管理者: スケジュール生成タブ"""
 import streamlit as st
 import pandas as pd
+import numpy as np
 import requests
 from datetime import date
 from database import (
@@ -8,10 +9,119 @@ from database import (
     get_affinities, get_schedules, save_schedule, confirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_clinic_date_overrides, get_all_confirmed_schedules,
-    delete_old_schedules,
+    delete_old_schedules, append_training_data,
+    append_suitability_training_data,
 )
-from optimizer import get_target_saturdays, generate_multiple_plans
+from ml_adjuster import (
+    compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
+    _compute_doctor_history, compute_pair_features,
+)
+from optimizer import get_target_saturdays, get_clinic_dates
+from pipeline import run_integrated_pipeline
 from components.schedule_table import render_schedule_table
+
+
+def _append_training_rows(target_month, sched, doctors, clinics, confirmed_schedules):
+    """確定スケジュールから学習データを計算してGoogle Sheetsに追記"""
+    effort_map = {c["id"]: c.get("effort_cost", 0) for c in clinics}
+
+    doc_assignments = {}
+    for a in sched["assignments"]:
+        doc_assignments.setdefault(a["doctor_id"], []).append(
+            (a["date"], a["clinic_id"])
+        )
+
+    rows = []
+    for doc in doctors:
+        if doc["id"] not in doc_assignments:
+            continue
+        features = compute_doctor_features(
+            doc, clinics, confirmed_schedules, target_month
+        )
+        for a_date, clinic_id in doc_assignments[doc["id"]]:
+            row = [
+                str(doc["id"]),
+                target_month,
+                a_date,
+            ]
+            for col in FEATURE_COLUMNS:
+                val = features.get(col, "")
+                row.append("" if (isinstance(val, float) and np.isnan(val)) else val)
+            row.append(effort_map.get(clinic_id, 0))
+            rows.append(row)
+
+    if rows:
+        append_training_data(rows)
+
+
+def _append_suitability_training_rows(target_month, sched, doctors, clinics,
+                                       confirmed_schedules, affinities, saturdays):
+    """確定スケジュールからペア適合性学習データを計算してGoogle Sheetsに追記。
+
+    ポジティブサンプル: 割り当てられた (doctor, clinic, date) ペア → 割当結果=1
+    ネガティブサンプル: 利用可能だが割り当てられなかった ペア → 割当結果=0
+    """
+    # 優先度マスタを辞書化
+    affinities_by_doctor = {}
+    for a in affinities:
+        affinities_by_doctor.setdefault(a["doctor_id"], {})[a["clinic_id"]] = a["weight"]
+
+    # NG日マップ（希望データから取得）
+    prefs = get_all_preferences(target_month)
+    ng_map = {}
+    for p in prefs:
+        ng_map[p["doctor_id"]] = set(p.get("ng_dates", []))
+
+    # 医員の履歴を事前計算
+    doctor_histories = {}
+    for doc in doctors:
+        doctor_histories[doc["id"]] = _compute_doctor_history(
+            doc, clinics, confirmed_schedules, target_month
+        )
+
+    # 割当済みペアを (doctor_id, clinic_id, date_str) のセットに
+    positive_set = set()
+    for a in sched["assignments"]:
+        positive_set.add((a["doctor_id"], a["clinic_id"], a["date"]))
+
+    # 日付ごとにアクティブな外勤先を特定
+    active_clinics_by_date = {}
+    for a in sched["assignments"]:
+        active_clinics_by_date.setdefault(a["date"], set()).add(a["clinic_id"])
+
+    rows = []
+    for date_str in sorted(active_clinics_by_date.keys()):
+        active_cids = active_clinics_by_date[date_str]
+
+        for doc in doctors:
+            # NG日の医員はスキップ（利用不可なのでサンプルに含めない）
+            if date_str in ng_map.get(doc["id"], set()):
+                continue
+
+            dh = doctor_histories[doc["id"]]
+            aff_map = affinities_by_doctor.get(doc["id"], {})
+
+            for clinic in clinics:
+                if clinic["id"] not in active_cids:
+                    continue
+
+                features = compute_pair_features(dh, clinic, aff_map)
+                assigned = 1 if (doc["id"], clinic["id"], date_str) in positive_set else 0
+
+                row = [
+                    str(doc["id"]),
+                    str(clinic["id"]),
+                    target_month,
+                    date_str,
+                ]
+                for col in PAIR_FEATURE_COLUMNS:
+                    val = features.get(col, "")
+                    row.append("" if (isinstance(val, float) and np.isnan(val)) else val)
+                row.append(assigned)
+                rows.append(row)
+
+    if rows:
+        append_suitability_training_data(rows)
 
 
 def _send_confirmation_notification(target_month, sched):
@@ -73,13 +183,15 @@ def render(target_month, year, month):
             st.info(f"過去の確定スケジュール({len(months_used)}ヶ月分: {', '.join(months_used)})の累計報酬を考慮します")
 
         if st.button("スケジュール案を生成", type="primary", use_container_width=True):
-            with st.spinner("最適化計算中..."):
+            with st.spinner("ML適合性スコア計算 + 最適化中..."):
                 overrides = get_clinic_date_overrides(target_month)
-                plans = generate_multiple_plans(
-                    doctors, clinics, saturdays, prefs, affinities,
-                    previous_earnings=previous_earnings,
-                    date_overrides=overrides,
+                confirmed = get_all_confirmed_schedules()
+                result = run_integrated_pipeline(
+                    target_month, year, month,
+                    doctors, clinics, confirmed, prefs, affinities,
+                    overrides, previous_earnings=previous_earnings,
                 )
+                plans = result["plans"]
 
             if not plans:
                 st.error("制約を満たすスケジュールが見つかりません。制約条件を見直してください。")
@@ -111,12 +223,15 @@ def render(target_month, year, month):
 
         for sched in schedules:
             confirmed = "[確定]" if sched["is_confirmed"] else ""
+            relaxed = " [緩和あり]" if sched.get("relaxations") else ""
             with st.expander(
-                f"{sched['plan_name']} {confirmed} "
+                f"{sched['plan_name']} {confirmed}{relaxed} "
                 f"(分散: {sched['total_variance']:.0f}, "
                 f"満足度: {sched['satisfaction_score']:.1f})",
                 expanded=sched["is_confirmed"]
             ):
+                if sched.get("relaxations"):
+                    st.caption(f"制約緩和: {', '.join(sched['relaxations'])}")
                 # 手動調整モード
                 editing_key = f"editing_sched_{sched['id']}"
                 is_editing = st.session_state.get(editing_key, False)
@@ -156,6 +271,16 @@ def render(target_month, year, month):
                                          type="primary"):
                                 confirm_schedule(sched["id"])
                                 delete_old_schedules(months_to_keep=4)
+                                all_confirmed = get_all_confirmed_schedules()
+                                _append_training_rows(
+                                    target_month, sched, _doctors, _clinics,
+                                    all_confirmed,
+                                )
+                                _append_suitability_training_rows(
+                                    target_month, sched, _doctors, _clinics,
+                                    all_confirmed, get_affinities(),
+                                    get_target_saturdays(year, month),
+                                )
                                 _send_confirmation_notification(target_month, sched)
                                 st.success("確定しました！")
                                 st.rerun()

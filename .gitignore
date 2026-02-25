@@ -5,8 +5,15 @@ credentials/
 
 # ML model & reference data
 model.pkl
+suitability_model.pkl
 model_integration_guide.md
 data_format_templates_modified.xlsx
+training_table.csv
+suitability_table.csv
+docs/ml_implementation.md
+
+# Test scripts
+scripts/tests/
 
 # Python
 __pycache__/

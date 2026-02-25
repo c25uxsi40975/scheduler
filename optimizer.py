@@ -52,6 +52,8 @@ def solve_schedule(
     mode: str = "balanced",
     previous_earnings: dict = None,
     date_overrides: dict = None,
+    suitability_scores: dict = None,
+    relax_must: bool = False,
 ) -> dict | None:
     """
     最適化ソルバー
@@ -60,6 +62,10 @@ def solve_schedule(
       - "balanced": 給与ばらつき最小化を重視
       - "preference": 希望重視
       - "affinity": 優先度重視
+      - "ml_integrated": ML適合性スコア重視
+
+    suitability_scores: {(doctor_id, clinic_id): float} ML適合性スコア行列
+    relax_must: Trueの場合、◎制約をハード制約からソフト制約（ペナルティ）に緩和
     """
     doc_ids = [d["id"] for d in doctors]
     clinic_list = clinics
@@ -183,14 +189,24 @@ def solve_schedule(
                     prob += x[(doc_id, cid, ds)] == 0, f"never_{doc_id}_{cid}_{ds}"
 
     # 5. ◎外勤先（must）は月1回以上割り当て
+    must_slack_vars = {}
     for doc_id in doc_ids:
         for cid in must_pairs.get(doc_id, []):
             clinic_slots = [(c, d) for (c, d) in slots if c == cid]
             if clinic_slots:
-                prob += (
-                    pulp.lpSum(x[(doc_id, c, d)] for (c, d) in clinic_slots) >= 1,
-                    f"must_{doc_id}_{cid}"
-                )
+                if relax_must:
+                    # ソフト制約化: スラック変数で未充足を許容しペナルティを課す
+                    slack = pulp.LpVariable(f"must_slack_{doc_id}_{cid}", lowBound=0)
+                    must_slack_vars[(doc_id, cid)] = slack
+                    prob += (
+                        pulp.lpSum(x[(doc_id, c, d)] for (c, d) in clinic_slots) + slack >= 1,
+                        f"must_{doc_id}_{cid}"
+                    )
+                else:
+                    prob += (
+                        pulp.lpSum(x[(doc_id, c, d)] for (c, d) in clinic_slots) >= 1,
+                        f"must_{doc_id}_{cid}"
+                    )
 
     # 6. 固定メンバーは必ず割り当て（NG日を除く）
     for (cid, ds) in slots:
@@ -291,6 +307,21 @@ def solve_schedule(
         if date_clinic_req_map.get(doc_id, {}).get(ds) == cid
     )
 
+    # 適合性スコア項（MLモデルによるペアスコア）
+    if suitability_scores:
+        suitability_term = pulp.lpSum(
+            x[(doc_id, cid, ds)] * suitability_scores.get((doc_id, cid), 0.5)
+            for doc_id in doc_ids
+            for (cid, ds) in slots
+        )
+    else:
+        suitability_term = 0
+
+    # ◎制約緩和ペナルティ（relax_must=True時のみ有効）
+    must_penalty = pulp.lpSum(
+        100.0 * slack for slack in must_slack_vars.values()
+    ) if must_slack_vars else 0
+
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
@@ -299,14 +330,30 @@ def solve_schedule(
     #   w_avoid: △日ペナルティ
     #   w_cnt:  回数均等
     #   w_dcr:  日別外勤先希望
+    #   w_suit: ML適合性スコア
     if mode == "balanced":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 10.0, -1.0, -2.0, -1.0, 3.0, 5.0, -3.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -2.0, -1.0, 3.0, 5.0, -3.0, -3.0
     elif mode == "preference":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 2.0, -5.0, -3.0, -2.0, 3.0, 3.0, -5.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -5.0, -3.0, -2.0, 3.0, 3.0, -5.0, -2.0
     elif mode == "affinity":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 2.0, -2.0, -2.0, -5.0, 3.0, 3.0, -3.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -2.0, -2.0, -5.0, 3.0, 3.0, -3.0, -2.0
+    elif mode == "ml_integrated":
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -2.0, -1.0, 3.0, 3.0, -3.0, -5.0
+    elif mode == "ml_salary":
+        # ML適合性 + 給与均等重視
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -1.0, -1.0, 3.0, 3.0, -2.0, -5.0
+    elif mode == "ml_preference":
+        # ML適合性 + 希望重視
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -5.0, -3.0, -2.0, 3.0, 2.0, -5.0, -5.0
+    elif mode == "ml_count":
+        # ML適合性 + 回数均等重視
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -1.0, -1.0, -1.0, 3.0, 10.0, -2.0, -5.0
     else:
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr = 5.0, -2.0, -2.0, -2.0, 3.0, 5.0, -3.0
+        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -2.0, -2.0, 3.0, 5.0, -3.0, -3.0
+
+    # suitability_scores が未提供の場合、適合性項の重みをゼロにする
+    if not suitability_scores:
+        w_suit = 0
 
     # 報酬が0の場合は回数均等をメインにする
     if all(fee_map.get(cid, 0) == 0 for cid in fee_map):
@@ -320,6 +367,8 @@ def solve_schedule(
         + w_avoid * avoid_penalty
         + w_cnt * count_variance
         + w_dcr * date_clinic_bonus
+        + w_suit * suitability_term
+        + must_penalty
     )
 
     # ---- 求解 ----
@@ -370,22 +419,114 @@ def solve_schedule(
     }
 
 
+def solve_with_relaxation(
+    doctors, clinics, saturdays, preferences, affinities,
+    mode="balanced", previous_earnings=None, date_overrides=None,
+    suitability_scores=None,
+) -> dict | None:
+    """段階的制約緩和付きの最適化。Infeasible時に制約を段階的に緩和して再試行。
+
+    Returns:
+        dict: solve_schedule の結果に "relaxations" キーを追加
+    """
+    relaxations = []
+
+    # Step 0: 全制約で試行
+    result = solve_schedule(
+        doctors, clinics, saturdays, preferences, affinities,
+        mode=mode, previous_earnings=previous_earnings,
+        date_overrides=date_overrides,
+        suitability_scores=suitability_scores,
+    )
+    if result:
+        result["relaxations"] = []
+        return result
+
+    # Step 1: ◎制約をソフト制約に緩和
+    relaxations.append("◎制約をソフト制約に変更")
+    result = solve_schedule(
+        doctors, clinics, saturdays, preferences, affinities,
+        mode=mode, previous_earnings=previous_earnings,
+        date_overrides=date_overrides,
+        suitability_scores=suitability_scores,
+        relax_must=True,
+    )
+    if result:
+        result["relaxations"] = list(relaxations)
+        return result
+
+    # Step 2: max_assignments を +1 に緩和
+    relaxations.append("月回数上限を +1 に緩和")
+    relaxed_doctors = []
+    for d in doctors:
+        rd = dict(d)
+        ma = rd.get("max_assignments", 0)
+        if ma > 0:
+            rd["max_assignments"] = ma + 1
+        relaxed_doctors.append(rd)
+    result = solve_schedule(
+        relaxed_doctors, clinics, saturdays, preferences, affinities,
+        mode=mode, previous_earnings=previous_earnings,
+        date_overrides=date_overrides,
+        suitability_scores=suitability_scores,
+        relax_must=True,
+    )
+    if result:
+        result["relaxations"] = list(relaxations)
+        return result
+
+    # Step 3: △日を許容（避けたい日の回避を完全に無視）
+    relaxations.append("△日制約を無視")
+    cleared_prefs = []
+    for p in preferences:
+        cp = dict(p)
+        cp["avoid_dates"] = []
+        cleared_prefs.append(cp)
+    result = solve_schedule(
+        relaxed_doctors, clinics, saturdays, cleared_prefs, affinities,
+        mode=mode, previous_earnings=previous_earnings,
+        date_overrides=date_overrides,
+        suitability_scores=suitability_scores,
+        relax_must=True,
+    )
+    if result:
+        result["relaxations"] = list(relaxations)
+        return result
+
+    return None  # すべての緩和を試しても解なし
+
+
 def generate_multiple_plans(
     doctors, clinics, saturdays, preferences, affinities,
     previous_earnings=None, date_overrides=None,
+    suitability_scores=None,
 ) -> list[dict]:
-    """複数のプラン（案）を生成"""
+    """複数のプラン（案）を生成
+
+    suitability_scores が提供された場合:
+      ML適合性スコアベースの3案を生成（重みバランスを変えて多様性を確保）
+    suitability_scores が未提供の場合:
+      従来の3案（給与均等, 希望重視, 優先度重視）を生成
+    """
     plans = []
-    modes = [
-        ("balanced", "案A: 給与均等重視"),
-        ("preference", "案B: 希望重視"),
-        ("affinity", "案C: 優先度重視"),
-    ]
+    if suitability_scores:
+        modes = [
+            ("ml_salary", "案A: ML + 給与均等重視"),
+            ("ml_preference", "案B: ML + 希望重視"),
+            ("ml_count", "案C: ML + 回数均等重視"),
+        ]
+    else:
+        modes = [
+            ("balanced", "案A: 給与均等重視"),
+            ("preference", "案B: 希望重視"),
+            ("affinity", "案C: 優先度重視"),
+        ]
     for mode, label in modes:
-        result = solve_schedule(
+        result = solve_with_relaxation(
             doctors, clinics, saturdays, preferences, affinities,
             mode=mode, previous_earnings=previous_earnings,
             date_overrides=date_overrides,
+            suitability_scores=suitability_scores,
         )
         if result:
             result["plan_name"] = label

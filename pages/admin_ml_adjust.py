@@ -8,7 +8,7 @@ from database import (
     get_affinities, get_schedules, save_schedule,
     get_clinic_date_overrides, get_all_confirmed_schedules,
 )
-from ml_adjuster import ml_readjust
+from ml_adjuster import ml_readjust, get_model_metrics, _clear_model
 from components.schedule_table import render_schedule_table
 
 
@@ -40,6 +40,19 @@ def render(target_month, year, month):
         st.caption(f"過去の確定データ: {len(past_months)}ヶ月分 ({', '.join(past_months)})")
     else:
         st.caption("過去の確定データ: なし（全特徴量がNaN→モデルが中央値で補完）")
+
+    # ---- 学習データ状況 ----
+    metrics = get_model_metrics()
+    st.caption(
+        f"学習データ: {metrics['training_rows']}行"
+        f"{'（ローカルmodel.pkl使用）' if metrics['using_local_model'] else ''}"
+    )
+
+    if metrics["training_rows"] >= metrics["min_required"]:
+        if st.button("モデルを再学習", help="最新の学習データでモデルを再構築します"):
+            _clear_model()
+            st.success("モデルキャッシュをクリアしました。次回実行時に最新データで再学習されます。")
+            st.rerun()
 
     # ---- 実行ブロック ----
     if missing_effort:

@@ -17,7 +17,7 @@ from database import (
 from optimizer import get_target_saturdays
 from pages import (
     admin_master, admin_preferences, admin_generate,
-    admin_schedule, admin_ml_adjust, doctor_input, doctor_schedule,
+    admin_schedule, doctor_input, doctor_schedule,
 )
 
 # ---- 初期設定 ----
@@ -229,9 +229,9 @@ elif st.session_state.role == "admin":
     else:
         target_month, year, month = _show_admin_header()
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4 = st.tabs([
             "マスタ管理", "希望状況一覧",
-            "スケジュール生成", "スケジュール確認", "ML再調整",
+            "スケジュール生成", "スケジュール確認",
         ])
 
         with tab1:
@@ -242,8 +242,6 @@ elif st.session_state.role == "admin":
             admin_generate.render(target_month, year, month)
         with tab4:
             admin_schedule.render(target_month)
-        with tab5:
-            admin_ml_adjust.render(target_month, year, month)
 
 elif st.session_state.role == "doctor":
     if not st.session_state.doctor_authenticated:

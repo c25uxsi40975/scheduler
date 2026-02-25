@@ -10,6 +10,8 @@ from database.master import (
     get_affinities, set_affinity,
     get_clinic_date_overrides, set_clinic_date_override,
     set_clinic_date_overrides_batch,
+    get_training_data, append_training_data,
+    get_suitability_training_data, append_suitability_training_data,
 )
 from database.operational import (
     get_preference, get_all_preferences, upsert_preference,

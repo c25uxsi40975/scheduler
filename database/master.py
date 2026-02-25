@@ -4,6 +4,7 @@
 """
 import json
 from datetime import datetime
+import pandas as pd
 import streamlit as st
 
 from database.connection import (
@@ -321,4 +322,56 @@ def set_clinic_date_overrides_batch(changes: dict):
     if appends:
         _retry(ws.append_rows, appends)
 
+    _clear_data_cache()
+
+
+# ---- Training Data ----
+
+@_register_cached
+@st.cache_data(ttl=300)
+def get_training_data():
+    """学習テーブルの全データをDataFrameで返す"""
+    ws = _get_sheet("学習テーブル")
+    records = _get_all_records(ws)
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    numeric_cols = [c for c in df.columns if c not in ("社員ID", "年月", "週日付")]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def append_training_data(rows: list):
+    """学習テーブルに行を一括追記。rows: [[社員ID, 年月, ...], ...]"""
+    if not rows:
+        return
+    ws = _get_sheet("学習テーブル")
+    _retry(ws.append_rows, rows)
+    _clear_data_cache()
+
+
+# ---- Suitability Training Data ----
+
+@_register_cached
+@st.cache_data(ttl=300)
+def get_suitability_training_data():
+    """適合学習テーブルの全データをDataFrameで返す"""
+    ws = _get_sheet("適合学習テーブル")
+    records = _get_all_records(ws)
+    if not records:
+        return pd.DataFrame()
+    df = pd.DataFrame(records)
+    numeric_cols = [c for c in df.columns if c not in ("社員ID", "外勤先ID", "年月", "週日付")]
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    return df
+
+
+def append_suitability_training_data(rows: list):
+    """適合学習テーブルに行を一括追記。rows: [[社員ID, 外勤先ID, 年月, ...], ...]"""
+    if not rows:
+        return
+    ws = _get_sheet("適合学習テーブル")
+    _retry(ws.append_rows, rows)
     _clear_data_cache()
