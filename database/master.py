@@ -243,6 +243,74 @@ def set_affinity(doctor_id, clinic_id, weight):
     _clear_data_cache()
 
 
+def batch_set_affinities(updates: list[dict]):
+    """優先度を一括保存（マトリクス保存用）
+
+    updates: [{"doctor_id": ..., "clinic_id": ..., "weight": ...}, ...]
+    API呼び出し: max 4回 (_get_sheet + _get_all_records + batch_update + append_rows)
+    """
+    if not updates:
+        return
+
+    ws = _get_sheet("優先度マスタ")
+    records = _get_all_records(ws)
+
+    # 既存レコードの (doctor_id, clinic_id) → row_index マップ
+    existing = {}
+    for i, r in enumerate(records):
+        key = (str(r.get("doctor_id", "")), str(r.get("clinic_id", "")))
+        existing[key] = i
+
+    batch_updates = []
+    appends = []
+
+    for u in updates:
+        did, cid, w = str(u["doctor_id"]), str(u["clinic_id"]), u["weight"]
+        key = (did, cid)
+        if key in existing:
+            row_num = existing[key] + 2
+            batch_updates.append(
+                {"range": f"A{row_num}", "values": [[did, cid, w]]}
+            )
+        else:
+            appends.append([did, cid, w])
+
+    if batch_updates:
+        _retry(ws.batch_update, batch_updates)
+    if appends:
+        _retry(ws.append_rows, appends)
+
+    _clear_data_cache()
+
+
+def batch_update_max_assignments(updates: dict):
+    """月回数上限を一括保存
+
+    updates: {doctor_id: max_assignments, ...}
+    API呼び出し: max 4回 (_get_sheet + row_values + get_all_values + batch_update)
+    """
+    if not updates:
+        return
+
+    ws = _get_sheet("医員マスタ")
+    actual_headers = _retry(ws.row_values, 1)
+    col = actual_headers.index("max_assignments") + 1
+    id_col = actual_headers.index("id")
+    all_rows = _retry(ws.get_all_values)
+
+    batch = []
+    for i, row in enumerate(all_rows[1:], start=2):
+        doc_id = int(row[id_col]) if row[id_col] else 0
+        if doc_id in updates:
+            batch.append(
+                {"range": f"{_col_letter(col)}{i}", "values": [[int(updates[doc_id])]]}
+            )
+
+    if batch:
+        _retry(ws.batch_update, batch)
+    _clear_data_cache()
+
+
 # ---- Clinic Date Overrides ----
 
 @_register_cached

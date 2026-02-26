@@ -7,7 +7,8 @@ from database.connection import init_db, SHEET_HEADERS
 from database.master import (
     get_doctors, add_doctor, update_doctor, delete_doctor,
     get_clinics, add_clinic, update_clinic, delete_clinic,
-    get_affinities, set_affinity,
+    get_affinities, set_affinity, batch_set_affinities,
+    batch_update_max_assignments,
     get_clinic_date_overrides, set_clinic_date_override,
     set_clinic_date_overrides_batch,
     get_training_data, append_training_data,

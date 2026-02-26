@@ -287,27 +287,15 @@ def ml_readjust(target_month, year, month, doctors, clinics,
 
     never_pairs = {}
     must_pairs = {}
+    fixed_members = {}
+    excluded_members = {}
     for a in affinities:
         if a["weight"] == 0.0:
             never_pairs.setdefault(a["doctor_id"], []).append(a["clinic_id"])
-        elif a["weight"] == 2.0:
+            excluded_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
+        elif a["weight"] == 3.0:
             must_pairs.setdefault(a["doctor_id"], []).append(a["clinic_id"])
-
-    fixed_members = {}
-    for c in clinics:
-        fixed = c.get("fixed_doctors", [])
-        if isinstance(fixed, str):
-            fixed = json.loads(fixed)
-        if fixed:
-            fixed_members[c["id"]] = set(fixed)
-
-    excluded_members = {}
-    for c in clinics:
-        excluded = c.get("excluded_doctors", [])
-        if isinstance(excluded, str):
-            excluded = json.loads(excluded)
-        if excluded:
-            excluded_members[c["id"]] = set(excluded)
+            fixed_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
 
     # ML予測の実行
     predictions = predict_effort_costs(doctors, clinics, confirmed_schedules, target_month)
@@ -368,7 +356,7 @@ def ml_readjust(target_month, year, month, doctors, clinics,
             if cid not in doc_clinic_assigned.get(doc_id, set()):
                 doc_name = next((d["name"] for d in doctors if d["id"] == doc_id), str(doc_id))
                 cli_name = next((c["name"] for c in clinics if c["id"] == cid), str(cid))
-                warnings.append(f"◎制約未充足: {doc_name} → {cli_name}")
+                warnings.append(f"固定メンバー制約未充足: {doc_name} → {cli_name}")
 
     # 統計計算
     doc_earnings = {d["id"]: 0 for d in doctors}
@@ -650,8 +638,8 @@ def compute_suitability_matrix(doctors, clinics, confirmed_schedules,
             aff_map = affinities_by_doctor.get(doc["id"], {})
             for clinic in clinics:
                 base_score = _fallback_suitability_score(dh, clinic)
-                # 優先度重みで調整 (×=0.0, ○=1.0, ◎=2.0)
+                # 優先度重みで調整 (除外=0.0, 任意=1.0, 指名=2.0, 固定=3.0)
                 weight = aff_map.get(clinic["id"], 1.0)
-                adjusted = base_score * (weight / 2.0) if weight > 0 else 0.0
+                adjusted = base_score * (weight / 3.0) if weight > 0 else 0.0
                 result[(doc["id"], clinic["id"])] = min(1.0, adjusted)
         return result

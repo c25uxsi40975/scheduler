@@ -9,10 +9,11 @@ import pulp
 import numpy as np
 
 
-# 優先度の weight 値定義
-PRIORITY_MUST = 2.0      # ◎ 月1回以上必ず行く
-PRIORITY_POSSIBLE = 1.0  # ○ 行くときもある
-PRIORITY_NEVER = 0.0     # × まったく行かない
+# 優先度の weight 値定義（4ラベル）
+PRIORITY_FIXED = 3.0      # 固定: 固定メンバー（WL + 月1回以上）
+PRIORITY_NOMINATED = 2.0  # 指名: できれば来てほしい
+PRIORITY_ANY = 1.0        # 任意: デフォルト
+PRIORITY_EXCLUDED = 0.0   # 除外: 割当不可
 
 
 def get_target_saturdays(year: int, month: int) -> list[date]:
@@ -65,7 +66,7 @@ def solve_schedule(
       - "ml_integrated": ML適合性スコア重視
 
     suitability_scores: {(doctor_id, clinic_id): float} ML適合性スコア行列
-    relax_must: Trueの場合、◎制約をハード制約からソフト制約（ペナルティ）に緩和
+    relax_must: Trueの場合、固定メンバーの月1回以上制約をソフト制約（ペナルティ）に緩和
     """
     doc_ids = [d["id"] for d in doctors]
     clinic_list = clinics
@@ -109,42 +110,25 @@ def solve_schedule(
                 ds: int(cid) for ds, cid in dcr.items()
             }
 
-    # 外勤先の希望医員マップ
-    clinic_preferred = {}
-    for c in clinic_list:
-        pref = c.get("preferred_doctors", "[]")
-        if isinstance(pref, str):
-            pref = json.loads(pref)
-        clinic_preferred[c["id"]] = set(pref)
-
-    # 外勤先の固定メンバーマップ（ホワイトリスト）
-    clinic_fixed = {}
-    for c in clinic_list:
-        fixed = c.get("fixed_doctors", [])
-        if isinstance(fixed, str):
-            fixed = json.loads(fixed)
-        clinic_fixed[c["id"]] = set(fixed)
-
-    # 外勤先の除外メンバーマップ（ブラックリスト）
-    clinic_excluded = {}
-    for c in clinic_list:
-        excluded = c.get("excluded_doctors", [])
-        if isinstance(excluded, str):
-            excluded = json.loads(excluded)
-        clinic_excluded[c["id"]] = set(excluded)
-
-    # 優先度マップ (weight: ◎=2.0, ○=1.0, ×=0.0)
+    # 優先度マップ (weight: 固定=3.0, 指名=2.0, 任意=1.0, 除外=0.0)
+    # 全制約を優先度マスタから導出（外勤先マスタの fixed/excluded/preferred は参照しない）
     priority_map = {}
     for a in affinities:
         priority_map[(a["doctor_id"], a["clinic_id"])] = a["weight"]
 
-    # ◎(must)リスト: 医員→外勤先ID のリスト
-    must_pairs = {}
-    never_pairs = {}
+    clinic_fixed = {}      # {clinic_id: set(doctor_ids)} 固定メンバー(WL)
+    clinic_nominated = {}  # {clinic_id: set(doctor_ids)} 指名医員
+    clinic_excluded = {}   # {clinic_id: set(doctor_ids)} 除外メンバー(BL)
+    must_pairs = {}        # {doctor_id: [clinic_ids]} 固定 → 月1回以上
+    never_pairs = {}       # {doctor_id: [clinic_ids]} 除外 → 割当不可
     for (did, cid), w in priority_map.items():
-        if w == PRIORITY_MUST:
+        if w == PRIORITY_FIXED:
+            clinic_fixed.setdefault(cid, set()).add(did)
             must_pairs.setdefault(did, []).append(cid)
-        elif w == PRIORITY_NEVER:
+        elif w == PRIORITY_NOMINATED:
+            clinic_nominated.setdefault(cid, set()).add(did)
+        elif w == PRIORITY_EXCLUDED:
+            clinic_excluded.setdefault(cid, set()).add(did)
             never_pairs.setdefault(did, []).append(cid)
 
     # 報酬マップ
@@ -189,14 +173,14 @@ def solve_schedule(
             if ds in ng_dates:
                 prob += x[(doc_id, cid, ds)] == 0, f"ng_{doc_id}_{cid}_{ds}"
 
-    # 4. ×外勤先（never）は割り当て不可
+    # 4. 除外（weight=0.0）は割り当て不可
     for doc_id in doc_ids:
         for cid in never_pairs.get(doc_id, []):
             for (slot_cid, ds) in slots:
                 if slot_cid == cid:
                     prob += x[(doc_id, cid, ds)] == 0, f"never_{doc_id}_{cid}_{ds}"
 
-    # 5. ◎外勤先（must）は月1回以上割り当て
+    # 5. 固定メンバー（weight=3.0）は月1回以上割り当て
     must_slack_vars = {}
     for doc_id in doc_ids:
         for cid in must_pairs.get(doc_id, []):
@@ -216,19 +200,13 @@ def solve_schedule(
                         f"must_{doc_id}_{cid}"
                     )
 
-    # 6. 固定メンバー制約（ホワイトリスト: リスト外の医員は割り当て不可）
+    # 6. 固定メンバー制約（WL: 固定メンバーがいる外勤先には固定メンバーのみ割当可）
     for (cid, ds) in slots:
         fixed = clinic_fixed.get(cid, set())
         if fixed:
             for doc_id in doc_ids:
                 if doc_id not in fixed:
                     prob += x[(doc_id, cid, ds)] == 0, f"fixed_{doc_id}_{cid}_{ds}"
-
-    # 6b. 除外メンバー制約（ブラックリスト: 除外メンバーは割り当て不可）
-    for (cid, ds) in slots:
-        for doc_id in clinic_excluded.get(cid, set()):
-            if doc_id in doc_ids:
-                prob += x[(doc_id, cid, ds)] == 0, f"excluded_{doc_id}_{cid}_{ds}"
 
     # 7. 月回数上限（max_assignments > 0 の場合）
     for doc in doctors:
@@ -277,15 +255,8 @@ def solve_schedule(
         if cid in pref_clinics_map.get(doc_id, set())
     )
 
-    # 指名スコア（外勤先が指名した医員に来てもらえるとプラス）
-    nomination_term = pulp.lpSum(
-        x[(doc_id, cid, ds)]
-        for doc_id in doc_ids
-        for (cid, ds) in slots
-        if doc_id in clinic_preferred.get(cid, set())
-    )
-
-    # 優先度スコア（◎=2, ○=1 の外勤先に行くとプラス）
+    # 優先度スコア（固定=3, 指名=2, 任意=1 の外勤先に行くとプラス）
+    # 旧 nomination_term は priority_term に統合（指名=2.0 が自然にボーナスとして機能）
     priority_term = pulp.lpSum(
         x[(doc_id, cid, ds)] * priority_map.get((doc_id, cid), 0)
         for doc_id in doc_ids
@@ -341,31 +312,30 @@ def solve_schedule(
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
-    #   w_nom:  外勤先指名医員
-    #   w_pri:  優先度(◎○×)
+    #   w_pri:  優先度（固定=3/指名=2/任意=1/除外=0）
     #   w_avoid: △日ペナルティ
     #   w_cnt:  回数均等
     #   w_dcr:  日別外勤先希望
     #   w_suit: ML適合性スコア
     if mode == "balanced":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -2.0, -1.0, 3.0, 5.0, -3.0, -3.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -2.0, 3.0, 5.0, -3.0, -3.0
     elif mode == "preference":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -5.0, -3.0, -2.0, 3.0, 3.0, -5.0, -2.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -5.0, -3.0, 3.0, 3.0, -5.0, -2.0
     elif mode == "affinity":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -2.0, -2.0, -5.0, 3.0, 3.0, -3.0, -2.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 2.0, -2.0, -5.0, 3.0, 3.0, -3.0, -2.0
     elif mode == "ml_integrated":
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -2.0, -1.0, 3.0, 3.0, -3.0, -5.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -2.0, 3.0, 3.0, -3.0, -5.0
     elif mode == "ml_salary":
         # ML適合性 + 給与均等重視
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -1.0, -1.0, 3.0, 3.0, -2.0, -5.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 10.0, -1.0, -1.0, 3.0, 3.0, -2.0, -5.0
     elif mode == "ml_preference":
         # ML適合性 + 希望重視
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -5.0, -3.0, -2.0, 3.0, 2.0, -5.0, -5.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -5.0, -3.0, 3.0, 2.0, -5.0, -5.0
     elif mode == "ml_count":
         # ML適合性 + 回数均等重視
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -1.0, -1.0, -1.0, 3.0, 10.0, -2.0, -5.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 3.0, -1.0, -1.0, 3.0, 10.0, -2.0, -5.0
     else:
-        w_var, w_pref, w_nom, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -2.0, -2.0, 3.0, 5.0, -3.0, -3.0
+        w_var, w_pref, w_pri, w_avoid, w_cnt, w_dcr, w_suit = 5.0, -2.0, -3.0, 3.0, 5.0, -3.0, -3.0
 
     # suitability_scores が未提供の場合、適合性項の重みをゼロにする
     if not suitability_scores:
@@ -378,7 +348,6 @@ def solve_schedule(
     prob += (
         w_var * variance_term
         + w_pref * preference_term
-        + w_nom * nomination_term
         + w_pri * priority_term
         + w_avoid * avoid_penalty
         + w_cnt * count_variance
@@ -421,8 +390,6 @@ def solve_schedule(
         did, cid = a["doctor_id"], a["clinic_id"]
         if cid in pref_clinics_map.get(did, set()):
             sat += 1
-        if did in clinic_preferred.get(cid, set()):
-            sat += 1
         sat += priority_map.get((did, cid), 0)
 
     return {
@@ -458,8 +425,8 @@ def solve_with_relaxation(
         result["relaxations"] = []
         return result
 
-    # Step 1: ◎制約をソフト制約に緩和
-    relaxations.append("◎制約をソフト制約に変更")
+    # Step 1: 固定メンバーの月1回以上制約をソフト制約に緩和
+    relaxations.append("固定メンバーの月1回以上制約をソフト制約に変更")
     result = solve_schedule(
         doctors, clinics, saturdays, preferences, affinities,
         mode=mode, previous_earnings=previous_earnings,

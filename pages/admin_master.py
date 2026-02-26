@@ -1,9 +1,11 @@
 """管理者: マスタ管理タブ"""
+import pandas as pd
 import streamlit as st
 from database import (
     get_doctors, add_doctor, update_doctor, delete_doctor,
     get_clinics, add_clinic, update_clinic, delete_clinic,
-    get_affinities, set_affinity,
+    get_affinities, set_affinity, batch_set_affinities,
+    batch_update_max_assignments,
     get_clinic_date_overrides, set_clinic_date_overrides_batch,
     set_doctor_individual_password, update_doctor_email,
     get_open_month, set_open_month,
@@ -13,6 +15,11 @@ from database import (
 from optimizer import get_target_saturdays, get_clinic_dates
 from datetime import date
 from dateutil.relativedelta import relativedelta
+
+# 優先度ラベル定義（weight値とラベルの対応）
+WEIGHT_TO_LABEL = {3.0: "固定", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
+LABEL_TO_WEIGHT = {"固定": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
+PRIORITY_LABELS = ["固定", "指名", "任意", "除外"]
 
 
 def _render_open_month_setting():
@@ -210,13 +217,9 @@ def render(target_month, year, month):
                             if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_email_{d['id']}"] = True
                         with b4:
-                            if st.button("回数上限", key=f"setlimit_{d['id']}", use_container_width=True):
-                                st.session_state[f"setting_limit_{d['id']}"] = True
-                        with b5:
                             if st.button("役職", key=f"setrank_{d['id']}", use_container_width=True):
                                 st.session_state[f"setting_rank_{d['id']}"] = True
-                        b6, _, _, _, _ = st.columns(5)
-                        with b6:
+                        with b5:
                             if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
                                 st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
@@ -273,27 +276,6 @@ def render(target_month, year, month):
                             if st.button("キャンセル", key=f"cancel_del_doc_{d['id']}"):
                                 st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
                                 st.rerun()
-
-                    # 回数上限設定フォーム
-                    if st.session_state.get(f"setting_limit_{d['id']}"):
-                        with st.form(f"setlimit_form_{d['id']}"):
-                            new_limit = st.number_input(
-                                "月回数上限（0 = 制限なし）",
-                                min_value=0, max_value=20, value=max_a,
-                                key=f"limit_val_{d['id']}"
-                            )
-                            fc1, fc2 = st.columns(2)
-                            with fc1:
-                                if st.form_submit_button("保存"):
-                                    update_doctor(d['id'], max_assignments=new_limit)
-                                    lbl = "制限なし" if new_limit == 0 else f"{new_limit}回/月"
-                                    st.success(f"回数上限を{lbl}に設定しました")
-                                    st.session_state.pop(f"setting_limit_{d['id']}", None)
-                                    st.rerun()
-                            with fc2:
-                                if st.form_submit_button("キャンセル"):
-                                    st.session_state.pop(f"setting_limit_{d['id']}", None)
-                                    st.rerun()
 
                     # 役職ランク設定フォーム
                     if st.session_state.get(f"setting_rank_{d['id']}"):
@@ -471,116 +453,182 @@ def render(target_month, year, month):
     if st.session_state.get("_save_msg"):
         _msg_area.success(st.session_state.pop("_save_msg"))
 
-    # ---- 指名・優先度設定 ----
+    # ---- セクション2: 外勤先の指名・優先度設定 ----
     st.markdown("---")
-    st.subheader("指名・優先度設定")
+    st.subheader("外勤先の指名・優先度設定")
 
     if clinics and doctors:
-        PRIORITY_OPTIONS = {"◎ 必ず行く": 2.0, "○ 行くときもある": 1.0, "× 行かない": 0.0}
-        WEIGHT_TO_LABEL = {2.0: "◎ 必ず行く", 1.0: "○ 行くときもある", 0.0: "× 行かない"}
-
         all_affinities = get_affinities()
 
-        selected_clinic = st.selectbox(
-            "外勤先を選択",
-            clinics,
-            format_func=lambda c: c["name"],
-            key="affinity_clinic"
+        # 医員のソート: job_rank降順 → 名前順（上級医が上）
+        rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
+        sorted_doctors = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
+
+        # --- 2A: 優先度マトリクス（編集可能）---
+        st.caption(
+            "固定: 固定メンバーでまわす（ハード制約）／ "
+            "指名: できれば来てほしい（ソフト制約）／ "
+            "任意: デフォルト ／ "
+            "除外: 割り当てない（ハード制約）"
         )
 
-        if selected_clinic:
-            # 指名医員
-            pref_docs = selected_clinic.get("preferred_doctors", [])
-            st.write("**指名医員（この外勤先が希望する医員）:**")
-            st.caption("ソフト制約: 指名医員が優先的に割り当てられます")
-            new_pref = st.multiselect(
-                "指名医員",
-                [d["id"] for d in doctors],
-                default=[did for did in pref_docs if did in [d["id"] for d in doctors]],
-                format_func=lambda did: next((d["name"] for d in doctors if d["id"] == did), str(did)),
-                label_visibility="collapsed"
+        # 現在のaffinityを (doctor_id, clinic_id) → weight のマップに変換
+        aff_map = {}
+        for a in all_affinities:
+            aff_map[(a["doctor_id"], a["clinic_id"])] = a["weight"]
+
+        # DataFrameを構築（行=医員, 列=外勤先, 値=ラベル）
+        matrix_data = {}
+        for d in sorted_doctors:
+            row_label = f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
+            row = {}
+            for c in clinics:
+                w = aff_map.get((d["id"], c["id"]), 1.0)
+                row[c["name"]] = WEIGHT_TO_LABEL.get(w, "任意")
+            matrix_data[row_label] = row
+
+        df_matrix = pd.DataFrame.from_dict(matrix_data, orient="index")
+
+        # st.data_editor で編集可能なマトリクスを表示
+        column_config = {
+            c["name"]: st.column_config.SelectboxColumn(
+                c["name"], options=PRIORITY_LABELS, default="任意", width="small",
             )
-            if st.button("指名を保存", type="primary", key="save_nomination"):
-                update_clinic(selected_clinic["id"], preferred_doctors=new_pref)
-                st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の指名医員を保存しました"
-                st.rerun()
+            for c in clinics
+        }
+        edited_df = st.data_editor(
+            df_matrix,
+            column_config=column_config,
+            use_container_width=True,
+            key="priority_matrix",
+        )
 
-            # 固定メンバー
-            fixed_docs = selected_clinic.get("fixed_doctors", [])
-            st.write("**固定メンバー（この外勤先を担当する医員）:**")
-            st.caption("ハード制約: この外勤先にはこのメンバーのみ割り当てられます（未設定の場合は制限なし）")
-            new_fixed = st.multiselect(
-                "固定メンバー",
-                [d["id"] for d in doctors],
-                default=[did for did in fixed_docs if did in [d["id"] for d in doctors]],
-                format_func=lambda did: next((d["name"] for d in doctors if d["id"] == did), str(did)),
-                label_visibility="collapsed",
-                key="fixed_doctors_select",
-            )
-            if st.button("固定メンバーを保存", type="primary", key="save_fixed"):
-                update_clinic(selected_clinic["id"], fixed_doctors=new_fixed)
-                st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の固定メンバーを保存しました"
-                st.rerun()
-
-            # 除外メンバー
-            excluded_docs = selected_clinic.get("excluded_doctors", [])
-            st.write("**除外メンバー（この外勤先に割り当てない医員）:**")
-            st.caption("ハード制約: この外勤先には除外メンバーは割り当てられません")
-            new_excluded = st.multiselect(
-                "除外メンバー",
-                [d["id"] for d in doctors],
-                default=[did for did in excluded_docs if did in [d["id"] for d in doctors]],
-                format_func=lambda did: next((d["name"] for d in doctors if d["id"] == did), str(did)),
-                label_visibility="collapsed",
-                key="excluded_doctors_select",
-            )
-            if st.button("除外メンバーを保存", type="primary", key="save_excluded"):
-                update_clinic(selected_clinic["id"], excluded_doctors=new_excluded)
-                st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の除外メンバーを保存しました"
-                st.rerun()
-
-            # 優先度（外勤先 → 各医員）
-            st.write("**各医員の優先度:**")
-            st.caption("◎ 月1回以上必ず行く ／ ○ 行くときもある ／ × まったく行かない")
-            current_affinities = {
-                a["doctor_id"]: a["weight"]
-                for a in all_affinities
-                if a["clinic_id"] == selected_clinic["id"]
-            }
-
-            aff_cols = st.columns(4)
-            for i, d in enumerate(doctors):
-                with aff_cols[i % 4]:
-                    current_w = current_affinities.get(d["id"], 1.0)
-                    current_label = WEIGHT_TO_LABEL.get(current_w, "○ 行くときもある")
-                    st.radio(
-                        d["name"],
-                        list(PRIORITY_OPTIONS.keys()),
-                        index=list(PRIORITY_OPTIONS.keys()).index(current_label),
-                        key=f"pri_{selected_clinic['id']}_{d['id']}",
-                        horizontal=True,
-                    )
-
-            if st.button("優先度を保存", type="primary", key="save_affinity_by_clinic"):
-                changed = 0
-                for d in doctors:
-                    sel_label = st.session_state.get(f"pri_{selected_clinic['id']}_{d['id']}")
-                    if sel_label is None:
-                        continue
-                    new_w = PRIORITY_OPTIONS[sel_label]
-                    old_w = current_affinities.get(d["id"], 1.0)
+        if st.button("優先度を一括保存", type="primary", key="save_matrix"):
+            updates = []
+            for i, d in enumerate(sorted_doctors):
+                row_label = f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
+                for c in clinics:
+                    new_label = edited_df.at[row_label, c["name"]]
+                    new_w = LABEL_TO_WEIGHT.get(new_label, 1.0)
+                    old_w = aff_map.get((d["id"], c["id"]), 1.0)
                     if new_w != old_w:
-                        set_affinity(d["id"], selected_clinic["id"], new_w)
-                        changed += 1
-                if changed:
-                    st.session_state["_save_msg"] = f"「{selected_clinic['name']}」の優先度を保存しました（{changed}件変更）"
+                        updates.append({"doctor_id": d["id"], "clinic_id": c["id"], "weight": new_w})
+            if updates:
+                batch_set_affinities(updates)
+                st.session_state["_save_msg"] = f"優先度を保存しました（{len(updates)}件変更）"
+            else:
+                st.session_state["_save_msg"] = "変更はありませんでした"
+            st.rerun()
+
+        # --- 2B: 確認ビュー ---
+        # 固定/指名/除外がある外勤先のみ表示
+        has_special = False
+        for c in clinics:
+            fixed_docs = [d for d in sorted_doctors if edited_df.at[
+                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+            ] == "固定"]
+            nominated_docs = [d for d in sorted_doctors if edited_df.at[
+                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+            ] == "指名"]
+            excluded_docs = [d for d in sorted_doctors if edited_df.at[
+                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+            ] == "除外"]
+
+            if fixed_docs or nominated_docs or excluded_docs:
+                if not has_special:
+                    st.markdown("---")
+                    st.write("**設定確認**")
+                    has_special = True
+                parts = [f"**{c['name']}**: "]
+                if fixed_docs:
+                    names = ", ".join(d["name"] for d in fixed_docs)
+                    parts.append(f"固定=[{names}]")
+                if nominated_docs:
+                    names = ", ".join(d["name"] for d in nominated_docs)
+                    parts.append(f"指名=[{names}]")
+                if excluded_docs:
+                    names = ", ".join(d["name"] for d in excluded_docs)
+                    parts.append(f"除外=[{names}]")
+                st.caption(" / ".join(parts))
+
+        # --- 2C: 医員の外勤先制限ショートカット ---
+        st.markdown("---")
+        st.write("**医員の外勤先制限**")
+        st.caption("選択した外勤先のみ割当可能にし、それ以外を除外に設定します")
+
+        restrict_doctor = st.selectbox(
+            "医員を選択",
+            sorted_doctors,
+            format_func=lambda d: f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})",
+            key="restrict_doctor",
+        )
+        if restrict_doctor:
+            # 現在の除外以外の外勤先を取得
+            current_allowed = [
+                c["id"] for c in clinics
+                if aff_map.get((restrict_doctor["id"], c["id"]), 1.0) > 0.0
+            ]
+            allowed_clinics = st.multiselect(
+                "割当可能な外勤先",
+                [c["id"] for c in clinics],
+                default=current_allowed,
+                format_func=lambda cid: next((c["name"] for c in clinics if c["id"] == cid), str(cid)),
+                key="restrict_clinics",
+            )
+            if st.button("制限を適用", type="primary", key="apply_restriction"):
+                updates = []
+                for c in clinics:
+                    old_w = aff_map.get((restrict_doctor["id"], c["id"]), 1.0)
+                    if c["id"] in allowed_clinics:
+                        # 許可: 現在の値を維持（既に固定/指名ならそのまま）
+                        pass
+                    else:
+                        # 除外に設定
+                        if old_w != 0.0:
+                            updates.append({"doctor_id": restrict_doctor["id"], "clinic_id": c["id"], "weight": 0.0})
+                if updates:
+                    batch_set_affinities(updates)
+                    st.session_state["_save_msg"] = f"「{restrict_doctor['name']}」の外勤先制限を適用しました（{len(updates)}件を除外に設定）"
                 else:
                     st.session_state["_save_msg"] = "変更はありませんでした"
                 st.rerun()
 
-    # ---- 日別外勤先希望 ----
+    # ---- セクション3: 医員の希望設定 ----
     st.markdown("---")
-    st.subheader(f"日別外勤先希望 ({target_month})")
+    st.subheader("医員の希望設定")
+
+    # --- 3A: 月回数上限の一括設定 ---
+    if doctors:
+        st.write(f"**月回数上限の一括設定**")
+        st.caption("各医員の月あたりの最大外勤回数を設定します（0 = 制限なし）")
+
+        with st.form("batch_max_assignments"):
+            max_cols = st.columns(min(len(doctors), 4))
+            for i, d in enumerate(sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))):
+                rank_labels_3a = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
+                with max_cols[i % len(max_cols)]:
+                    current_max = d.get("max_assignments", 0)
+                    st.number_input(
+                        f"{d['name']}({rank_labels_3a.get(d.get('job_rank', 0), '')})",
+                        min_value=0, max_value=20, value=current_max,
+                        key=f"max_assign_{d['id']}",
+                    )
+            if st.form_submit_button("回数上限を一括保存", type="primary"):
+                updates = {}
+                for d in doctors:
+                    new_val = st.session_state.get(f"max_assign_{d['id']}", d.get("max_assignments", 0))
+                    if new_val != d.get("max_assignments", 0):
+                        updates[d["id"]] = new_val
+                if updates:
+                    batch_update_max_assignments(updates)
+                    st.session_state["_save_msg"] = f"回数上限を保存しました（{len(updates)}件変更）"
+                else:
+                    st.session_state["_save_msg"] = "変更はありませんでした"
+                st.rerun()
+
+    # --- 3B: 日別外勤先希望 ---
+    st.markdown("---")
+    st.write(f"**日別外勤先希望 ({target_month})**")
     st.caption("医員の「この日にこの外勤先に行きたい」という希望を設定できます")
 
     if clinics and doctors:
@@ -652,9 +700,9 @@ def render(target_month, year, month):
                         st.session_state["_save_msg"] = f"「{selected_doctor_dcr['name']}」の日別外勤先希望を保存しました"
                         st.rerun()
 
-    # ---- 外勤先の日別設定 ----
+    # --- 3C: 外勤先の日別設定 ---
     st.markdown("---")
-    st.subheader(f"外勤先の日別設定 ({target_month})")
+    st.write(f"**外勤先の日別設定 ({target_month})**")
     st.caption("特定の日に2人体制にする、または休診に設定できます")
 
     if clinics:
