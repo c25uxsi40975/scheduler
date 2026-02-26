@@ -551,48 +551,6 @@ def render(target_month, year, month):
                     parts.append(f"除外=[{names}]")
                 st.caption(" / ".join(parts))
 
-        # --- 2C: 医員の外勤先制限ショートカット ---
-        st.markdown("---")
-        st.write("**医員の外勤先制限**")
-        st.caption("選択した外勤先のみ割当可能にし、それ以外を除外に設定します")
-
-        restrict_doctor = st.selectbox(
-            "医員を選択",
-            sorted_doctors,
-            format_func=lambda d: f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})",
-            key="restrict_doctor",
-        )
-        if restrict_doctor:
-            # 現在の除外以外の外勤先を取得
-            current_allowed = [
-                c["id"] for c in clinics
-                if aff_map.get((restrict_doctor["id"], c["id"]), 1.0) > 0.0
-            ]
-            allowed_clinics = st.multiselect(
-                "割当可能な外勤先",
-                [c["id"] for c in clinics],
-                default=current_allowed,
-                format_func=lambda cid: next((c["name"] for c in clinics if c["id"] == cid), str(cid)),
-                key="restrict_clinics",
-            )
-            if st.button("制限を適用", type="primary", key="apply_restriction"):
-                updates = []
-                for c in clinics:
-                    old_w = aff_map.get((restrict_doctor["id"], c["id"]), 1.0)
-                    if c["id"] in allowed_clinics:
-                        # 許可: 現在の値を維持（既に固定/指名ならそのまま）
-                        pass
-                    else:
-                        # 除外に設定
-                        if old_w != 0.0:
-                            updates.append({"doctor_id": restrict_doctor["id"], "clinic_id": c["id"], "weight": 0.0})
-                if updates:
-                    batch_set_affinities(updates)
-                    st.session_state["_save_msg"] = f"「{restrict_doctor['name']}」の外勤先制限を適用しました（{len(updates)}件を除外に設定）"
-                else:
-                    st.session_state["_save_msg"] = "変更はありませんでした"
-                st.rerun()
-
     # ---- セクション3: 医員の希望設定 ----
     st.markdown("---")
     st.subheader("医員の希望設定")
