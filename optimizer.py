@@ -513,10 +513,12 @@ def diagnose_infeasibility(
 ) -> list[str]:
     """制約を満たせない原因の診断情報を返す"""
     issues = []
-
     overrides = date_overrides or {}
-    # スロット数を計算
-    total_required = 0
+    clinic_name = {c["id"]: c["name"] for c in clinics}
+    doc_name = {d["id"]: d["name"] for d in doctors}
+
+    # スロット一覧を構築: [(clinic_id, date_str, required)]
+    slots = []
     slots_by_date = {}
     for c in clinics:
         if c.get("frequency") == "irregular":
@@ -524,7 +526,7 @@ def diagnose_infeasibility(
                 ds = d.isoformat()
                 req = overrides.get((c["id"], ds), 0)
                 if req > 0:
-                    total_required += req
+                    slots.append((c["id"], ds, req))
                     slots_by_date[ds] = slots_by_date.get(ds, 0) + req
         else:
             cd = get_clinic_dates(c, saturdays)
@@ -532,10 +534,12 @@ def diagnose_infeasibility(
                 ds = d.isoformat()
                 req = overrides.get((c["id"], ds), 1)
                 if req > 0:
-                    total_required += req
+                    slots.append((c["id"], ds, req))
                     slots_by_date[ds] = slots_by_date.get(ds, 0) + req
 
-    # NG日マップ
+    total_required = sum(r for _, _, r in slots)
+
+    # 希望・優先度マップ
     ng_map = {}
     post_night_map = {}
     for p in preferences:
@@ -544,64 +548,114 @@ def diagnose_infeasibility(
         if pn:
             post_night_map[p["doctor_id"]] = pn
 
-    # 優先度マップ
     priority_map = {}
     for a in affinities:
         priority_map[(a["doctor_id"], a["clinic_id"])] = a["weight"]
     clinic_fixed = {}
+    clinic_excluded = {}
+    must_pairs = {}
     for (did, cid), w in priority_map.items():
         if w == PRIORITY_FIXED:
             clinic_fixed.setdefault(cid, set()).add(did)
+            must_pairs.setdefault(did, []).append(cid)
+        elif w == PRIORITY_EXCLUDED:
+            clinic_excluded.setdefault(cid, set()).add(did)
 
     clinic_time_slot = {c["id"]: c.get("time_slot", "") for c in clinics}
 
-    issues.append(f"医員数: {len(doctors)}人, スロット総数: {total_required}")
+    # --- 基本情報 ---
+    issues.append(f"**基本情報**: 医員{len(doctors)}人 / スロット{total_required}枠 / 日数{len(slots_by_date)}日")
+    cap = sum(d.get("max_assignments", 0) or 99 for d in doctors)
+    issues.append(f"**月回数上限合計**: {cap}（必要: {total_required}）")
 
-    # 日別の利用可能医員数チェック
-    for ds, req in sorted(slots_by_date.items()):
-        available = 0
+    # --- 日別サマリー ---
+    day_problems = []
+    for ds in sorted(slots_by_date):
+        req = slots_by_date[ds]
+        available = [d for d in doctors if ds not in ng_map.get(d["id"], set())]
+        if len(available) < req:
+            day_problems.append(f"{ds}: 必要{req}人だが利用可能{len(available)}人（NG日超過）")
+    if day_problems:
+        issues.append("**日別の医員不足**:")
+        issues.extend(day_problems)
+
+    # --- スロット別: 割当可能医員数チェック ---
+    slot_problems = []
+    for cid, ds, req in slots:
+        eligible = []
         for d in doctors:
-            if ds not in ng_map.get(d["id"], set()):
-                available += 1
-        if available < req:
-            issues.append(f"{ds}: 必要{req}人 > 利用可能{available}人（NG日による不足）")
-
-    # 固定メンバー制約チェック
-    for c in clinics:
-        fixed = clinic_fixed.get(c["id"], set())
-        if not fixed:
-            continue
-        active_fixed = [did for did in fixed if any(d["id"] == did for d in doctors)]
-        if not active_fixed:
-            issues.append(f"外勤先「{c['name']}」: 固定メンバーが全員無効 → 割当不可")
-
-    # 月回数上限 vs 必要スロット
-    total_capacity = sum(d.get("max_assignments", 0) or 99 for d in doctors)
-    if total_capacity < total_required:
-        issues.append(f"医員の月回数上限合計({total_capacity}) < 必要スロット数({total_required})")
-
-    # 当直明け日のPM制約チェック
-    for ds, req in sorted(slots_by_date.items()):
-        pn_doctors = [d for d in doctors if ds in post_night_map.get(d["id"], set())]
-        if pn_doctors:
-            pm_slots = sum(
-                1 for c in clinics
-                if clinic_time_slot.get(c["id"]) == "PM"
-                and overrides.get((c["id"], ds), 1) > 0
+            did = d["id"]
+            if ds in ng_map.get(did, set()):
+                continue
+            if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                continue
+            fixed = clinic_fixed.get(cid, set())
+            if fixed and did not in fixed:
+                continue
+            if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                continue
+            eligible.append(did)
+        if len(eligible) < req:
+            names = ", ".join(doc_name.get(e, "?") for e in eligible) or "なし"
+            slot_problems.append(
+                f"{ds} {clinic_name.get(cid, '?')}: "
+                f"必要{req}人だが割当可能{len(eligible)}人（{names}）"
             )
-            non_pn_available = sum(
-                1 for d in doctors
-                if ds not in ng_map.get(d["id"], set())
-                and ds not in post_night_map.get(d["id"], set())
-            )
-            if non_pn_available < req - pm_slots:
-                issues.append(
-                    f"{ds}: 当直明け{len(pn_doctors)}人, PM枠{pm_slots}, "
-                    f"通常利用可能{non_pn_available}人 → 非PMスロットが埋まらない可能性"
+    if slot_problems:
+        issues.append("**割当可能医員が不足しているスロット**:")
+        issues.extend(slot_problems)
+
+    # --- 固定メンバー月1回以上 vs NG日 ---
+    must_problems = []
+    for did, cids in must_pairs.items():
+        for cid in cids:
+            clinic_slots = [(c, d) for c, d, _ in slots if c == cid]
+            available_slots = [
+                d for c, d in clinic_slots
+                if d not in ng_map.get(did, set())
+                and not (d in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM")
+            ]
+            if not available_slots:
+                must_problems.append(
+                    f"{doc_name.get(did, '?')} は {clinic_name.get(cid, '?')} の固定メンバーだが"
+                    f"全日程がNG/制約により割当不可"
                 )
+    if must_problems:
+        issues.append("**固定メンバー制約の矛盾**:")
+        issues.extend(must_problems)
 
-    if len(issues) == 1:
-        issues.append("明確なボトルネックは検出されませんでした。制約の組み合わせが原因の可能性があります")
+    # --- 同一日スロット数 vs 利用可能医員（制約込み） ---
+    day_detail_problems = []
+    for ds in sorted(slots_by_date):
+        day_slots = [(cid, req) for cid, d, req in slots if d == ds]
+        day_req = sum(r for _, r in day_slots)
+        # この日に何らかのスロットに割当可能な医員
+        available_any = set()
+        for d in doctors:
+            did = d["id"]
+            if ds in ng_map.get(did, set()):
+                continue
+            for cid, _ in day_slots:
+                if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                    continue
+                fixed = clinic_fixed.get(cid, set())
+                if fixed and did not in fixed:
+                    continue
+                if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                    continue
+                available_any.add(did)
+                break
+        if len(available_any) < day_req:
+            day_detail_problems.append(
+                f"{ds}: 必要{day_req}人だが制約込みで利用可能{len(available_any)}人"
+            )
+    if day_detail_problems:
+        issues.append("**日別の制約込み医員不足**:")
+        issues.extend(day_detail_problems)
+
+    if len(issues) == 2:
+        issues.append("個別の制約は問題ありませんが、組み合わせにより解がない可能性があります。"
+                       "NG日や固定メンバー設定の緩和を検討してください")
 
     return issues
 
