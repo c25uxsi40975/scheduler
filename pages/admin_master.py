@@ -604,7 +604,7 @@ def render(target_month, year, month):
                         elif val == "当○":
                             new_pn.append(ds)
 
-                    if set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
+                    if not pref or set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
                         batch_items.append({
                             "doctor_id": d["id"],
                             "ng_dates": new_ng,
