@@ -16,7 +16,7 @@ from ml_adjuster import (
     compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
     _compute_doctor_history, compute_pair_features,
 )
-from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_FIXED, PRIORITY_EXCLUDED
+from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_FIXED, PRIORITY_EXCLUDED, diagnose_infeasibility
 from pipeline import run_integrated_pipeline
 from components.schedule_table import render_schedule_table
 
@@ -195,6 +195,13 @@ def render(target_month, year, month):
 
             if not plans:
                 st.error("制約を満たすスケジュールが見つかりません。制約条件を見直してください。")
+                diag = diagnose_infeasibility(
+                    doctors, clinics, saturdays, prefs, affinities,
+                    date_overrides=overrides,
+                )
+                with st.expander("診断情報", expanded=True):
+                    for line in diag:
+                        st.write(f"- {line}")
             else:
                 st.success(f"{len(plans)}件の案を生成しました")
 
