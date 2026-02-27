@@ -244,10 +244,16 @@ def solve_schedule(
                 if doc_id not in fixed:
                     prob += x[(doc_id, cid, ds)] == 0, f"fixed_{doc_id}_{cid}_{ds}"
 
-    # 7. 月回数上限（max_assignments > 0 の場合）
+    # 7. 月回数上限
+    # max_assignments=0: 今月は割当不可（全スロット=0）
+    # max_assignments未設定 or None: 制限なし
+    # max_assignments>0: その回数まで
     for doc in doctors:
-        max_a = doc.get("max_assignments", 0)
-        if max_a > 0:
+        max_a = doc.get("max_assignments")
+        if max_a is not None and max_a == 0:
+            for (cid, ds) in slots:
+                prob += x[(doc["id"], cid, ds)] == 0, f"no_assign_{doc['id']}_{cid}_{ds}"
+        elif max_a is not None and max_a > 0:
             prob += (
                 pulp.lpSum(x[(doc["id"], cid, ds)] for (cid, ds) in slots) <= max_a,
                 f"max_assign_{doc['id']}"
@@ -796,6 +802,89 @@ def diagnose_infeasibility(
             issues.extend(must_details)
         if free_cap < total_required - must_reserved:
             issues.append("⚠ 必須予約後の自由容量が不足しています")
+
+    # --- 日別の二部マッチング（最大割当）チェック ---
+    # 各スロットに十分な候補がいても、同一日1人1枠の制約で割当不可能なケースを検出
+    def _max_matching(adj, left_nodes, right_nodes):
+        """Hopcroft-Karp風の二部最大マッチング（DFS）"""
+        match_r = {}
+        def dfs(u, visited):
+            for v in adj.get(u, []):
+                if v in visited:
+                    continue
+                visited.add(v)
+                if v not in match_r or dfs(match_r[v], visited):
+                    match_r[v] = u
+                    return True
+            return False
+        count = 0
+        for u in left_nodes:
+            if dfs(u, set()):
+                count += 1
+        return count
+
+    matching_problems = []
+    for ds in sorted(slots_by_date):
+        day_slots_list = [(cid, req) for cid, d, req in slots if d == ds]
+        day_req = sum(r for _, r in day_slots_list)
+
+        # スロットを展開（2人体制は2枠）: slot_idx → clinic_id
+        expanded_slots = []
+        for cid, req in day_slots_list:
+            for _ in range(req):
+                expanded_slots.append(cid)
+
+        # 利用可能な医員（NG/max_assignments=0 を除外）
+        day_doctors = []
+        for d in doctors:
+            did = d["id"]
+            if ds in ng_map.get(did, set()):
+                continue
+            ma = d.get("max_assignments")
+            if ma is not None and ma == 0:
+                continue
+            day_doctors.append(did)
+
+        # 二部グラフ: 医員 → 割当可能なスロット（展開済みインデックス）
+        adj = {}
+        for did in day_doctors:
+            reachable = []
+            for si, cid in enumerate(expanded_slots):
+                if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                    continue
+                fixed = clinic_fixed.get(cid, set())
+                if fixed and did not in fixed:
+                    continue
+                if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                    continue
+                reachable.append(si)
+            if reachable:
+                adj[did] = reachable
+
+        max_match = _max_matching(adj, day_doctors, list(range(len(expanded_slots))))
+        if max_match < day_req:
+            # どのスロットが埋まらないか特定
+            slot_details = []
+            for cid, req in day_slots_list:
+                elig = []
+                for did in day_doctors:
+                    if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                        continue
+                    fixed = clinic_fixed.get(cid, set())
+                    if fixed and did not in fixed:
+                        continue
+                    if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                        continue
+                    elig.append(did)
+                names = ", ".join(doc_name.get(e, "?") for e in elig)
+                slot_details.append(f"  {clinic_name.get(cid, '?')}: 候補{len(elig)}人（{names}）")
+            matching_problems.append(
+                f"**{ds}**: {day_req}枠中{max_match}枠しか割当不可（医員の重複制約）"
+            )
+            matching_problems.extend(slot_details)
+    if matching_problems:
+        issues.append("**日別マッチング分析（同一日1人1枠の制約考慮）**:")
+        issues.extend(matching_problems)
 
     # --- 最終フォールバック ---
     if len(issues) == 2:

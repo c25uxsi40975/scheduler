@@ -532,7 +532,7 @@ def render(target_month, year, month):
     # --- 3A: 月回数上限の一括設定 ---
     if doctors:
         st.write(f"**月回数上限の一括設定**")
-        st.caption("各医員の月あたりの最大外勤回数を設定します（1〜5回）")
+        st.caption("各医員の月あたりの最大外勤回数を設定します（1〜4回）")
 
         with st.form("batch_max_assignments"):
             max_cols = st.columns(min(len(doctors), 4))
@@ -540,11 +540,11 @@ def render(target_month, year, month):
                 rank_labels_3a = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
                 with max_cols[i % len(max_cols)]:
                     current_max = d.get("max_assignments", 0)
-                    if current_max < 1 or current_max > 5:
+                    if current_max < 1 or current_max > 4:
                         current_max = 4
                     st.number_input(
                         f"{d['name']}({rank_labels_3a.get(d.get('job_rank', 0), '')})",
-                        min_value=1, max_value=5, value=current_max,
+                        min_value=1, max_value=4, value=current_max,
                         key=f"max_assign_{d['id']}",
                     )
             if st.form_submit_button("回数上限を一括保存", type="primary"):
@@ -552,7 +552,7 @@ def render(target_month, year, month):
                 for d in doctors:
                     new_val = st.session_state.get(f"max_assign_{d['id']}", d.get("max_assignments", 0))
                     current = d.get("max_assignments", 0)
-                    if current < 1 or current > 5:
+                    if current < 1 or current > 4:
                         current = 4
                     if new_val != current:
                         updates[d["id"]] = new_val
