@@ -16,7 +16,7 @@ from ml_adjuster import (
     compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
     _compute_doctor_history, compute_pair_features,
 )
-from optimizer import get_target_saturdays, get_clinic_dates
+from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_FIXED, PRIORITY_EXCLUDED
 from pipeline import run_integrated_pipeline
 from components.schedule_table import render_schedule_table
 
@@ -237,7 +237,7 @@ def render(target_month, year, month):
                 is_editing = st.session_state.get(editing_key, False)
 
                 if is_editing:
-                    _render_edit_mode(sched, _doctors, clinic_map, editing_key)
+                    _render_edit_mode(sched, _doctors, clinic_map, editing_key, prefs, affinities)
                 else:
                     render_schedule_table(sched, _doctors, _clinics)
 
@@ -310,10 +310,104 @@ def render(target_month, year, month):
                                 st.rerun()
 
 
-def _render_edit_mode(sched, doctors, clinic_map, editing_key):
-    """スケジュールの手動調整UI"""
+def _build_constraint_data(doctors, prefs, affinities):
+    """制約チェック用のルックアップデータを構築"""
+    ng_map = {}
+    avoid_map = {}
+    date_clinic_req_map = {}
+    for p in prefs:
+        did = p["doctor_id"]
+        ng_map[did] = set(p.get("ng_dates") or [])
+        avoid_map[did] = set(p.get("avoid_dates") or [])
+        dcr = p.get("date_clinic_requests") or {}
+        if dcr:
+            date_clinic_req_map[did] = dcr
+
+    excluded_pairs = set()
+    fixed_members = {}
+    for a in affinities:
+        if a["weight"] == PRIORITY_EXCLUDED:
+            excluded_pairs.add((a["doctor_id"], a["clinic_id"]))
+        elif a["weight"] == PRIORITY_FIXED:
+            fixed_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
+
+    max_assignments_map = {d["id"]: d.get("max_assignments", 0) for d in doctors}
+
+    return {
+        "ng_map": ng_map,
+        "avoid_map": avoid_map,
+        "excluded_pairs": excluded_pairs,
+        "fixed_members": fixed_members,
+        "max_assignments": max_assignments_map,
+        "date_clinic_requests": date_clinic_req_map,
+    }
+
+
+def _get_allowed_doctors(date_str, clinic_id, doctor_options, constraints, same_day_others):
+    """ハード制約に基づいてselectboxの選択肢をフィルタリング"""
+    ng_map = constraints["ng_map"]
+    excluded_pairs = constraints["excluded_pairs"]
+    fixed_members = constraints["fixed_members"]
+
+    allowed = []
+    for (did, dname) in doctor_options:
+        if did == "":
+            allowed.append((did, dname))
+            continue
+        if date_str in ng_map.get(did, set()):
+            continue
+        if (did, clinic_id) in excluded_pairs:
+            continue
+        fixed = fixed_members.get(clinic_id, set())
+        if fixed and did not in fixed:
+            continue
+        if did in same_day_others:
+            continue
+        allowed.append((did, dname))
+    return allowed
+
+
+def _check_soft_constraints(new_assignments, constraints, doctors):
+    """ソフト制約違反の警告メッセージリストを返す"""
+    doc_name_map = {d["id"]: d["name"] for d in doctors}
+    avoid_map = constraints["avoid_map"]
+    max_assignments_map = constraints["max_assignments"]
+    date_clinic_req_map = constraints["date_clinic_requests"]
+
+    warnings = []
+
+    for a in new_assignments:
+        did, ds, cid = a["doctor_id"], a["date"], a["clinic_id"]
+        dname = doc_name_map.get(did, "?")
+        if ds in avoid_map.get(did, set()):
+            d_obj = date.fromisoformat(ds)
+            warnings.append(
+                f"{dname} は {d_obj.strftime('%m/%d')} を「できれば避けたい」に設定しています"
+            )
+        requested_cid = date_clinic_req_map.get(did, {}).get(ds)
+        if requested_cid is not None and int(requested_cid) != cid:
+            d_obj = date.fromisoformat(ds)
+            warnings.append(
+                f"{dname} は {d_obj.strftime('%m/%d')} に別の外勤先を希望しています"
+            )
+
+    doc_counts = {}
+    for a in new_assignments:
+        doc_counts[a["doctor_id"]] = doc_counts.get(a["doctor_id"], 0) + 1
+    for did, count in doc_counts.items():
+        max_a = max_assignments_map.get(did, 0)
+        if max_a > 0 and count > max_a:
+            dname = doc_name_map.get(did, "?")
+            warnings.append(f"{dname} の割当 {count}回 が月上限 {max_a}回 を超えています")
+
+    return warnings
+
+
+def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities):
+    """スケジュールの手動調整UI（制約チェック付き）"""
     st.info("手動調整モード: 各スロットの担当医員を変更できます")
 
+    constraints = _build_constraint_data(doctors, prefs, affinities)
     assignments = sched["assignments"]
 
     # assignments を (date, clinic_id) → doctor_id のマップに変換
@@ -330,6 +424,19 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key):
 
     doctor_options = [("", "（割り当てなし）")] + [(d["id"], d["name"]) for d in doctors]
 
+    # session_stateから同日重複チェック用の現在選択値を収集
+    current_selections = {}
+    for ds in dates:
+        for cid in clinics_in_sched:
+            if (ds, cid) not in slot_map:
+                continue
+            key = f"slot_{sched['id']}_{ds}_{cid}"
+            val = st.session_state.get(key)
+            if val and val[0]:
+                current_selections[(ds, cid)] = val[0]
+            else:
+                current_selections[(ds, cid)] = slot_map.get((ds, cid), "")
+
     new_assignments = []
     for ds in dates:
         d_obj = date.fromisoformat(ds)
@@ -341,16 +448,33 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key):
             cname = clinic_map.get(cid, {}).get("name", f"外勤先{cid}")
             current_did = slot_map.get((ds, cid))
             with cols[i % len(cols)]:
+                # 同日の他スロットで選択済みの医員を取得
+                same_day_others = {
+                    did for (ds2, cid2), did in current_selections.items()
+                    if ds2 == ds and cid2 != cid and did
+                }
+                # ハード制約でフィルタリングした選択肢
+                allowed = _get_allowed_doctors(
+                    ds, cid, doctor_options, constraints, same_day_others
+                )
+
                 # 現在の担当医員のインデックスを取得
                 current_idx = 0
-                for j, (did, _) in enumerate(doctor_options):
+                for j, (did, _) in enumerate(allowed):
                     if did == current_did:
                         current_idx = j
                         break
 
+                # 元の割当がハード制約違反で選択肢にない場合の警告
+                if current_did and current_did not in [did for did, _ in allowed]:
+                    invalid_name = next(
+                        (d["name"] for d in doctors if d["id"] == current_did), "?"
+                    )
+                    st.caption(f"元の担当 {invalid_name} はハード制約違反のため選択不可")
+
                 selected = st.selectbox(
                     cname,
-                    doctor_options,
+                    allowed,
                     index=current_idx,
                     format_func=lambda x: x[1],
                     key=f"slot_{sched['id']}_{ds}_{cid}",
@@ -362,14 +486,41 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key):
                         "doctor_id": selected[0],
                     })
 
+    confirm_save_key = f"confirm_save_warnings_{sched['id']}"
+
     btn_cols = st.columns(2)
     with btn_cols[0]:
         if st.button("変更を保存", key=f"save_edit_{sched['id']}", type="primary"):
-            update_schedule_assignments(sched["id"], new_assignments)
-            st.session_state.pop(editing_key, None)
-            st.success("保存しました")
-            st.rerun()
+            soft_warnings = _check_soft_constraints(new_assignments, constraints, doctors)
+            if soft_warnings:
+                st.session_state[confirm_save_key] = soft_warnings
+                st.rerun()
+            else:
+                update_schedule_assignments(sched["id"], new_assignments)
+                st.session_state.pop(editing_key, None)
+                st.success("保存しました")
+                st.rerun()
     with btn_cols[1]:
         if st.button("キャンセル", key=f"cancel_edit_{sched['id']}"):
             st.session_state.pop(editing_key, None)
+            st.session_state.pop(confirm_save_key, None)
             st.rerun()
+
+    # ソフト制約違反の確認ダイアログ
+    if st.session_state.get(confirm_save_key):
+        st.markdown("---")
+        st.warning("以下の希望・制約に合致しない変更があります。このまま保存しますか？")
+        for w in st.session_state[confirm_save_key]:
+            st.write(f"- {w}")
+        wc1, wc2 = st.columns(2)
+        with wc1:
+            if st.button("確認して保存", key=f"force_save_{sched['id']}", type="primary"):
+                update_schedule_assignments(sched["id"], new_assignments)
+                st.session_state.pop(editing_key, None)
+                st.session_state.pop(confirm_save_key, None)
+                st.success("保存しました")
+                st.rerun()
+        with wc2:
+            if st.button("編集に戻る", key=f"back_edit_{sched['id']}"):
+                st.session_state.pop(confirm_save_key, None)
+                st.rerun()
