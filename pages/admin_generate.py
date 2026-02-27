@@ -463,6 +463,7 @@ def _check_soft_constraints(new_assignments, constraints, doctors):
 def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities):
     """スケジュールの手動調整UI（制約チェック付き）"""
     st.info("手動調整モード: 各スロットの担当医員を変更できます")
+    st.caption("入れ替え: 一方を「割り当てなし」にしてから、もう一方を変更してください")
 
     constraints = _build_constraint_data(doctors, prefs, affinities, clinic_map)
     assignments = sched["assignments"]
@@ -489,8 +490,8 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
                 continue
             key = f"slot_{sched['id']}_{ds}_{cid}"
             val = st.session_state.get(key)
-            if val and val[0]:
-                current_selections[(ds, cid)] = val[0]
+            if val is not None:
+                current_selections[(ds, cid)] = val[0]  # "" = 割り当てなし
             else:
                 current_selections[(ds, cid)] = slot_map.get((ds, cid), "")
 
