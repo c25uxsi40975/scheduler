@@ -247,7 +247,7 @@ def _solve_single_date(saturday, available_doctors, active_clinics,
         for j, cid in enumerate(clinic_slots):
             if cid in doc_never:
                 continue
-            # 固定メンバー制約: リスト外の医員は割り当て不可
+            # 限定メンバー制約: リスト外の医員は割り当て不可
             fixed = fixed_members.get(cid, set())
             if fixed and doc["id"] not in fixed:
                 continue
@@ -287,7 +287,6 @@ def ml_readjust(target_month, year, month, doctors, clinics,
 
     never_pairs = {}
     must_pairs = {}
-    fixed_members = {}
     excluded_members = {}
     for a in affinities:
         if a["weight"] == 0.0:
@@ -295,7 +294,13 @@ def ml_readjust(target_month, year, month, doctors, clinics,
             excluded_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
         elif a["weight"] == 3.0:
             must_pairs.setdefault(a["doctor_id"], []).append(a["clinic_id"])
-            fixed_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
+
+    # 限定メンバー（WL）: 外勤先マスタの fixed_doctors から構築
+    fixed_members = {}
+    for c in clinics:
+        fd = c.get("fixed_doctors") or []
+        if fd:
+            fixed_members[c["id"]] = set(fd)
 
     # ML予測の実行
     predictions = predict_effort_costs(doctors, clinics, confirmed_schedules, target_month)
@@ -363,7 +368,7 @@ def ml_readjust(target_month, year, month, doctors, clinics,
             if cid not in doc_clinic_assigned.get(doc_id, set()):
                 doc_name = next((d["name"] for d in doctors if d["id"] == doc_id), str(doc_id))
                 cli_name = next((c["name"] for c in clinics if c["id"] == cid), str(cid))
-                warnings.append(f"固定メンバー制約未充足: {doc_name} → {cli_name}")
+                warnings.append(f"必須メンバー制約未充足: {doc_name} → {cli_name}")
 
     # 統計計算
     doc_earnings = {d["id"]: 0 for d in doctors}
@@ -645,7 +650,7 @@ def compute_suitability_matrix(doctors, clinics, confirmed_schedules,
             aff_map = affinities_by_doctor.get(doc["id"], {})
             for clinic in clinics:
                 base_score = _fallback_suitability_score(dh, clinic)
-                # 優先度重みで調整 (除外=0.0, 任意=1.0, 指名=2.0, 固定=3.0)
+                # 優先度重みで調整 (除外=0.0, 任意=1.0, 指名=2.0, 必須=3.0)
                 weight = aff_map.get(clinic["id"], 1.0)
                 adjusted = base_score * (weight / 3.0) if weight > 0 else 0.0
                 result[(doc["id"], clinic["id"])] = min(1.0, adjusted)

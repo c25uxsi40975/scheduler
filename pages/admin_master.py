@@ -12,9 +12,9 @@ from database import (
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 # 優先度ラベル定義（weight値とラベルの対応）
-WEIGHT_TO_LABEL = {3.0: "固定", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
-LABEL_TO_WEIGHT = {"固定": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
-PRIORITY_LABELS = ["固定", "指名", "任意", "除外"]
+WEIGHT_TO_LABEL = {3.0: "必須", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
+LABEL_TO_WEIGHT = {"必須": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
+PRIORITY_LABELS = ["必須", "指名", "任意", "除外"]
 
 
 FREQ_OPTIONS = [
@@ -254,6 +254,10 @@ def render(target_month, year, month):
             )
             tpl = CLINIC_TEMPLATES.get(selected_tpl, {})
 
+            _add_form_doctors = get_doctors()
+            _add_doc_id_name = {d["id"]: d["name"] for d in _add_form_doctors}
+            _add_doc_ids = [d["id"] for d in _add_form_doctors]
+
             with st.form("add_clinic_form", clear_on_submit=True):
                 new_clinic = st.text_input("外勤先名", value=selected_tpl if tpl else "")
                 new_fee = st.number_input("日当（円）", min_value=0, step=10000,
@@ -269,12 +273,18 @@ def render(target_month, year, month):
                                          index=tslot_options.index(tpl_tslot) if tpl_tslot in tslot_options else 0,
                                          help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です")
                 new_loc = st.text_input("勤務地", value=tpl.get("location", ""))
+                new_limited = st.multiselect(
+                    "限定メンバー", options=_add_doc_ids,
+                    format_func=lambda x: _add_doc_id_name.get(x, "?"),
+                    help="設定すると、この外勤先にはリスト内の医員のみ割り当て可能になります（ホワイトリスト）",
+                )
                 if st.form_submit_button("追加", use_container_width=True):
                     if new_clinic.strip():
                         add_clinic(
                             new_clinic.strip(), new_fee, new_freq[0],
                             effort_cost=new_effort, work_hours=new_hours,
                             time_slot=new_tslot, location=new_loc,
+                            fixed_doctors=new_limited,
                         )
                         st.success(f"「{new_clinic}」を追加しました")
                         st.rerun()
@@ -298,6 +308,10 @@ def render(target_month, year, month):
                     hours = c.get("work_hours", 0)
                     tslot = c.get("time_slot", "")
                     loc = c.get("location", "")
+                    _edit_docs = get_doctors()
+                    _edit_doc_id_name = {d["id"]: d["name"] for d in _edit_docs}
+                    _edit_doc_ids = [d["id"] for d in _edit_docs]
+
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
                         info_parts = [
@@ -313,6 +327,10 @@ def render(target_month, year, month):
                             info_parts.append(tslot)
                         if loc:
                             info_parts.append(loc)
+                        fd_list = c.get("fixed_doctors") or []
+                        if fd_list:
+                            fd_names = ", ".join(_edit_doc_id_name.get(did, "?") for did in fd_list)
+                            info_parts.append(f"限定:[{fd_names}]")
                         st.markdown(" | ".join(info_parts))
                         bc1, bc2 = st.columns(2)
                         with bc1:
@@ -368,6 +386,15 @@ def render(target_month, year, month):
                                 "勤務地", value=c.get("location", ""),
                                 key=f"loc_{c['id']}"
                             )
+                            current_fd = c.get("fixed_doctors") or []
+                            # default にはリスト内のIDのうち、現在有効な医員のみ
+                            edit_limited = st.multiselect(
+                                "限定メンバー", options=_edit_doc_ids,
+                                default=[did for did in current_fd if did in _edit_doc_id_name],
+                                format_func=lambda x: _edit_doc_id_name.get(x, "?"),
+                                key=f"limited_{c['id']}",
+                                help="設定すると、この外勤先にはリスト内の医員のみ割り当て可能になります（ホワイトリスト）",
+                            )
                             fc1, fc2 = st.columns(2)
                             with fc1:
                                 if st.form_submit_button("保存"):
@@ -375,6 +402,7 @@ def render(target_month, year, month):
                                         c['id'], fee=edit_fee, frequency=edit_freq[0],
                                         effort_cost=edit_effort, work_hours=edit_hours,
                                         time_slot=edit_tslot, location=edit_loc,
+                                        fixed_doctors=edit_limited,
                                     )
                                     st.session_state.pop(f"editing_cli_{c['id']}", None)
                                     st.success("保存しました")
@@ -405,7 +433,7 @@ def render(target_month, year, month):
 
         # --- 2A: 優先度マトリクス（編集可能）---
         st.caption(
-            "固定: 固定メンバーでまわす（ハード制約）／ "
+            "必須: 月1回以上必ず割り当て（ハード制約）／ "
             "指名: できれば来てほしい（ソフト制約）／ "
             "任意: デフォルト ／ "
             "除外: 割り当てない（ハード制約）"
@@ -460,12 +488,12 @@ def render(target_month, year, month):
             st.rerun()
 
         # --- 2B: 確認ビュー ---
-        # 固定/指名/除外がある外勤先のみ表示
+        # 必須/指名/除外/限定がある外勤先のみ表示
         has_special = False
         for c in clinics:
-            fixed_docs = [d for d in sorted_doctors if edited_df.at[
+            mandatory_docs = [d for d in sorted_doctors if edited_df.at[
                 f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
-            ] == "固定"]
+            ] == "必須"]
             nominated_docs = [d for d in sorted_doctors if edited_df.at[
                 f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
             ] == "指名"]
@@ -473,15 +501,22 @@ def render(target_month, year, month):
                 f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
             ] == "除外"]
 
-            if fixed_docs or nominated_docs or excluded_docs:
+            # 限定メンバー（外勤先マスタの fixed_doctors）
+            fd = c.get("fixed_doctors") or []
+            doc_name_map = {d["id"]: d["name"] for d in sorted_doctors}
+
+            if mandatory_docs or nominated_docs or excluded_docs or fd:
                 if not has_special:
                     st.markdown("---")
                     st.write("**設定確認**")
                     has_special = True
                 parts = [f"**{c['name']}**: "]
-                if fixed_docs:
-                    names = ", ".join(d["name"] for d in fixed_docs)
-                    parts.append(f"固定=[{names}]")
+                if fd:
+                    fd_names = ", ".join(doc_name_map.get(did, "?") for did in fd)
+                    parts.append(f"限定=[{fd_names}]")
+                if mandatory_docs:
+                    names = ", ".join(d["name"] for d in mandatory_docs)
+                    parts.append(f"必須=[{names}]")
                 if nominated_docs:
                     names = ", ".join(d["name"] for d in nominated_docs)
                     parts.append(f"指名=[{names}]")

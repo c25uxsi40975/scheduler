@@ -10,10 +10,13 @@ import numpy as np
 
 
 # 優先度の weight 値定義（4ラベル）
-PRIORITY_FIXED = 3.0      # 固定: 固定メンバー（WL + 月1回以上）
-PRIORITY_NOMINATED = 2.0  # 指名: できれば来てほしい
-PRIORITY_ANY = 1.0        # 任意: デフォルト
-PRIORITY_EXCLUDED = 0.0   # 除外: 割当不可
+PRIORITY_MANDATORY = 3.0   # 必須: 月1回以上割り当て
+PRIORITY_NOMINATED = 2.0   # 指名: できれば来てほしい
+PRIORITY_ANY = 1.0         # 任意: デフォルト
+PRIORITY_EXCLUDED = 0.0    # 除外: 割当不可
+
+# 後方互換エイリアス
+PRIORITY_FIXED = PRIORITY_MANDATORY
 
 
 def get_target_saturdays(year: int, month: int) -> list[date]:
@@ -68,7 +71,7 @@ def solve_schedule(
       - "ml_integrated": ML適合性スコア重視
 
     suitability_scores: {(doctor_id, clinic_id): float} ML適合性スコア行列
-    relax_must: Trueの場合、固定メンバーの月1回以上制約をソフト制約（ペナルティ）に緩和
+    relax_must: Trueの場合、必須メンバーの月1回以上制約をソフト制約（ペナルティ）に緩和
     """
     doc_ids = [d["id"] for d in doctors]
     clinic_list = clinics
@@ -131,26 +134,31 @@ def solve_schedule(
                 ds: int(cid) for ds, cid in dcr.items()
             }
 
-    # 優先度マップ (weight: 固定=3.0, 指名=2.0, 任意=1.0, 除外=0.0)
-    # 全制約を優先度マスタから導出（外勤先マスタの fixed/excluded/preferred は参照しない）
+    # 優先度マップ (weight: 必須=3.0, 指名=2.0, 任意=1.0, 除外=0.0)
     priority_map = {}
     for a in affinities:
         priority_map[(a["doctor_id"], a["clinic_id"])] = a["weight"]
 
-    clinic_fixed = {}      # {clinic_id: set(doctor_ids)} 固定メンバー(WL)
+    # 必須ペア: weight=3.0 → 月1回以上割り当て
+    must_pairs = {}        # {doctor_id: [clinic_ids]}
     clinic_nominated = {}  # {clinic_id: set(doctor_ids)} 指名医員
     clinic_excluded = {}   # {clinic_id: set(doctor_ids)} 除外メンバー(BL)
-    must_pairs = {}        # {doctor_id: [clinic_ids]} 固定 → 月1回以上
     never_pairs = {}       # {doctor_id: [clinic_ids]} 除外 → 割当不可
     for (did, cid), w in priority_map.items():
-        if w == PRIORITY_FIXED:
-            clinic_fixed.setdefault(cid, set()).add(did)
+        if w == PRIORITY_MANDATORY:
             must_pairs.setdefault(did, []).append(cid)
         elif w == PRIORITY_NOMINATED:
             clinic_nominated.setdefault(cid, set()).add(did)
         elif w == PRIORITY_EXCLUDED:
             clinic_excluded.setdefault(cid, set()).add(did)
             never_pairs.setdefault(did, []).append(cid)
+
+    # 限定メンバー（WL）: 外勤先マスタの fixed_doctors から構築
+    clinic_fixed = {}      # {clinic_id: set(doctor_ids)}
+    for c in clinic_list:
+        fd = c.get("fixed_doctors") or []
+        if fd:
+            clinic_fixed[c["id"]] = set(fd)
 
     # 報酬マップ
     fee_map = {c["id"]: c.get("fee", 0) for c in clinic_list}
@@ -208,7 +216,7 @@ def solve_schedule(
                 if slot_cid == cid:
                     prob += x[(doc_id, cid, ds)] == 0, f"never_{doc_id}_{cid}_{ds}"
 
-    # 5. 固定メンバー（weight=3.0）は月1回以上割り当て
+    # 5. 必須（weight=3.0）は月1回以上割り当て
     must_slack_vars = {}
     for doc_id in doc_ids:
         for cid in must_pairs.get(doc_id, []):
@@ -228,7 +236,7 @@ def solve_schedule(
                         f"must_{doc_id}_{cid}"
                     )
 
-    # 6. 固定メンバー制約（WL: 固定メンバーがいる外勤先には固定メンバーのみ割当可）
+    # 6. 限定メンバー制約（WL: 限定メンバーが設定された外勤先にはリスト内の医員のみ割当可）
     for (cid, ds) in slots:
         fixed = clinic_fixed.get(cid, set())
         if fixed:
@@ -283,7 +291,7 @@ def solve_schedule(
         if cid in pref_clinics_map.get(doc_id, set())
     )
 
-    # 優先度スコア（固定=3, 指名=2, 任意=1 の外勤先に行くとプラス）
+    # 優先度スコア（必須=3, 指名=2, 任意=1 の外勤先に行くとプラス）
     # 旧 nomination_term は priority_term に統合（指名=2.0 が自然にボーナスとして機能）
     priority_term = pulp.lpSum(
         x[(doc_id, cid, ds)] * priority_map.get((doc_id, cid), 0)
@@ -340,7 +348,7 @@ def solve_schedule(
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
-    #   w_pri:  優先度（固定=3/指名=2/任意=1/除外=0）
+    #   w_pri:  優先度（必須=3/指名=2/任意=1/除外=0）
     #   w_avoid: △日ペナルティ
     #   w_cnt:  回数均等
     #   w_dcr:  日別外勤先希望
@@ -453,8 +461,8 @@ def solve_with_relaxation(
         result["relaxations"] = []
         return result
 
-    # Step 1: 固定メンバーの月1回以上制約をソフト制約に緩和
-    relaxations.append("固定メンバーの月1回以上制約をソフト制約に変更")
+    # Step 1: 必須メンバーの月1回以上制約をソフト制約に緩和
+    relaxations.append("必須メンバーの月1回以上制約をソフト制約に変更")
     result = solve_schedule(
         doctors, clinics, saturdays, preferences, affinities,
         mode=mode, previous_earnings=previous_earnings,
@@ -551,12 +559,18 @@ def diagnose_infeasibility(
     priority_map = {}
     for a in affinities:
         priority_map[(a["doctor_id"], a["clinic_id"])] = a["weight"]
+
+    # 限定メンバー（WL）: 外勤先マスタの fixed_doctors から構築
     clinic_fixed = {}
+    for c in clinics:
+        fd = c.get("fixed_doctors") or []
+        if fd:
+            clinic_fixed[c["id"]] = set(fd)
+
     clinic_excluded = {}
     must_pairs = {}
     for (did, cid), w in priority_map.items():
-        if w == PRIORITY_FIXED:
-            clinic_fixed.setdefault(cid, set()).add(did)
+        if w == PRIORITY_MANDATORY:
             must_pairs.setdefault(did, []).append(cid)
         elif w == PRIORITY_EXCLUDED:
             clinic_excluded.setdefault(cid, set()).add(did)
@@ -605,7 +619,7 @@ def diagnose_infeasibility(
         issues.append("**割当可能医員が不足しているスロット**:")
         issues.extend(slot_problems)
 
-    # --- 固定メンバー月1回以上 vs NG日 ---
+    # --- 必須メンバー月1回以上 vs NG日 ---
     must_problems = []
     for did, cids in must_pairs.items():
         for cid in cids:
@@ -617,11 +631,11 @@ def diagnose_infeasibility(
             ]
             if not available_slots:
                 must_problems.append(
-                    f"{doc_name.get(did, '?')} は {clinic_name.get(cid, '?')} の固定メンバーだが"
+                    f"{doc_name.get(did, '?')} は {clinic_name.get(cid, '?')} の必須メンバーだが"
                     f"全日程がNG/制約により割当不可"
                 )
     if must_problems:
-        issues.append("**固定メンバー制約の矛盾**:")
+        issues.append("**必須メンバー制約の矛盾**:")
         issues.extend(must_problems)
 
     # --- 同一日スロット数 vs 利用可能医員（制約込み） ---
@@ -655,7 +669,7 @@ def diagnose_infeasibility(
 
     if len(issues) == 2:
         issues.append("個別の制約は問題ありませんが、組み合わせにより解がない可能性があります。"
-                       "NG日や固定メンバー設定の緩和を検討してください")
+                       "NG日や限定メンバー・必須設定の緩和を検討してください")
 
     return issues
 

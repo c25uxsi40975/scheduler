@@ -16,7 +16,7 @@ from ml_adjuster import (
     compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
     _compute_doctor_history, compute_pair_features,
 )
-from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_FIXED, PRIORITY_EXCLUDED, diagnose_infeasibility
+from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_MANDATORY, PRIORITY_EXCLUDED, diagnose_infeasibility
 from pipeline import run_integrated_pipeline
 from components.schedule_table import render_schedule_table
 
@@ -335,12 +335,16 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
             post_night_map[did] = pn
 
     excluded_pairs = set()
-    fixed_members = {}
     for a in affinities:
         if a["weight"] == PRIORITY_EXCLUDED:
             excluded_pairs.add((a["doctor_id"], a["clinic_id"]))
-        elif a["weight"] == PRIORITY_FIXED:
-            fixed_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
+
+    # 限定メンバー（WL）: 外勤先マスタの fixed_doctors から構築
+    fixed_members = {}
+    for cid, c in clinic_map.items():
+        fd = c.get("fixed_doctors") or []
+        if fd:
+            fixed_members[cid] = set(fd)
 
     max_assignments_map = {d["id"]: d.get("max_assignments", 0) for d in doctors}
     clinic_time_slot = {cid: c.get("time_slot", "") for cid, c in clinic_map.items()}
