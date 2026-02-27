@@ -86,18 +86,16 @@ FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 
 # 外勤先テンプレート（Excel③出張先マスタの定義値）
 CLINIC_TEMPLATES = {
-    "KamoH":    {"fee": 75000,  "effort_cost": 1,  "work_hours": 2.5, "time_slot": "AM",  "location": "鴨川市"},
-    "AsuCL":    {"fee": 60000,  "effort_cost": 2,  "work_hours": 3.0, "time_slot": "AM",  "location": "千葉市"},
-    "NaraH":    {"fee": 50000,  "effort_cost": 3,  "work_hours": 3.5, "time_slot": "AM",  "location": "習志野市"},
-    "AriCL":    {"fee": 60000,  "effort_cost": 4,  "work_hours": 3.0, "time_slot": "AM",  "location": "市川市"},
-    "DoCL":     {"fee": 70000,  "effort_cost": 5,  "work_hours": 3.5, "time_slot": "AM",  "location": "船橋市"},
-    "SyoCL":    {"fee": 100000, "effort_cost": 6,  "work_hours": 5.0, "time_slot": "ALL", "location": "柏市"},
-    "InaCL_PM": {"fee": 60002,  "effort_cost": 6,  "work_hours": 3.0, "time_slot": "PM",  "location": "千葉市"},
-    "WadCL":    {"fee": 80000,  "effort_cost": 7,  "work_hours": 5.0, "time_slot": "PM",  "location": "市原市"},
-    "FutaCL":   {"fee": 100000, "effort_cost": 8,  "work_hours": 5.0, "time_slot": "ALL", "location": "千葉市"},
-    "MihaCL":   {"fee": 100000, "effort_cost": 9,  "work_hours": 6.0, "time_slot": "ALL", "location": "千葉市"},
-    "InaCL":    {"fee": 120000, "effort_cost": 10, "work_hours": 7.0, "time_slot": "ALL", "location": "千葉市"},
-    "NaCL":     {"fee": 60001,  "effort_cost": 10, "work_hours": 6.0, "time_slot": "ALL", "location": "浦安市"},
+    "鴨川病院":   {"fee": 75000,  "effort_cost": 1,  "work_hours": 2.5, "time_slot": "AM",  "location": "鴨川市"},
+    "あすみが丘": {"fee": 60000,  "effort_cost": 2,  "work_hours": 3.0, "time_slot": "AM",  "location": "千葉市"},
+    "習志野第一": {"fee": 50000,  "effort_cost": 3,  "work_hours": 3.5, "time_slot": "AM",  "location": "習志野市"},
+    "有本":       {"fee": 60000,  "effort_cost": 4,  "work_hours": 3.0, "time_slot": "AM",  "location": "市川市"},
+    "土井":       {"fee": 70000,  "effort_cost": 5,  "work_hours": 3.5, "time_slot": "AM",  "location": "船橋市"},
+    "沼南":       {"fee": 100000, "effort_cost": 6,  "work_hours": 5.0, "time_slot": "ALL", "location": "柏市"},
+    "和田":       {"fee": 80000,  "effort_cost": 7,  "work_hours": 5.0, "time_slot": "PM",  "location": "市原市"},
+    "双葉":       {"fee": 100000, "effort_cost": 8,  "work_hours": 5.0, "time_slot": "ALL", "location": "千葉市"},
+    "千葉駅":     {"fee": 100000, "effort_cost": 9,  "work_hours": 6.0, "time_slot": "ALL", "location": "千葉市"},
+    "稲毛":       {"fee": 120000, "effort_cost": 10, "work_hours": 7.0, "time_slot": "ALL", "location": "千葉市"},
 }
 
 

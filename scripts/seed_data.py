@@ -39,20 +39,18 @@ for name, account in doctor_data:
     else:
         print(f"  追加: {name} [ID:{account}]")
 
-# 外勤先12ヶ所（CLINIC_TEMPLATESの定義に準拠）
+# 外勤先10ヶ所（CLINIC_TEMPLATESの定義に準拠）
 clinic_data = [
-    ("KamoH",    75000,  "weekly",       1,  2.5, "AM",  "鴨川市"),
-    ("AsuCL",    60000,  "weekly",       2,  3.0, "AM",  "千葉市"),
-    ("NaraH",    50000,  "weekly",       3,  3.5, "AM",  "習志野市"),
-    ("AriCL",    60000,  "biweekly_odd", 4,  3.0, "AM",  "市川市"),
-    ("DoCL",     70000,  "weekly",       5,  3.5, "AM",  "船橋市"),
-    ("SyoCL",    100000, "weekly",       6,  5.0, "ALL", "柏市"),
-    ("InaCL_PM", 60002,  "biweekly_even",6,  3.0, "PM",  "千葉市"),
-    ("WadCL",    80000,  "weekly",       7,  5.0, "PM",  "市原市"),
-    ("FutaCL",   100000, "biweekly_odd", 8,  5.0, "ALL", "千葉市"),
-    ("MihaCL",   100000, "weekly",       9,  6.0, "ALL", "千葉市"),
-    ("InaCL",    120000, "biweekly_even",10, 7.0, "ALL", "千葉市"),
-    ("NaCL",     60001,  "weekly",       10, 6.0, "ALL", "浦安市"),
+    ("鴨川病院",   75000,  "weekly",       1,  2.5, "AM",  "鴨川市"),
+    ("あすみが丘", 60000,  "weekly",       2,  3.0, "AM",  "千葉市"),
+    ("習志野第一", 50000,  "weekly",       3,  3.5, "AM",  "習志野市"),
+    ("有本",       60000,  "biweekly_odd", 4,  3.0, "AM",  "市川市"),
+    ("土井",       70000,  "weekly",       5,  3.5, "AM",  "船橋市"),
+    ("沼南",       100000, "weekly",       6,  5.0, "ALL", "柏市"),
+    ("和田",       80000,  "weekly",       7,  5.0, "PM",  "市原市"),
+    ("双葉",       100000, "biweekly_odd", 8,  5.0, "ALL", "千葉市"),
+    ("千葉駅",     100000, "weekly",       9,  6.0, "ALL", "千葉市"),
+    ("稲毛",       120000, "biweekly_even",10, 7.0, "ALL", "千葉市"),
 ]
 
 for name, fee, freq, effort, hours, tslot, loc in clinic_data:
