@@ -2,7 +2,7 @@
 import streamlit as st
 from datetime import date
 from database import get_doctors, get_clinics, get_schedules
-from components.schedule_table import render_schedule_table
+from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
 
 
 def render(doctor, target_month):
@@ -13,6 +13,7 @@ def render(doctor, target_month):
 
     if confirmed:
         sched = confirmed[0]
+        doctors = get_doctors()
         clinics = get_clinics()
         clinic_map = {c["id"]: c["name"] for c in clinics}
 
@@ -34,6 +35,12 @@ def render(doctor, target_month):
         # 全体表示
         st.markdown("---")
         st.subheader("全体スケジュール")
-        render_schedule_table(sched, get_doctors(), clinics)
+        render_schedule_table(sched, doctors, clinics)
+
+        # 医員別ビュー
+        render_doctor_view_table(sched, doctors)
+
+        # 医員別統計
+        render_doctor_stats_table(sched, doctors, clinics)
     else:
         st.info("まだスケジュールが確定されていません")

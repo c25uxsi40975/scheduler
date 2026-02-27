@@ -144,7 +144,11 @@ def _show_admin_header():
     # デフォルト月: session_stateに明示的な値があればそれを使う。
     # なければ公開月（open_month）をデフォルトにする。
     key = "admin_target_month"
-    if key not in st.session_state:
+    # スケジュール確定後の次月切替（widget keyは直接設定不可なので間接キー経由）
+    pending = st.session_state.pop("_pending_target_month", None)
+    if pending and pending in months:
+        st.session_state[key] = pending
+    elif key not in st.session_state:
         current_open = get_open_month()
         if current_open and current_open in months:
             st.session_state[key] = current_open

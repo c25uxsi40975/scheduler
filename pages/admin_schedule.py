@@ -1,7 +1,7 @@
 """管理者: 確定スケジュール確認タブ"""
 import streamlit as st
 from database import get_doctors, get_clinics, get_schedules
-from components.schedule_table import render_schedule_table
+from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
 
 
 def render(target_month):
@@ -12,7 +12,14 @@ def render(target_month):
 
     if confirmed:
         sched = confirmed[0]
-        df = render_schedule_table(sched, get_doctors(), get_clinics())
+        doctors = get_doctors()
+        df = render_schedule_table(sched, doctors, get_clinics())
+
+        # 医員別ビュー
+        render_doctor_view_table(sched, doctors)
+
+        # 医員別統計
+        render_doctor_stats_table(sched, doctors, get_clinics())
 
         # CSV出力
         if df is not None:

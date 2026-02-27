@@ -19,7 +19,7 @@ from ml_adjuster import (
 )
 from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_MANDATORY, PRIORITY_EXCLUDED, diagnose_infeasibility
 from pipeline import run_integrated_pipeline
-from components.schedule_table import render_schedule_table
+from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
 
 
 def _append_training_rows(target_month, sched, doctors, clinics, confirmed_schedules):
@@ -231,7 +231,6 @@ def render(target_month, year, month):
         # データを一度だけ取得してローカル変数に保持（冗長なAPI呼出を排除）
         _clinics = get_clinics()
         _doctors = get_doctors()
-        fee_map = {c["id"]: c["fee"] for c in _clinics}
         clinic_map = {c["id"]: c for c in _clinics}
         doc_name_map = {d["id"]: d["name"] for d in _doctors}
         clinic_name_map = {c["id"]: c["name"] for c in _clinics}
@@ -264,25 +263,7 @@ def render(target_month, year, month):
                     render_schedule_table(sched, _doctors, _clinics)
 
                     # 医員別ビュー（医員 × 日付 → 外勤先）
-                    st.write("**医員別ビュー:**")
-                    doc_sched = {}
-                    for a in sched["assignments"]:
-                        doc_sched.setdefault(a["doctor_id"], {})[a["date"]] = (
-                            clinic_name_map.get(a["clinic_id"], "?")
-                        )
-                    dates_in_sched = sorted(set(a["date"] for a in sched["assignments"]))
-                    date_labels = {
-                        ds: date.fromisoformat(ds).strftime("%m/%d(%a)")
-                        for ds in dates_in_sched
-                    }
-                    doc_rows = []
-                    for d in sorted(_doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
-                        row = {"医員": d["name"]}
-                        for ds in dates_in_sched:
-                            row[date_labels[ds]] = doc_sched.get(d["id"], {}).get(ds, "-")
-                        doc_rows.append(row)
-                    df_doc_view = pd.DataFrame(doc_rows)
-                    st.dataframe(df_doc_view, use_container_width=True, hide_index=True)
+                    render_doctor_view_table(sched, _doctors)
 
                     # △日に割り当てがある場合の警告
                     avoid_hits = []
@@ -301,26 +282,7 @@ def render(target_month, year, month):
                         )
 
                     # 医員別統計
-                    st.write("**医員別統計:**")
-                    doc_stats = {}
-                    for a in sched["assignments"]:
-                        did = a["doctor_id"]
-                        if did not in doc_stats:
-                            doc_stats[did] = {"回数": 0, "報酬合計": 0}
-                        doc_stats[did]["回数"] += 1
-                        doc_stats[did]["報酬合計"] += fee_map.get(a["clinic_id"], 0)
-
-                    stat_rows = []
-                    for d in _doctors:
-                        s = doc_stats.get(d["id"], {"回数": 0, "報酬合計": 0})
-                        stat_rows.append({
-                            "医員": d["name"],
-                            "外勤回数": s["回数"],
-                            "報酬合計": f"¥{s['報酬合計']:,}",
-                        })
-
-                    df_stat = pd.DataFrame(stat_rows)
-                    st.dataframe(df_stat, use_container_width=True, hide_index=True)
+                    render_doctor_stats_table(sched, _doctors, _clinics)
 
                     # アクションボタン
                     btn_cols = st.columns(3)
@@ -341,9 +303,9 @@ def render(target_month, year, month):
                                     get_target_saturdays(year, month),
                                 )
                                 _send_confirmation_notification(target_month, sched)
-                                # 確定後は次の月をデフォルト表示にする
+                                # 確定後は次の月をデフォルト表示にする（widget keyは直接設定不可なので間接キーを使用）
                                 next_month = (date(year, month, 1) + relativedelta(months=1)).strftime("%Y-%m")
-                                st.session_state["admin_target_month"] = next_month
+                                st.session_state["_pending_target_month"] = next_month
                                 st.success("確定しました！")
                                 st.rerun()
                         else:
