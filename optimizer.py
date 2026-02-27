@@ -698,7 +698,11 @@ def diagnose_infeasibility(
             eligible.append((cid, ds))
         # 同一日は1枠しか使えないので、割当可能日数でカウント
         eligible_dates = set(ds for _, ds in eligible)
-        max_a = d.get("max_assignments", 0) or 99
+        raw_ma = d.get("max_assignments")
+        if raw_ma is not None and raw_ma == 0:
+            max_a = 0
+        else:
+            max_a = raw_ma if raw_ma and raw_ma > 0 else 99
         effective = min(len(eligible_dates), max_a)
         doc_eligible_count[did] = effective
         doc_eligible_slots[did] = eligible
@@ -885,6 +889,112 @@ def diagnose_infeasibility(
     if matching_problems:
         issues.append("**日別マッチング分析（同一日1人1枠の制約考慮）**:")
         issues.extend(matching_problems)
+
+    # --- 全日程通しの実行可能性チェック（PuLP簡易LP） ---
+    # 必須制約を除いた全ハード制約で最大何枠埋められるかを計算
+    try:
+        feas_prob = pulp.LpProblem("FeasCheck", pulp.LpMaximize)
+        feas_x = {}
+        active_dids = set()
+        for d in doctors:
+            did = d["id"]
+            raw_ma = d.get("max_assignments")
+            if raw_ma is not None and raw_ma == 0:
+                continue
+            for cid, ds, req in slots:
+                if ds in ng_map.get(did, set()):
+                    continue
+                if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                    continue
+                fixed = clinic_fixed.get(cid, set())
+                if fixed and did not in fixed:
+                    continue
+                if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                    continue
+                feas_x[(did, cid, ds)] = pulp.LpVariable(f"f_{did}_{cid}_{ds}", cat=pulp.LpBinary)
+                active_dids.add(did)
+
+        feas_prob += pulp.lpSum(feas_x.values())
+
+        # 各スロットに最大 required 人
+        for cid, ds, req in slots:
+            relevant = [feas_x[k] for k in feas_x if k[1] == cid and k[2] == ds]
+            if relevant:
+                feas_prob += pulp.lpSum(relevant) <= req
+
+        # 同一日に1人1枠
+        all_dates = sorted(slots_by_date.keys())
+        for did in active_dids:
+            for ds in all_dates:
+                relevant = [feas_x[k] for k in feas_x if k[0] == did and k[2] == ds]
+                if relevant:
+                    feas_prob += pulp.lpSum(relevant) <= 1
+
+        # 月回数上限
+        for d in doctors:
+            did = d["id"]
+            raw_ma = d.get("max_assignments")
+            if raw_ma and raw_ma > 0:
+                relevant = [feas_x[k] for k in feas_x if k[0] == did]
+                if relevant:
+                    feas_prob += pulp.lpSum(relevant) <= raw_ma
+
+        solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=5)
+        feas_prob.solve(solver)
+        max_assignable = int(sum(pulp.value(v) or 0 for v in feas_x.values()))
+
+        if max_assignable < total_required:
+            issues.append(
+                f"**全日程の実行可能性チェック**: 全ハード制約下で最大{max_assignable}枠のみ割当可能"
+                f"（必要{total_required}枠、{total_required - max_assignable}枠不足）"
+            )
+            # 日ごとの不足を表示
+            for ds in all_dates:
+                day_assigned = int(sum(
+                    pulp.value(feas_x[k]) or 0
+                    for k in feas_x if k[2] == ds
+                ))
+                day_needed = slots_by_date[ds]
+                if day_assigned < day_needed:
+                    # どのスロットが埋まらなかったか
+                    unfilled = []
+                    for cid, d_s, req in slots:
+                        if d_s != ds:
+                            continue
+                        filled = int(sum(
+                            pulp.value(feas_x[k]) or 0
+                            for k in feas_x if k[1] == cid and k[2] == ds
+                        ))
+                        if filled < req:
+                            elig = [did for did in active_dids
+                                    if (did, cid, ds) in feas_x]
+                            names = ", ".join(doc_name.get(e, "?") for e in elig)
+                            unfilled.append(
+                                f"  {clinic_name.get(cid, '?')}: 候補{len(elig)}人（{names}）"
+                            )
+                    if unfilled:
+                        issues.append(f"  {ds}: {day_needed}枠中{day_assigned}枠のみ割当可能")
+                        issues.extend(unfilled)
+
+            # ボトルネック医員
+            bottleneck = []
+            for d in doctors:
+                did = d["id"]
+                raw_ma = d.get("max_assignments")
+                if raw_ma is not None and raw_ma == 0:
+                    bottleneck.append(f"  {doc_name[did]}: max_assignments=0（割当対象外）")
+                    continue
+                ma = raw_ma if raw_ma and raw_ma > 0 else 99
+                eligible_days = set(ds for _, ds in doc_eligible_slots.get(did, []))
+                if len(eligible_days) < ma:
+                    bottleneck.append(
+                        f"  {doc_name[did]}: 上限{ma}回だが利用可能{len(eligible_days)}日"
+                    )
+            if bottleneck:
+                issues.append("**ボトルネック医員**:")
+                issues.extend(bottleneck[:10])
+    except Exception:
+        pass  # LP構築エラー時はスキップ
 
     # --- 最終フォールバック ---
     if len(issues) == 2:
