@@ -6,7 +6,8 @@ from optimizer import get_target_saturdays
 
 
 def _send_notifications(doctor_name, doctor_email, target_month,
-                        ng_dates, avoid_dates, free_text, saturdays):
+                        ng_dates, avoid_dates, free_text, saturdays,
+                        post_night_dates=None):
     """GAS Web App経由で通知メールを送信"""
     gas_url = st.secrets.get("gas_webapp_url", "")
     if not gas_url:
@@ -14,6 +15,7 @@ def _send_notifications(doctor_name, doctor_email, target_month,
     # 日程サマリー作成
     ng_set = set(ng_dates)
     avoid_set = set(avoid_dates)
+    pn_set = set(post_night_dates or [])
     date_summary = []
     for s in saturdays:
         ds = s.isoformat()
@@ -22,6 +24,8 @@ def _send_notifications(doctor_name, doctor_email, target_month,
             date_summary.append(f"{label}: × NG")
         elif ds in avoid_set:
             date_summary.append(f"{label}: △")
+        elif ds in pn_set:
+            date_summary.append(f"{label}: 当直明け○(PM)")
         else:
             date_summary.append(f"{label}: ○")
 
@@ -54,7 +58,7 @@ def _send_notifications(doctor_name, doctor_email, target_month,
         pass
 
 
-DAY_STATUS_OPTIONS = ["○ 可能", "△ できれば避けたい", "× NG"]
+DAY_STATUS_OPTIONS = ["○ 可能", "当直明け○ (PMのみ)", "△ できれば避けたい", "× NG"]
 
 
 def render(doctor, target_month, year, month):
@@ -65,20 +69,24 @@ def render(doctor, target_month, year, month):
     existing = get_preference(doctor["id"], target_month)
     existing_ng = set(existing["ng_dates"]) if existing else set()
     existing_avoid = set(existing["avoid_dates"]) if existing else set()
+    existing_post_night = set(existing["post_night_dates"]) if existing else set()
 
-    # 日程の希望入力（○△×）
+    # 日程の希望入力（○/当直明け○/△/×）
     st.subheader("日程の希望")
-    st.caption("○ 出勤可能 ／ △ できれば避けたい ／ × NG（出勤不可）")
+    st.caption("○ 出勤可能 ／ 当直明け○ PMのみ可 ／ △ できれば避けたい ／ × NG（出勤不可）")
 
     ng_dates = []
     avoid_dates = []
+    post_night_dates = []
     cols = st.columns(min(len(saturdays), 5)) if saturdays else []
     for i, s in enumerate(saturdays):
         ds = s.isoformat()
         with cols[i % len(cols)]:
             if ds in existing_ng:
-                default_idx = 2
+                default_idx = 3
             elif ds in existing_avoid:
+                default_idx = 2
+            elif ds in existing_post_night:
                 default_idx = 1
             else:
                 default_idx = 0
@@ -92,6 +100,8 @@ def render(doctor, target_month, year, month):
                 ng_dates.append(ds)
             elif status == "△ できれば避けたい":
                 avoid_dates.append(ds)
+            elif status == "当直明け○ (PMのみ)":
+                post_night_dates.append(ds)
 
     # 自由入力欄
     st.subheader("自由入力欄")
@@ -116,10 +126,11 @@ def render(doctor, target_month, year, month):
             preferred_clinics=existing_pref_clinics,
             date_clinic_requests=existing_dcr,
             free_text=free_text,
+            post_night_dates=post_night_dates,
         )
         _send_notifications(
             doctor["name"], doctor.get("email", ""), target_month,
-            ng_dates, avoid_dates, free_text, saturdays,
+            ng_dates, avoid_dates, free_text, saturdays, post_night_dates,
         )
         st.session_state["_doc_saved"] = True
         st.rerun()
@@ -142,6 +153,8 @@ def render(doctor, target_month, year, month):
                 sat_strs.append(f"**{label}** × NG")
             elif ds in existing_avoid:
                 sat_strs.append(f"**{label}** △")
+            elif ds in existing_post_night:
+                sat_strs.append(f"**{label}** 当直明け○")
             else:
                 sat_strs.append(f"**{label}** ○")
         st.write("　".join(sat_strs))

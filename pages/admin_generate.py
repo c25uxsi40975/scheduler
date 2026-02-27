@@ -310,11 +310,12 @@ def render(target_month, year, month):
                                 st.rerun()
 
 
-def _build_constraint_data(doctors, prefs, affinities):
+def _build_constraint_data(doctors, prefs, affinities, clinic_map):
     """制約チェック用のルックアップデータを構築"""
     ng_map = {}
     avoid_map = {}
     date_clinic_req_map = {}
+    post_night_map = {}
     for p in prefs:
         did = p["doctor_id"]
         ng_map[did] = set(p.get("ng_dates") or [])
@@ -322,6 +323,9 @@ def _build_constraint_data(doctors, prefs, affinities):
         dcr = p.get("date_clinic_requests") or {}
         if dcr:
             date_clinic_req_map[did] = dcr
+        pn = set(p.get("post_night_dates") or [])
+        if pn:
+            post_night_map[did] = pn
 
     excluded_pairs = set()
     fixed_members = {}
@@ -332,6 +336,7 @@ def _build_constraint_data(doctors, prefs, affinities):
             fixed_members.setdefault(a["clinic_id"], set()).add(a["doctor_id"])
 
     max_assignments_map = {d["id"]: d.get("max_assignments", 0) for d in doctors}
+    clinic_time_slot = {cid: c.get("time_slot", "") for cid, c in clinic_map.items()}
 
     return {
         "ng_map": ng_map,
@@ -340,6 +345,8 @@ def _build_constraint_data(doctors, prefs, affinities):
         "fixed_members": fixed_members,
         "max_assignments": max_assignments_map,
         "date_clinic_requests": date_clinic_req_map,
+        "post_night_map": post_night_map,
+        "clinic_time_slot": clinic_time_slot,
     }
 
 
@@ -348,6 +355,8 @@ def _get_allowed_doctors(date_str, clinic_id, doctor_options, constraints, same_
     ng_map = constraints["ng_map"]
     excluded_pairs = constraints["excluded_pairs"]
     fixed_members = constraints["fixed_members"]
+    post_night_map = constraints["post_night_map"]
+    clinic_ts = constraints["clinic_time_slot"]
 
     allowed = []
     for (did, dname) in doctor_options:
@@ -362,6 +371,9 @@ def _get_allowed_doctors(date_str, clinic_id, doctor_options, constraints, same_
         if fixed and did not in fixed:
             continue
         if did in same_day_others:
+            continue
+        # 当直明け日はPM以外の外勤先に割り当て不可
+        if date_str in post_night_map.get(did, set()) and clinic_ts.get(clinic_id, "") != "PM":
             continue
         allowed.append((did, dname))
     return allowed
@@ -407,7 +419,7 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
     """スケジュールの手動調整UI（制約チェック付き）"""
     st.info("手動調整モード: 各スロットの担当医員を変更できます")
 
-    constraints = _build_constraint_data(doctors, prefs, affinities)
+    constraints = _build_constraint_data(doctors, prefs, affinities, clinic_map)
     assignments = sched["assignments"]
 
     # assignments を (date, clinic_id) → doctor_id のマップに変換

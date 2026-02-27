@@ -112,6 +112,16 @@ def solve_schedule(
         avoid_map[p["doctor_id"]] = set(p.get("avoid_dates", []))
         pref_clinics_map[p["doctor_id"]] = set(p.get("preferred_clinics", []))
 
+    # 当直明け日マップ: {doctor_id: set(date_str)} PMのみ割当可
+    post_night_map = {}
+    for p in preferences:
+        pn = set(p.get("post_night_dates") or [])
+        if pn:
+            post_night_map[p["doctor_id"]] = pn
+
+    # 外勤先time_slotマップ
+    clinic_time_slot = {c["id"]: c.get("time_slot", "") for c in clinic_list}
+
     # 日別外勤先希望マップ: {doctor_id: {date_str: clinic_id}}
     date_clinic_req_map = {}
     for p in preferences:
@@ -183,6 +193,13 @@ def solve_schedule(
         for (cid, ds) in slots:
             if ds in ng_dates:
                 prob += x[(doc_id, cid, ds)] == 0, f"ng_{doc_id}_{cid}_{ds}"
+
+    # 3b. 当直明け日はPM以外の外勤先に割り当て不可
+    for doc_id in doc_ids:
+        pn_dates = post_night_map.get(doc_id, set())
+        for (cid, ds) in slots:
+            if ds in pn_dates and clinic_time_slot.get(cid, "") != "PM":
+                prob += x[(doc_id, cid, ds)] == 0, f"post_night_{doc_id}_{cid}_{ds}"
 
     # 4. 除外（weight=0.0）は割り当て不可
     for doc_id in doc_ids:

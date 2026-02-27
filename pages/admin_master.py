@@ -266,7 +266,8 @@ def render(target_month, year, month):
                 tslot_options = ["", "AM", "PM", "ALL"]
                 tpl_tslot = tpl.get("time_slot", "")
                 new_tslot = st.selectbox("時間帯", tslot_options,
-                                         index=tslot_options.index(tpl_tslot) if tpl_tslot in tslot_options else 0)
+                                         index=tslot_options.index(tpl_tslot) if tpl_tslot in tslot_options else 0,
+                                         help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です")
                 new_loc = st.text_input("勤務地", value=tpl.get("location", ""))
                 if st.form_submit_button("追加", use_container_width=True):
                     if new_clinic.strip():
@@ -360,7 +361,8 @@ def render(target_month, year, month):
                             edit_tslot = st.selectbox(
                                 "時間帯", time_slot_options,
                                 index=tslot_idx,
-                                key=f"tslot_{c['id']}"
+                                key=f"tslot_{c['id']}",
+                                help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です",
                             )
                             edit_loc = st.text_input(
                                 "勤務地", value=c.get("location", ""),
@@ -529,7 +531,7 @@ def render(target_month, year, month):
     # --- 3B-1: 日程マトリクス（医員×日付 ○/△/×） ---
     st.markdown("---")
     st.write(f"**医員の日程希望 — 代理入力 ({target_month})**")
-    st.caption("管理者が医員の日程希望をまとめて入力できます（○=可能 △=できれば避けたい ×=NG）")
+    st.caption("管理者が医員の日程希望をまとめて入力できます（○=可能 当○=当直明け(PMのみ) △=できれば避けたい ×=NG）")
 
     if doctors:
         saturdays = get_target_saturdays(year, month)
@@ -539,7 +541,7 @@ def render(target_month, year, month):
             prefs_3b = get_all_preferences(target_month)
             pref_map_3b = {p["doctor_id"]: p for p in prefs_3b}
 
-            SCHEDULE_STATUS = ["○", "△", "×"]
+            SCHEDULE_STATUS = ["○", "当○", "△", "×"]
             rank_labels_3b = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
             sorted_docs_3b = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
 
@@ -550,6 +552,7 @@ def render(target_month, year, month):
                 pref = pref_map_3b.get(d["id"])
                 ng_set = set(pref.get("ng_dates", [])) if pref else set()
                 avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
+                pn_set = set(pref.get("post_night_dates", [])) if pref else set()
                 row = {}
                 for s in saturdays:
                     ds = s.isoformat()
@@ -558,6 +561,8 @@ def render(target_month, year, month):
                         row[col_label] = "×"
                     elif ds in avoid_set:
                         row[col_label] = "△"
+                    elif ds in pn_set:
+                        row[col_label] = "当○"
                     else:
                         row[col_label] = "○"
                 matrix_data[row_label] = row
@@ -583,9 +588,11 @@ def render(target_month, year, month):
                     pref = pref_map_3b.get(d["id"])
                     old_ng = set(pref.get("ng_dates", [])) if pref else set()
                     old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
+                    old_pn = set(pref.get("post_night_dates", [])) if pref else set()
 
                     new_ng = []
                     new_avoid = []
+                    new_pn = []
                     for s in saturdays:
                         ds = s.isoformat()
                         col_label = s.strftime("%m/%d(%a)")
@@ -594,12 +601,15 @@ def render(target_month, year, month):
                             new_ng.append(ds)
                         elif val == "△":
                             new_avoid.append(ds)
+                        elif val == "当○":
+                            new_pn.append(ds)
 
-                    if set(new_ng) != old_ng or set(new_avoid) != old_avoid:
+                    if set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
                         batch_items.append({
                             "doctor_id": d["id"],
                             "ng_dates": new_ng,
                             "avoid_dates": new_avoid,
+                            "post_night_dates": new_pn,
                             "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
                             "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
                             "free_text": pref.get("free_text", "") if pref else "",
