@@ -667,6 +667,137 @@ def diagnose_infeasibility(
         issues.append("**日別の制約込み医員不足**:")
         issues.extend(day_detail_problems)
 
+    # --- 容量の余裕チェック ---
+    slack = cap - total_required
+    if slack <= 2:
+        issues.append(f"**容量の余裕が非常に少ない**: 上限合計{cap} - 必要{total_required} = 余裕{slack}枠。"
+                       "NG日や制約により実質的に不足する可能性が高いです")
+
+    # --- 医員ごとの実質割当可能スロット数 ---
+    doc_eligible_count = {}
+    doc_eligible_slots = {}
+    for d in doctors:
+        did = d["id"]
+        eligible = []
+        for cid, ds, req in slots:
+            if ds in ng_map.get(did, set()):
+                continue
+            if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                continue
+            fixed = clinic_fixed.get(cid, set())
+            if fixed and did not in fixed:
+                continue
+            if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                continue
+            eligible.append((cid, ds))
+        # 同一日は1枠しか使えないので、割当可能日数でカウント
+        eligible_dates = set(ds for _, ds in eligible)
+        max_a = d.get("max_assignments", 0) or 99
+        effective = min(len(eligible_dates), max_a)
+        doc_eligible_count[did] = effective
+        doc_eligible_slots[did] = eligible
+
+    effective_cap = sum(doc_eligible_count.values())
+    if effective_cap < total_required:
+        issues.append(f"**実質容量不足**: 制約考慮後の割当可能合計={effective_cap}枠 < 必要{total_required}枠")
+        # 制約で大きく制限されている医員を表示
+        constrained = []
+        for d in doctors:
+            did = d["id"]
+            max_a = d.get("max_assignments", 0) or 99
+            if doc_eligible_count[did] < max_a:
+                constrained.append(
+                    f"{doc_name[did]}: 上限{max_a}回だが実質{doc_eligible_count[did]}枠のみ可能"
+                )
+        if constrained:
+            issues.append("**制約で制限されている医員**:")
+            issues.extend(constrained[:10])
+
+    # --- 日別の詳細分析（WLロックイン検出） ---
+    day_analysis = []
+    for ds in sorted(slots_by_date):
+        day_slots_list = [(cid, req) for cid, d, req in slots if d == ds]
+        day_req = sum(r for _, r in day_slots_list)
+
+        # スロットごとの割当可能医員
+        slot_eligible = {}
+        for cid, req in day_slots_list:
+            eligible = []
+            for d in doctors:
+                did = d["id"]
+                if ds in ng_map.get(did, set()):
+                    continue
+                if priority_map.get((did, cid)) == PRIORITY_EXCLUDED:
+                    continue
+                fixed = clinic_fixed.get(cid, set())
+                if fixed and did not in fixed:
+                    continue
+                if ds in post_night_map.get(did, set()) and clinic_time_slot.get(cid, "") != "PM":
+                    continue
+                eligible.append(did)
+            slot_eligible[cid] = eligible
+
+        # WLロックイン: WLスロットで割当可能がちょうど必要人数 → その医員は他に使えない
+        locked = set()
+        lock_details = []
+        for cid, req in day_slots_list:
+            elig = slot_eligible.get(cid, [])
+            if clinic_fixed.get(cid) and len(elig) <= req:
+                locked.update(elig)
+                names = ", ".join(doc_name.get(e, "?") for e in elig)
+                lock_details.append(
+                    f"  {clinic_name.get(cid, '?')}(限定): 割当可能{len(elig)}人={names} → 全員ロック"
+                )
+
+        # ロックイン後の残りスロット vs 残り医員
+        remaining_req = sum(r for cid, r in day_slots_list if not clinic_fixed.get(cid) or len(slot_eligible.get(cid, [])) > r)
+        all_available = set()
+        for cid, _ in day_slots_list:
+            all_available.update(slot_eligible.get(cid, []))
+        remaining_docs = all_available - locked
+        # ロック済み医員を除いた非WLスロットの割当可能数
+        non_locked_req = 0
+        for cid, req in day_slots_list:
+            if cid in clinic_fixed and len(slot_eligible.get(cid, [])) <= req:
+                continue  # このスロットはロック済み
+            non_locked_req += req
+
+        if locked and len(remaining_docs) < non_locked_req:
+            day_analysis.append(
+                f"**{ds}**: 限定メンバーのロックインにより残り医員が不足"
+            )
+            day_analysis.extend(lock_details)
+            day_analysis.append(
+                f"  残りスロット{non_locked_req}枠に対し残り医員{len(remaining_docs)}人"
+            )
+
+    if day_analysis:
+        issues.append("**日別のロックイン分析**:")
+        issues.extend(day_analysis)
+
+    # --- 必須予約による容量圧迫 ---
+    must_reserved = 0
+    must_details = []
+    for did, cids in must_pairs.items():
+        must_reserved += len(cids)
+        if len(cids) > 1:
+            cnames = ", ".join(clinic_name.get(cid, "?") for cid in cids)
+            must_details.append(
+                f"{doc_name.get(did, '?')}: {len(cids)}件の必須（{cnames}）"
+            )
+    if must_reserved > 0:
+        free_cap = effective_cap - must_reserved
+        issues.append(
+            f"**必須予約**: {must_reserved}枠が必須で予約済み → "
+            f"自由に使える容量={effective_cap}-{must_reserved}={free_cap}枠"
+            f"（残り必要: {total_required - must_reserved}枠）"
+        )
+        if must_details:
+            issues.extend(must_details)
+        if free_cap < total_required - must_reserved:
+            issues.append("⚠ 必須予約後の自由容量が不足しています")
+
+    # --- 最終フォールバック ---
     if len(issues) == 2:
         issues.append("個別の制約は問題ありませんが、組み合わせにより解がない可能性があります。"
                        "NG日や限定メンバー・必須設定の緩和を検討してください")
