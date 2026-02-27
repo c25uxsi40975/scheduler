@@ -2,7 +2,7 @@
 import streamlit as st
 from datetime import date
 from database import get_doctors, get_clinics, get_schedules
-from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
+from components.schedule_table import render_schedule_table, render_doctor_view_table
 
 
 def render(doctor, target_month):
@@ -39,8 +39,5 @@ def render(doctor, target_month):
 
         # 医員別ビュー
         render_doctor_view_table(sched, doctors)
-
-        # 医員別統計
-        render_doctor_stats_table(sched, doctors, clinics)
     else:
         st.info("まだスケジュールが確定されていません")

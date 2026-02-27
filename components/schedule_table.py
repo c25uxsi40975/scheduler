@@ -75,12 +75,15 @@ def render_doctor_view_table(sched, doctors):
 
 
 def render_doctor_stats_table(sched, doctors, clinics):
-    """医員別統計（外勤回数・報酬合計）を表示する"""
+    """医員別統計（今月の回数・報酬 + 累計回数・累計報酬）を表示する"""
+    from database import get_all_confirmed_schedules
+
     if not sched["assignments"]:
         return None
 
     fee_map = {c["id"]: c.get("fee", 0) for c in clinics}
 
+    # 今月の統計
     doc_stats = {}
     for a in sched["assignments"]:
         did = a["doctor_id"]
@@ -89,13 +92,34 @@ def render_doctor_stats_table(sched, doctors, clinics):
         doc_stats[did]["回数"] += 1
         doc_stats[did]["報酬合計"] += fee_map.get(a["clinic_id"], 0)
 
+    # 累計（当月含む全確定スケジュール）
+    cumulative = {}
+    for cs in get_all_confirmed_schedules():
+        for a in cs["assignments"]:
+            did = a["doctor_id"]
+            if did not in cumulative:
+                cumulative[did] = {"回数": 0, "報酬合計": 0}
+            cumulative[did]["回数"] += 1
+            cumulative[did]["報酬合計"] += fee_map.get(a["clinic_id"], 0)
+
+    # 表示中のスケジュールが未確定の場合、その分を累計に加算
+    if not sched.get("is_confirmed"):
+        for did, s in doc_stats.items():
+            if did not in cumulative:
+                cumulative[did] = {"回数": 0, "報酬合計": 0}
+            cumulative[did]["回数"] += s["回数"]
+            cumulative[did]["報酬合計"] += s["報酬合計"]
+
     rows = []
     for d in sorted(doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
         s = doc_stats.get(d["id"], {"回数": 0, "報酬合計": 0})
+        c = cumulative.get(d["id"], {"回数": 0, "報酬合計": 0})
         rows.append({
             "医員": d["name"],
-            "外勤回数": s["回数"],
-            "報酬合計": f"¥{s['報酬合計']:,}",
+            "今月回数": s["回数"],
+            "今月報酬": f"¥{s['報酬合計']:,}",
+            "累計回数": c["回数"],
+            "累計報酬": f"¥{c['報酬合計']:,}",
         })
 
     df = pd.DataFrame(rows)
