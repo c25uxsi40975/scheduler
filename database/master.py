@@ -356,16 +356,12 @@ def set_clinic_date_override(clinic_id, date_str, required_doctors):
     # 既存行を探す
     for i, r in enumerate(records):
         if str(r.get("clinic_id", "")) == str(clinic_id) and str(r.get("date", "")) == date_str:
-            if required_doctors == 1:
-                ws.delete_rows(i + 2)
-            else:
-                ws.update([[str(clinic_id), date_str, required_doctors]], f"A{i+2}")
+            ws.update([[str(clinic_id), date_str, required_doctors]], f"A{i+2}")
             _clear_data_cache()
             return
 
-    # 新規（通常=1以外のみ保存）
-    if required_doctors != 1:
-        ws.append_row([str(clinic_id), date_str, required_doctors])
+    # 新規
+    ws.append_row([str(clinic_id), date_str, required_doctors])
     _clear_data_cache()
 
 
@@ -386,7 +382,6 @@ def set_clinic_date_overrides_batch(changes: dict):
         key = (str(r.get("clinic_id", "")), str(r.get("date", "")))
         existing[key] = i
 
-    rows_to_delete = []
     updates = []
     appends = []
 
@@ -394,21 +389,13 @@ def set_clinic_date_overrides_batch(changes: dict):
         key = (str(clinic_id), date_str)
         if key in existing:
             row_num = existing[key] + 2
-            if req == 1:
-                rows_to_delete.append(row_num)
-            else:
-                updates.append({'range': f'A{row_num}', 'values': [[str(clinic_id), date_str, req]]})
+            updates.append({'range': f'A{row_num}', 'values': [[str(clinic_id), date_str, req]]})
         else:
-            if req != 1:
-                appends.append([str(clinic_id), date_str, req])
+            appends.append([str(clinic_id), date_str, req])
 
     # バッチ更新（1回のAPI呼出）
     if updates:
         _retry(ws.batch_update, updates)
-
-    # 行削除（逆順で実行）
-    for row in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(row)
 
     # 新規行を一括追加（1回のAPI呼出）
     if appends:
