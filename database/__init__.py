@@ -15,7 +15,7 @@ from database.master import (
     get_suitability_training_data, append_suitability_training_data,
 )
 from database.operational import (
-    get_preference, get_all_preferences, upsert_preference,
+    get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences,
     get_schedules, save_schedule, confirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, get_confirmed_months,

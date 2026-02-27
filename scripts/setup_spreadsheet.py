@@ -133,7 +133,7 @@ GUIDE_ROWS = [
     ["id", "連番", "重複不可"],
     ["name", "外勤先名", ""],
     ["fee", "日当（円）", ""],
-    ["frequency", "頻度", "weekly / biweekly_odd(隔週奇数) / biweekly_even(隔週偶数) / first_only(第1週のみ) / last_only(最終週のみ)"],
+    ["frequency", "頻度", "weekly / biweekly_odd(隔週奇数) / biweekly_even(隔週偶数) / first_only(第1週のみ) / last_only(最終週のみ) / irregular(不定期。日別設定で対象日を指定)"],
     ["preferred_doctors", "（現在未使用）", "空欄で可"],
     ["fixed_doctors", "（現在未使用）", "空欄で可。優先度マスタで管理"],
     ["excluded_doctors", "（現在未使用）", "空欄で可。優先度マスタで管理"],

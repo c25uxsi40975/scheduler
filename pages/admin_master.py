@@ -10,7 +10,7 @@ from database import (
     set_doctor_individual_password, update_doctor_email,
     get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
-    get_all_preferences, upsert_preference,
+    get_all_preferences, upsert_preference, batch_upsert_preferences,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 from datetime import date
@@ -81,6 +81,7 @@ FREQ_OPTIONS = [
     ("biweekly_even", "隔週（偶数週）"),
     ("first_only", "第1週のみ"),
     ("last_only", "最終週のみ"),
+    ("irregular", "不定期"),
 ]
 FREQ_LABELS = {k: v for k, v in FREQ_OPTIONS}
 
@@ -587,10 +588,95 @@ def render(target_month, year, month):
                     st.session_state["_save_msg"] = "変更はありませんでした"
                 st.rerun()
 
-    # --- 3B: 日別外勤先希望 ---
+    # --- 3B-1: 日程マトリクス（医員×日付 ○/△/×） ---
     st.markdown("---")
-    st.write(f"**日別外勤先希望 ({target_month})**")
-    st.caption("医員の「この日にこの外勤先に行きたい」という希望を設定できます")
+    st.write(f"**医員の日程希望 — 代理入力 ({target_month})**")
+    st.caption("管理者が医員の日程希望をまとめて入力できます（○=可能 △=できれば避けたい ×=NG）")
+
+    if doctors:
+        saturdays = get_target_saturdays(year, month)
+        if not saturdays:
+            st.info("対象月に土曜日がありません")
+        else:
+            prefs_3b = get_all_preferences(target_month)
+            pref_map_3b = {p["doctor_id"]: p for p in prefs_3b}
+
+            SCHEDULE_STATUS = ["○", "△", "×"]
+            rank_labels_3b = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
+            sorted_docs_3b = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
+
+            # DataFrame 構築
+            matrix_data = {}
+            for d in sorted_docs_3b:
+                row_label = f"{d['name']}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
+                pref = pref_map_3b.get(d["id"])
+                ng_set = set(pref.get("ng_dates", [])) if pref else set()
+                avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
+                row = {}
+                for s in saturdays:
+                    ds = s.isoformat()
+                    col_label = s.strftime("%m/%d(%a)")
+                    if ds in ng_set:
+                        row[col_label] = "×"
+                    elif ds in avoid_set:
+                        row[col_label] = "△"
+                    else:
+                        row[col_label] = "○"
+                matrix_data[row_label] = row
+
+            df_schedule = pd.DataFrame.from_dict(matrix_data, orient="index")
+            schedule_col_config = {
+                col: st.column_config.SelectboxColumn(
+                    col, options=SCHEDULE_STATUS, default="○", width="small",
+                )
+                for col in df_schedule.columns
+            }
+            edited_schedule_df = st.data_editor(
+                df_schedule,
+                column_config=schedule_col_config,
+                use_container_width=True,
+                key="schedule_matrix",
+            )
+
+            if st.button("日程を一括保存", type="primary", key="save_schedule_matrix"):
+                batch_items = []
+                for d in sorted_docs_3b:
+                    row_label = f"{d['name']}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
+                    pref = pref_map_3b.get(d["id"])
+                    old_ng = set(pref.get("ng_dates", [])) if pref else set()
+                    old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
+
+                    new_ng = []
+                    new_avoid = []
+                    for s in saturdays:
+                        ds = s.isoformat()
+                        col_label = s.strftime("%m/%d(%a)")
+                        val = edited_schedule_df.at[row_label, col_label]
+                        if val == "×":
+                            new_ng.append(ds)
+                        elif val == "△":
+                            new_avoid.append(ds)
+
+                    if set(new_ng) != old_ng or set(new_avoid) != old_avoid:
+                        batch_items.append({
+                            "doctor_id": d["id"],
+                            "ng_dates": new_ng,
+                            "avoid_dates": new_avoid,
+                            "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
+                            "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
+                            "free_text": pref.get("free_text", "") if pref else "",
+                        })
+                if batch_items:
+                    batch_upsert_preferences(target_month, batch_items)
+                    st.session_state["_save_msg"] = f"日程希望を保存しました（{len(batch_items)}名変更）"
+                else:
+                    st.session_state["_save_msg"] = "変更はありませんでした"
+                st.rerun()
+
+    # --- 3B-2: 個別詳細入力（外勤先希望・備考） ---
+    st.markdown("---")
+    st.write(f"**個別の外勤先希望・備考 ({target_month})**")
+    st.caption("医員ごとに「この日にこの外勤先に行きたい」希望と備考を設定できます")
 
     if clinics and doctors:
         selected_doctor_dcr = st.selectbox(
@@ -605,12 +691,13 @@ def render(target_month, year, month):
             if not saturdays:
                 st.info("対象月に土曜日がありません")
             else:
-                prefs = get_all_preferences(target_month)
-                pref = next((p for p in prefs if p["doctor_id"] == selected_doctor_dcr["id"]), None)
+                prefs_3b2 = get_all_preferences(target_month)
+                pref = next((p for p in prefs_3b2 if p["doctor_id"] == selected_doctor_dcr["id"]), None)
 
                 existing_ng = set(pref.get("ng_dates", [])) if pref else set()
                 existing_avoid = set(pref.get("avoid_dates", [])) if pref else set()
                 existing_dcr = pref.get("date_clinic_requests", {}) if pref else {}
+                existing_free_text = pref.get("free_text", "") if pref else ""
 
                 clinic_options = [0] + [cli["id"] for cli in clinics]
 
@@ -641,7 +728,14 @@ def render(target_month, year, month):
                                 key=f"adm_dcr_{selected_doctor_dcr['id']}_{ds}",
                             )
 
-                    if st.form_submit_button("日別希望を保存", type="primary"):
+                    st.text_area(
+                        "備考",
+                        value=existing_free_text,
+                        placeholder="例: 学会のため第2週は避けたい",
+                        key=f"adm_freetext_{selected_doctor_dcr['id']}",
+                    )
+
+                    if st.form_submit_button("外勤先希望・備考を保存", type="primary"):
                         new_dcr = {}
                         for s in saturdays:
                             ds = s.isoformat()
@@ -650,15 +744,16 @@ def render(target_month, year, month):
                             val = st.session_state.get(f"adm_dcr_{selected_doctor_dcr['id']}_{ds}", 0)
                             if val != 0:
                                 new_dcr[ds] = val
+                        new_free_text = st.session_state.get(f"adm_freetext_{selected_doctor_dcr['id']}", "")
                         upsert_preference(
                             selected_doctor_dcr["id"], target_month,
                             ng_dates=list(existing_ng),
                             avoid_dates=list(existing_avoid),
                             preferred_clinics=pref.get("preferred_clinics", []) if pref else [],
                             date_clinic_requests=new_dcr,
-                            free_text=pref.get("free_text", "") if pref else "",
+                            free_text=new_free_text,
                         )
-                        st.session_state["_save_msg"] = f"「{selected_doctor_dcr['name']}」の日別外勤先希望を保存しました"
+                        st.session_state["_save_msg"] = f"「{selected_doctor_dcr['name']}」の外勤先希望・備考を保存しました"
                         st.rerun()
 
     # --- 3C: 外勤先の日別設定 ---
@@ -676,8 +771,16 @@ def render(target_month, year, month):
 
         if override_clinic:
             saturdays = get_target_saturdays(year, month)
-            clinic_sats = get_clinic_dates(override_clinic, saturdays)
             overrides = get_clinic_date_overrides(target_month)
+            is_irregular = override_clinic.get("frequency") == "irregular"
+
+            if is_irregular:
+                clinic_sats = saturdays  # 不定期: 全土曜日を表示
+                default_req = 0          # デフォルトは休診
+                st.caption("不定期の外勤先です。外勤を実施する日を「通常(1人)」または「2人体制」に設定してください")
+            else:
+                clinic_sats = get_clinic_dates(override_clinic, saturdays)
+                default_req = 1          # デフォルトは通常
 
             if not clinic_sats:
                 st.info("この外勤先は対象月に該当日がありません")
@@ -690,7 +793,7 @@ def render(target_month, year, month):
                 changes = {}
                 for i, s in enumerate(clinic_sats):
                     ds = s.isoformat()
-                    current_req = overrides.get((override_clinic["id"], ds), 1)
+                    current_req = overrides.get((override_clinic["id"], ds), default_req)
                     current_label = REQ_TO_LABEL.get(current_req, "通常(1人)")
                     with override_cols[i % len(override_cols)]:
                         sel = st.radio(

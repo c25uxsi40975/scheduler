@@ -315,14 +315,21 @@ def ml_readjust(target_month, year, month, doctors, clinics,
         active_clinics = []
         slot_req_map = {}
         for c in clinics:
-            c_dates = get_clinic_dates(c, saturdays)
-            if saturday not in c_dates:
-                continue
-            req = date_overrides.get((c["id"], date_str), 1)
-            if req == 0:
-                continue
-            active_clinics.append(c)
-            slot_req_map[c["id"]] = req
+            if c.get("frequency") == "irregular":
+                # 不定期: 日別設定で required_doctors > 0 の日のみ
+                req = date_overrides.get((c["id"], date_str), 0)
+                if req > 0:
+                    active_clinics.append(c)
+                    slot_req_map[c["id"]] = req
+            else:
+                c_dates = get_clinic_dates(c, saturdays)
+                if saturday not in c_dates:
+                    continue
+                req = date_overrides.get((c["id"], date_str), 1)
+                if req == 0:
+                    continue
+                active_clinics.append(c)
+                slot_req_map[c["id"]] = req
 
         # ML割当に利用可能な医員
         available = [

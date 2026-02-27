@@ -105,6 +105,65 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
     _clear_data_cache()
 
 
+def batch_upsert_preferences(year_month, items: list[dict]):
+    """複数医員の希望を一括保存（API呼び出し最小化）
+
+    items: [{"doctor_id": int, "ng_dates": [...], "avoid_dates": [...],
+             "preferred_clinics": [...], "date_clinic_requests": {...},
+             "free_text": str}, ...]
+    """
+    if not items:
+        return
+    ws = _get_pref_sheet(year_month)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    actual_headers = _pref_header_order.get(year_month, _PREF_HEADERS)
+
+    # 医員名マップを1回で取得
+    doctors = get_doctors(active_only=False)
+    name_map = {d["id"]: d["name"] for d in doctors}
+
+    # 既存行のdoctor_id → row_indexマップを1回のAPI呼出で構築
+    col_values = _retry(ws.col_values, 1)
+    id_to_row = {}
+    for i, v in enumerate(col_values):
+        if i == 0:
+            continue
+        if v:
+            id_to_row[str(v)] = i + 1
+
+    batch_updates = []
+    append_rows = []
+    for item in items:
+        did = item["doctor_id"]
+        data_map = {
+            "doctor_id": str(did),
+            "doctor_name": name_map.get(did, ""),
+            "ng_dates": json.dumps(item.get("ng_dates") or []),
+            "avoid_dates": json.dumps(item.get("avoid_dates") or []),
+            "preferred_clinics": json.dumps(item.get("preferred_clinics") or []),
+            "date_clinic_requests": json.dumps(item.get("date_clinic_requests") or {}),
+            "free_text": item.get("free_text") or "",
+            "updated_at": now,
+        }
+        row_data = [data_map.get(h, "") for h in actual_headers]
+        row_idx = id_to_row.get(str(did))
+        if row_idx:
+            n_cols = len(actual_headers)
+            col_end = chr(64 + n_cols)
+            batch_updates.append({
+                'range': f'A{row_idx}:{col_end}{row_idx}',
+                'values': [row_data],
+            })
+        else:
+            append_rows.append(row_data)
+
+    if batch_updates:
+        _retry(ws.batch_update, batch_updates)
+    for row in append_rows:
+        _retry(ws.append_row, row)
+    _clear_data_cache()
+
+
 # ---- Schedules ----
 
 def _get_sched_sheet(year_month):

@@ -40,6 +40,8 @@ def get_clinic_dates(clinic: dict, saturdays: list[date]) -> list[date]:
         return saturdays[:1] if saturdays else []
     elif freq == "last_only":
         return saturdays[-1:] if saturdays else []
+    elif freq == "irregular":
+        return []  # 不定期: 日別設定で明示指定された日のみ
     else:
         return saturdays
 
@@ -78,14 +80,23 @@ def solve_schedule(
     clinic_dates = {}
     slot_required = {}  # スロットごとの必要医員数
     for c in clinic_list:
-        cd = get_clinic_dates(c, saturdays)
-        for d in cd:
-            ds = d.isoformat()
-            req = overrides.get((c["id"], ds), 1)
-            if req == 0:
-                continue  # 休診: スロットを生成しない
-            clinic_dates[(c["id"], ds)] = True
-            slot_required[(c["id"], ds)] = req
+        if c.get("frequency") == "irregular":
+            # 不定期: 日別設定で required_doctors > 0 の日のみスロット化
+            for d in saturdays:
+                ds = d.isoformat()
+                req = overrides.get((c["id"], ds), 0)
+                if req > 0:
+                    clinic_dates[(c["id"], ds)] = True
+                    slot_required[(c["id"], ds)] = req
+        else:
+            cd = get_clinic_dates(c, saturdays)
+            for d in cd:
+                ds = d.isoformat()
+                req = overrides.get((c["id"], ds), 1)
+                if req == 0:
+                    continue  # 休診: スロットを生成しない
+                clinic_dates[(c["id"], ds)] = True
+                slot_required[(c["id"], ds)] = req
 
     # 全スロット: (clinic_id, date_str)
     slots = list(clinic_dates.keys())
