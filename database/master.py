@@ -15,18 +15,25 @@ from database.connection import (
 )
 
 
-def _parse_bool_int(val, default=1):
-    """スプレッドシートの値を安全に0/1に変換（TRUE/FALSE/bool対応）"""
+def _safe_int(val, default=0):
+    """スプレッドシートの値を安全にintに変換（TRUE/FALSE/空文字/float対応）"""
     if isinstance(val, bool):
         return int(val)
+    if isinstance(val, (int, float)):
+        return int(val)
     if isinstance(val, str):
+        val = val.strip()
         if val.upper() == "TRUE":
             return 1
         if val.upper() == "FALSE":
             return 0
         if val == "":
             return default
-    return int(val)
+        try:
+            return int(float(val))
+        except (ValueError, TypeError):
+            return default
+    return default
 
 
 # ---- Doctor CRUD ----
@@ -38,14 +45,14 @@ def get_doctors(active_only=True):
     records = _get_all_records(ws)
     result = []
     for r in records:
-        r["id"] = int(r["id"])
+        r["id"] = _safe_int(r["id"])
         r["account"] = str(r.get("account", ""))
         r["account_name"] = str(r.get("account_name", "") or r.get("account", ""))
         r["email"] = str(r.get("email", ""))
         r["password_hash"] = str(r.get("password_hash", ""))
-        r["is_active"] = _parse_bool_int(r.get("is_active", 1))
-        r["max_assignments"] = int(r.get("max_assignments", 0) or 0)
-        r["job_rank"] = int(r.get("job_rank", 0) or 0)
+        r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
+        r["max_assignments"] = _safe_int(r.get("max_assignments", 0))
+        r["job_rank"] = _safe_int(r.get("job_rank", 0))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -136,9 +143,9 @@ def get_clinics(active_only=True):
     records = _get_all_records(ws)
     result = []
     for r in records:
-        r["id"] = int(r["id"])
-        r["fee"] = int(r.get("fee", 0))
-        r["is_active"] = _parse_bool_int(r.get("is_active", 1))
+        r["id"] = _safe_int(r["id"])
+        r["fee"] = _safe_int(r.get("fee", 0))
+        r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
         r["effort_cost"] = float(r.get("effort_cost", 0) or 0)
         r["work_hours"] = float(r.get("work_hours", 0) or 0)
         r["time_slot"] = str(r.get("time_slot", "") or "")
