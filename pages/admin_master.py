@@ -190,7 +190,7 @@ def render(target_month, year, month):
                     aname_display = d.get("account_name", "") or id_display
                     email_display = d.get("email", "") or "未設定"
                     max_a = d.get("max_assignments", 0)
-                    limit_display = f"{max_a}回/月" if max_a > 0 else "制限なし"
+                    limit_display = f"{max_a}回/月" if max_a > 0 else "未設定"
                     rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
                     rank_display = rank_labels.get(d.get("job_rank", 0), "未設定")
                     with st.container(border=True):
@@ -556,7 +556,7 @@ def render(target_month, year, month):
     # --- 3A: 月回数上限の一括設定 ---
     if doctors:
         st.write(f"**月回数上限の一括設定**")
-        st.caption("各医員の月あたりの最大外勤回数を設定します（0 = 制限なし）")
+        st.caption("各医員の月あたりの最大外勤回数を設定します（1〜5回）")
 
         with st.form("batch_max_assignments"):
             max_cols = st.columns(min(len(doctors), 4))
@@ -564,16 +564,21 @@ def render(target_month, year, month):
                 rank_labels_3a = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
                 with max_cols[i % len(max_cols)]:
                     current_max = d.get("max_assignments", 0)
+                    if current_max < 1 or current_max > 5:
+                        current_max = 4
                     st.number_input(
                         f"{d['name']}({rank_labels_3a.get(d.get('job_rank', 0), '')})",
-                        min_value=0, max_value=20, value=current_max,
+                        min_value=1, max_value=5, value=current_max,
                         key=f"max_assign_{d['id']}",
                     )
             if st.form_submit_button("回数上限を一括保存", type="primary"):
                 updates = {}
                 for d in doctors:
                     new_val = st.session_state.get(f"max_assign_{d['id']}", d.get("max_assignments", 0))
-                    if new_val != d.get("max_assignments", 0):
+                    current = d.get("max_assignments", 0)
+                    if current < 1 or current > 5:
+                        current = 4
+                    if new_val != current:
                         updates[d["id"]] = new_val
                 if updates:
                     batch_update_max_assignments(updates)

@@ -77,7 +77,7 @@ def add_doctor(name, account="", initial_password="1111"):
         "id": new_id, "name": name, "account": account,
         "account_name": account, "email": "",
         "password_hash": pw_hash, "is_active": 1,
-        "created_at": now, "max_assignments": 0,
+        "created_at": now, "max_assignments": 4,
     }
     row = [values.get(h, "") for h in actual_headers]
     ws.append_row(row)
