@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import requests
 from datetime import date
+from dateutil.relativedelta import relativedelta
 from database import (
     get_doctors, get_clinics, get_all_preferences,
     get_affinities, get_schedules, save_schedule, confirm_schedule,
@@ -203,7 +204,11 @@ def render(target_month, year, month):
                     for line in diag:
                         st.write(f"- {line}")
             else:
-                st.success(f"{len(plans)}件の案を生成しました")
+                # 未確定の旧案を削除してから新案を保存
+                old_schedules = get_schedules(target_month)
+                for old in old_schedules:
+                    if not old["is_confirmed"]:
+                        delete_schedule(old["id"])
 
                 for plan in plans:
                     save_schedule(
@@ -214,6 +219,7 @@ def render(target_month, year, month):
                         plan["satisfaction_score"]
                     )
 
+                st.success(f"{len(plans)}件の案を生成しました")
                 st.rerun()
 
     # 生成済みスケジュール表示
@@ -289,6 +295,9 @@ def render(target_month, year, month):
                                     get_target_saturdays(year, month),
                                 )
                                 _send_confirmation_notification(target_month, sched)
+                                # 確定後は次の月をデフォルト表示にする
+                                next_month = (date(year, month, 1) + relativedelta(months=1)).strftime("%Y-%m")
+                                st.session_state["admin_target_month"] = next_month
                                 st.success("確定しました！")
                                 st.rerun()
                         else:

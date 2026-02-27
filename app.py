@@ -141,12 +141,23 @@ def _show_admin_header():
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
 
+    # デフォルト月: session_stateに明示的な値があればそれを使う。
+    # なければ公開月（open_month）をデフォルトにする。
+    key = "admin_target_month"
+    if key not in st.session_state:
+        current_open = get_open_month()
+        if current_open and current_open in months:
+            st.session_state[key] = current_open
+    elif st.session_state[key] not in months:
+        # 選択肢外の値（過去月など）はリセット
+        del st.session_state[key]
+
     col_title, col_month, col_logout = st.columns([3, 2, 1])
     with col_title:
         st.markdown("**管理者メニュー**")
     with col_month:
         target_month = st.selectbox(
-            "対象月", months, label_visibility="collapsed",
+            "対象月", months, key=key, label_visibility="collapsed",
         )
     with col_logout:
         if st.button("ログアウト", use_container_width=True):
