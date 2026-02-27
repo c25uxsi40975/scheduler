@@ -8,71 +8,13 @@ from database import (
     batch_update_max_assignments,
     get_clinic_date_overrides, set_clinic_date_overrides_batch,
     set_doctor_individual_password, update_doctor_email,
-    get_open_month, set_open_month,
-    get_input_deadline, set_input_deadline,
     get_all_preferences, upsert_preference, batch_upsert_preferences,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
-from datetime import date
-from dateutil.relativedelta import relativedelta
-
 # 優先度ラベル定義（weight値とラベルの対応）
 WEIGHT_TO_LABEL = {3.0: "固定", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
 LABEL_TO_WEIGHT = {"固定": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
 PRIORITY_LABELS = ["固定", "指名", "任意", "除外"]
-
-
-def _render_open_month_setting():
-    """希望入力の対象月を設定するUI"""
-    st.subheader("希望入力 対象月設定")
-    current = get_open_month()
-    if current:
-        st.write(f"現在の対象月: **{current}**")
-    else:
-        st.warning("対象月が未設定です。医員は希望入力できません。")
-
-    today = date.today()
-    month_options = [
-        (today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)
-    ]
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        selected = st.selectbox(
-            "対象月を選択", month_options,
-            index=month_options.index(current) if current in month_options else 0,
-            key="open_month_select",
-            label_visibility="collapsed",
-        )
-    with col2:
-        if st.button("設定", key="set_open_month", use_container_width=True):
-            set_open_month(selected)
-            st.success(f"対象月を {selected} に設定しました")
-            st.rerun()
-
-    # 入力期限
-    current_deadline = get_input_deadline()
-    if current_deadline:
-        st.write(f"入力期限: **{current_deadline}**")
-    else:
-        st.caption("入力期限: 未設定")
-
-    col_d1, col_d2 = st.columns([3, 1])
-    with col_d1:
-        default_date = (
-            date.fromisoformat(current_deadline)
-            if current_deadline
-            else date.today() + relativedelta(days=7)
-        )
-        deadline_date = st.date_input(
-            "入力期限", value=default_date,
-            key="input_deadline_date",
-            label_visibility="collapsed",
-        )
-    with col_d2:
-        if st.button("期限を設定", key="set_deadline", use_container_width=True):
-            set_input_deadline(deadline_date.isoformat())
-            st.success(f"入力期限を {deadline_date.isoformat()} に設定しました")
-            st.rerun()
 
 
 FREQ_OPTIONS = [
@@ -102,10 +44,6 @@ CLINIC_TEMPLATES = {
 
 def render(target_month, year, month):
     st.header("マスタ管理")
-
-    # ---- 希望入力 対象月設定 ----
-    _render_open_month_setting()
-    st.markdown("---")
 
     # 行レベルの背景色CSS + スマホ向けコンパクト化
     st.markdown("""<style>

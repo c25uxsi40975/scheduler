@@ -12,7 +12,8 @@ from database import (
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, verify_doctor_by_account,
     update_doctor_email, update_doctor_account_name,
-    get_open_month, get_input_deadline, get_confirmed_months,
+    get_open_month, set_open_month, get_input_deadline, set_input_deadline,
+    get_confirmed_months,
 )
 from optimizer import get_target_saturdays
 from pages import (
@@ -136,7 +137,7 @@ def _show_doctor_login():
 
 
 def _show_admin_header():
-    """管理者用ヘッダー：タイトル・対象月セレクタ・ログアウト"""
+    """管理者用ヘッダー：タイトル・対象月セレクタ・希望入力公開設定・ログアウト"""
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
 
@@ -156,7 +157,41 @@ def _show_admin_header():
             st.rerun()
 
     year, month = map(int, target_month.split("-"))
-    st.caption(f"対象土曜日数: {len(get_target_saturdays(year, month))}日")
+    sat_count = len(get_target_saturdays(year, month))
+
+    # 希望入力の公開設定（対象月 + 入力期限）
+    current_open = get_open_month()
+    current_deadline = get_input_deadline()
+    open_label = f"公開中: {current_open}" if current_open else "未公開"
+    deadline_label = f"（期限: {current_deadline}）" if current_deadline else ""
+
+    col_info, col_open, col_deadline = st.columns([3, 2, 2])
+    with col_info:
+        st.caption(f"対象土曜日数: {sat_count}日　｜　希望入力 {open_label}{deadline_label}")
+    with col_open:
+        if st.button(
+            f"この月を医員に公開",
+            key="set_open_month_header",
+            use_container_width=True,
+            type="primary" if current_open != target_month else "secondary",
+        ):
+            set_open_month(target_month)
+            st.rerun()
+    with col_deadline:
+        default_deadline = (
+            date.fromisoformat(current_deadline)
+            if current_deadline
+            else today + relativedelta(days=7)
+        )
+        deadline_date = st.date_input(
+            "入力期限", value=default_deadline,
+            key="header_deadline",
+            label_visibility="collapsed",
+            on_change=lambda: set_input_deadline(
+                st.session_state["header_deadline"].isoformat()
+            ),
+        )
+
     st.markdown("---")
     return target_month, year, month
 
