@@ -233,6 +233,15 @@ def render(target_month, year, month):
         _doctors = get_doctors()
         fee_map = {c["id"]: c["fee"] for c in _clinics}
         clinic_map = {c["id"]: c for c in _clinics}
+        doc_name_map = {d["id"]: d["name"] for d in _doctors}
+        clinic_name_map = {c["id"]: c["name"] for c in _clinics}
+
+        # △日マップ（避けたい日）
+        avoid_map = {}
+        for p in prefs:
+            avoid = p.get("avoid_dates") or []
+            if avoid:
+                avoid_map[p["doctor_id"]] = set(avoid)
 
         for sched in schedules:
             confirmed = "[確定]" if sched["is_confirmed"] else ""
@@ -253,6 +262,22 @@ def render(target_month, year, month):
                     _render_edit_mode(sched, _doctors, clinic_map, editing_key, prefs, affinities)
                 else:
                     render_schedule_table(sched, _doctors, _clinics)
+
+                    # △日に割り当てがある場合の警告
+                    avoid_hits = []
+                    for a in sched["assignments"]:
+                        if a["date"] in avoid_map.get(a["doctor_id"], set()):
+                            d_obj = date.fromisoformat(a["date"])
+                            avoid_hits.append(
+                                f"{doc_name_map.get(a['doctor_id'], '?')} → "
+                                f"{d_obj.strftime('%m/%d')} "
+                                f"{clinic_name_map.get(a['clinic_id'], '?')}"
+                            )
+                    if avoid_hits:
+                        st.warning(
+                            f"△（できれば避けたい）日に割り当てがあります（{len(avoid_hits)}件）:\n"
+                            + "、".join(avoid_hits)
+                        )
 
                     # 医員別統計
                     st.write("**医員別統計:**")

@@ -480,44 +480,6 @@ def solve_with_relaxation(
         result["relaxations"] = list(relaxations)
         return result
 
-    # Step 2: max_assignments を +1 に緩和
-    relaxations.append("月回数上限を +1 に緩和")
-    relaxed_doctors = []
-    for d in doctors:
-        rd = dict(d)
-        ma = rd.get("max_assignments", 0)
-        if ma > 0:
-            rd["max_assignments"] = ma + 1
-        relaxed_doctors.append(rd)
-    result = solve_schedule(
-        relaxed_doctors, clinics, saturdays, preferences, affinities,
-        mode=mode, previous_earnings=previous_earnings,
-        date_overrides=date_overrides,
-        suitability_scores=suitability_scores,
-        relax_must=True,
-    )
-    if result:
-        result["relaxations"] = list(relaxations)
-        return result
-
-    # Step 3: △日を許容（避けたい日の回避を完全に無視）
-    relaxations.append("△日制約を無視")
-    cleared_prefs = []
-    for p in preferences:
-        cp = dict(p)
-        cp["avoid_dates"] = []
-        cleared_prefs.append(cp)
-    result = solve_schedule(
-        relaxed_doctors, clinics, saturdays, cleared_prefs, affinities,
-        mode=mode, previous_earnings=previous_earnings,
-        date_overrides=date_overrides,
-        suitability_scores=suitability_scores,
-        relax_must=True,
-    )
-    if result:
-        result["relaxations"] = list(relaxations)
-        return result
-
     return None  # すべての緩和を試しても解なし
 
 
