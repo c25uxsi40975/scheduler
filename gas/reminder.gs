@@ -4,13 +4,16 @@
  * 機能:
  *   1. 毎週金曜18時に翌日（土曜）の外勤リマインダーをメール送信
  *   2. スケジュール確定時にWeb App経由で全医員に通知メール送信
+ *      - HTMLメール + スケジュール表画像（Charts.newTableChart）のインライン埋め込み
+ *   3. スケジュール確定時にGoogleカレンダーへイベント自動登録（共有カレンダー）
  *
  * セットアップ:
  *   1. 運用データ用スプレッドシートで「拡張機能 > Apps Script」を開く
  *   2. このファイルの内容を貼り付ける
  *   3. MASTER_SPREADSHEET_ID を設定（必須）
- *   4. sendFridayReminder をトリガーに登録（毎週金曜 18:00-19:00）
- *   5. Web Appとしてデプロイ（確定通知用）
+ *   4. CALENDAR_ID を設定（カレンダー連携を使用する場合）
+ *   5. sendFridayReminder をトリガーに登録（毎週金曜 18:00-19:00）
+ *   6. Web Appとしてデプロイ（確定通知用）
  */
 
 // ---- 設定 ----
@@ -28,6 +31,14 @@ var ADMIN_EMAIL = "";
 // テストモード（本番運用時は false に変更してください）
 var TEST_MODE = true;
 var TEST_NOTICE = "【テスト送信】このメールはテストです。記載の外勤先は実際のものではありません。実際の外勤先は別途ご確認ください。\n\n";
+
+// Googleカレンダー連携: 共有カレンダーID（空欄でカレンダー連携無効）
+// 例: "abc123@group.calendar.google.com"
+var CALENDAR_ID = "";
+
+// カレンダーイベントのデフォルト時間帯（time_slot未設定の外勤先用）
+var DEFAULT_START_HOUR = 9;
+var DEFAULT_END_HOUR = 13;
 
 // ---- スプレッドシート取得 ----
 
@@ -75,7 +86,7 @@ function doPost(e) {
 }
 
 /**
- * 確定通知メールを全医員に送信
+ * 確定通知メールを全医員に送信（HTML + スケジュール表画像埋め込み）
  */
 function sendConfirmationEmails(yearMonth, planName) {
   var ssOp = getOperationalSpreadsheet();
@@ -95,7 +106,16 @@ function sendConfirmationEmails(yearMonth, planName) {
   }
 
   var doctors = getDoctorMap(ssMaster);
-  var clinics = getClinicMap(ssMaster);
+  var clinicDetails = getClinicDetailMap(ssMaster);
+
+  // Googleカレンダーにイベントを登録
+  if (CALENDAR_ID) {
+    try {
+      createCalendarEvents(yearMonth, allAssignments, doctors, clinicDetails);
+    } catch (e) {
+      Logger.log("カレンダー登録でエラー: " + e.message);
+    }
+  }
 
   // 医員ごとの割り当てをグループ化
   var doctorAssignments = {};
@@ -115,29 +135,64 @@ function sendConfirmationEmails(yearMonth, planName) {
     var assignments = doctorAssignments[doctorId] || [];
     var subject = (TEST_MODE ? "【テスト】" : "") + "【外勤スケジュール確定】" + yearMonth;
 
-    var body = (TEST_MODE ? TEST_NOTICE : "")
+    // プレーンテキスト版（フォールバック）
+    var plainBody = (TEST_MODE ? TEST_NOTICE : "")
       + doctor.name + " 先生\n\n"
       + yearMonth + " の外勤スケジュールが確定しました。\n\n";
 
     if (assignments.length > 0) {
-      body += "━━━━━━━━━━━━━━━━━━━━\n";
+      plainBody += "━━━━━━━━━━━━━━━━━━━━\n";
       assignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
       for (var j = 0; j < assignments.length; j++) {
         var dateObj = new Date(assignments[j].date + "T00:00:00+09:00");
         var dateStr = Utilities.formatDate(dateObj, "Asia/Tokyo", "M/d(E)");
-        var clinicName = clinics[assignments[j].clinic_id] || "（不明）";
-        body += "  " + dateStr + "：" + clinicName + "\n";
+        var clinicName = clinicDetails[String(assignments[j].clinic_id)]
+          ? clinicDetails[String(assignments[j].clinic_id)].name : "（不明）";
+        plainBody += "  " + dateStr + "：" + clinicName + "\n";
       }
-      body += "━━━━━━━━━━━━━━━━━━━━\n";
+      plainBody += "━━━━━━━━━━━━━━━━━━━━\n";
     } else {
-      body += "今月の外勤割り当てはありません。\n";
+      plainBody += "今月の外勤割り当てはありません。\n";
     }
 
-    body += "\n詳細はWebアプリのスケジュール確認タブからご確認ください。\n\n"
+    plainBody += "\n詳細はWebアプリのスケジュール確認タブからご確認ください。\n\n"
       + "※このメールは外勤調整システムから自動送信されています。";
 
+    // HTML版メール
+    var htmlBody = "";
+    if (TEST_MODE) {
+      htmlBody += '<p style="color:red;font-weight:bold;border:2px solid red;padding:8px;">'
+        + TEST_NOTICE.replace(/\n/g, "<br>") + "</p>";
+    }
+    htmlBody += "<p>" + doctor.name + " 先生</p>"
+      + "<p>" + yearMonth + " の外勤スケジュールが確定しました。</p>";
+
+    var emailOptions = { name: SENDER_NAME };
+
+    if (assignments.length > 0) {
+      // スケジュール表の画像を生成して埋め込み
+      try {
+        var tableBlob = buildDoctorScheduleImage(assignments, clinicDetails);
+        htmlBody += '<p><img src="cid:scheduleTable" style="max-width:100%;" /></p>';
+        emailOptions.inlineImages = { scheduleTable: tableBlob };
+      } catch (imgErr) {
+        Logger.log("テーブル画像生成失敗（テキスト代替）: " + imgErr.message);
+        htmlBody += buildScheduleHtmlTable(assignments, clinicDetails);
+      }
+    } else {
+      htmlBody += "<p>今月の外勤割り当てはありません。</p>";
+    }
+
+    htmlBody += "<p>詳細はWebアプリのスケジュール確認タブからご確認ください。</p>";
+    if (CALENDAR_ID) {
+      htmlBody += '<p style="color:#666;">※Googleカレンダーにも予定を登録しました。</p>';
+    }
+    htmlBody += '<p style="color:gray;font-size:small;">※このメールは外勤調整システムから自動送信されています。</p>';
+
+    emailOptions.htmlBody = htmlBody;
+
     try {
-      GmailApp.sendEmail(doctor.email, subject, body, { name: SENDER_NAME });
+      GmailApp.sendEmail(doctor.email, subject, plainBody, emailOptions);
       Logger.log("確定通知 送信成功: " + doctor.name + " (" + doctor.email + ")");
       sentCount++;
     } catch (e) {
@@ -545,6 +600,192 @@ function getClinicMap(ss) {
   return map;
 }
 
+// ---- スケジュール表画像生成 ----
+
+/**
+ * 医員個別のスケジュール表を Charts.newTableChart で画像化
+ * @param {Array} assignments - 医員の割り当て配列 [{date, clinic_id, doctor_id}, ...]
+ * @param {Object} clinicDetailMap - {id: {name, time_slot, ...}}
+ * @return {Blob} PNG画像のBlob
+ */
+function buildDoctorScheduleImage(assignments, clinicDetailMap) {
+  var table = Charts.newDataTable()
+    .addColumn(Charts.ColumnType.STRING, "日付")
+    .addColumn(Charts.ColumnType.STRING, "外勤先");
+
+  assignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
+
+  for (var i = 0; i < assignments.length; i++) {
+    var a = assignments[i];
+    var dateObj = new Date(a.date + "T00:00:00+09:00");
+    var dateStr = Utilities.formatDate(dateObj, "Asia/Tokyo", "M/d(E)");
+    var clinic = clinicDetailMap[String(a.clinic_id)];
+    var clinicName = clinic ? clinic.name : "（不明）";
+    table.addRow([dateStr, clinicName]);
+  }
+
+  var height = Math.max(120, 50 + assignments.length * 35);
+  var chart = Charts.newTableChart()
+    .setDataTable(table.build())
+    .setDimensions(450, height)
+    .setOption("alternatingRowStyle", true)
+    .build();
+
+  return chart.getBlob().setName("schedule.png");
+}
+
+/**
+ * スケジュール表のHTMLテーブル（画像生成失敗時のフォールバック）
+ */
+function buildScheduleHtmlTable(assignments, clinicDetailMap) {
+  assignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
+
+  var html = '<table style="border-collapse:collapse;margin:12px 0;">'
+    + '<tr style="background:#4472C4;color:white;">'
+    + '<th style="padding:8px 16px;border:1px solid #ddd;">日付</th>'
+    + '<th style="padding:8px 16px;border:1px solid #ddd;">外勤先</th></tr>';
+
+  for (var i = 0; i < assignments.length; i++) {
+    var a = assignments[i];
+    var dateObj = new Date(a.date + "T00:00:00+09:00");
+    var dateStr = Utilities.formatDate(dateObj, "Asia/Tokyo", "M/d(E)");
+    var clinic = clinicDetailMap[String(a.clinic_id)];
+    var clinicName = clinic ? clinic.name : "（不明）";
+    var bg = (i % 2 === 0) ? "#f8f9fa" : "#ffffff";
+    html += '<tr style="background:' + bg + ';">'
+      + '<td style="padding:6px 16px;border:1px solid #ddd;">' + dateStr + '</td>'
+      + '<td style="padding:6px 16px;border:1px solid #ddd;">' + clinicName + '</td></tr>';
+  }
+
+  html += "</table>";
+  return html;
+}
+
+// ---- Googleカレンダー連携 ----
+
+/**
+ * 外勤スケジュールをGoogleカレンダーに登録
+ * CALENDAR_ID に指定された共有カレンダーにイベントを作成する
+ */
+function createCalendarEvents(yearMonth, allAssignments, doctors, clinicDetailMap) {
+  if (!CALENDAR_ID) {
+    Logger.log("CALENDAR_ID 未設定のためカレンダー登録をスキップ");
+    return;
+  }
+
+  var calendar = CalendarApp.getCalendarById(CALENDAR_ID);
+  if (!calendar) {
+    Logger.log("カレンダーが見つかりません: " + CALENDAR_ID);
+    return;
+  }
+
+  // 対象月の既存イベントを削除
+  deleteCalendarEventsForMonth(calendar, yearMonth);
+
+  var createdCount = 0;
+  for (var i = 0; i < allAssignments.length; i++) {
+    var a = allAssignments[i];
+    var doctor = doctors[String(a.doctor_id)];
+    var clinic = clinicDetailMap[String(a.clinic_id)];
+    if (!doctor || !clinic) continue;
+
+    // time_slot に基づいて開始・終了時刻を決定
+    var startHour = DEFAULT_START_HOUR;
+    var endHour = DEFAULT_END_HOUR;
+    if (clinic.time_slot === "PM") {
+      startHour = 13;
+      endHour = 17;
+    } else if (clinic.time_slot === "AM") {
+      startHour = 9;
+      endHour = 13;
+    }
+
+    var startTime = new Date(a.date + "T" + padZero(startHour) + ":00:00+09:00");
+    var endTime = new Date(a.date + "T" + padZero(endHour) + ":00:00+09:00");
+
+    var title = "【外勤】" + doctor.name + " → " + clinic.name;
+    var description = "外勤調整システムにより自動登録\n"
+      + "医員: " + doctor.name + "\n"
+      + "外勤先: " + clinic.name;
+    if (clinic.location) {
+      description += "\n場所: " + clinic.location;
+    }
+
+    try {
+      var event = calendar.createEvent(title, startTime, endTime, {
+        description: description,
+        location: clinic.location || ""
+      });
+      Logger.log("カレンダー登録: " + title + " (" + a.date + ")");
+      createdCount++;
+    } catch (e) {
+      Logger.log("カレンダー登録失敗: " + title + " - " + e.message);
+    }
+  }
+
+  Logger.log("カレンダー登録完了: " + createdCount + "/" + allAssignments.length + " 件");
+}
+
+/**
+ * 対象月の【外勤】イベントを削除（再確定時の重複防止）
+ */
+function deleteCalendarEventsForMonth(calendar, yearMonth) {
+  var parts = yearMonth.split("-");
+  var year = parseInt(parts[0], 10);
+  var month = parseInt(parts[1], 10);
+
+  var startDate = new Date(year, month - 1, 1, 0, 0, 0);
+  var endDate = new Date(year, month, 0, 23, 59, 59);
+
+  var events = calendar.getEvents(startDate, endDate, { search: "【外勤】" });
+  var deletedCount = 0;
+  for (var i = 0; i < events.length; i++) {
+    if (events[i].getTitle().indexOf("【外勤】") === 0) {
+      events[i].deleteEvent();
+      deletedCount++;
+    }
+  }
+  if (deletedCount > 0) {
+    Logger.log("既存カレンダーイベント削除: " + deletedCount + " 件 (" + yearMonth + ")");
+  }
+}
+
+/**
+ * 数値を2桁ゼロ埋め文字列に変換
+ */
+function padZero(num) {
+  return num < 10 ? "0" + num : String(num);
+}
+
+/**
+ * 外勤先マスタを {id: {name, time_slot, work_hours, location}} の詳細マップで取得
+ */
+function getClinicDetailMap(ss) {
+  var sheet = getSheet(ss, "外勤先マスタ");
+  if (!sheet) return {};
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return {};
+
+  var headers = data[0];
+  var colId = headers.indexOf("id");
+  var colName = headers.indexOf("name");
+  var colTimeSlot = headers.indexOf("time_slot");
+  var colWorkHours = headers.indexOf("work_hours");
+  var colLocation = headers.indexOf("location");
+
+  var map = {};
+  for (var i = 1; i < data.length; i++) {
+    map[String(data[i][colId])] = {
+      name: String(data[i][colName]),
+      time_slot: colTimeSlot >= 0 ? String(data[i][colTimeSlot] || "") : "",
+      work_hours: colWorkHours >= 0 ? String(data[i][colWorkHours] || "") : "",
+      location: colLocation >= 0 ? String(data[i][colLocation] || "") : ""
+    };
+  }
+  return map;
+}
+
 // ---- テスト・手動実行用 ----
 
 /**
@@ -587,4 +828,64 @@ function dryRunReminder() {
     var cli = clinics[a.clinic_id] || "不明";
     Logger.log("  " + doc.name + " → " + cli + " (email: " + (doc.email || "未設定") + ")");
   }
+}
+
+/**
+ * テスト用：スケジュール表画像の生成テスト
+ * ログにBlobサイズを出力し、Google Driveに画像を保存する
+ */
+function testTableImage() {
+  var testAssignments = [
+    { date: "2025-04-05", clinic_id: "1", doctor_id: "1" },
+    { date: "2025-04-12", clinic_id: "2", doctor_id: "1" },
+    { date: "2025-04-19", clinic_id: "1", doctor_id: "1" },
+    { date: "2025-04-26", clinic_id: "3", doctor_id: "1" }
+  ];
+
+  var clinicDetailMap = {
+    "1": { name: "Aクリニック", time_slot: "AM", work_hours: "", location: "" },
+    "2": { name: "B病院", time_slot: "PM", work_hours: "", location: "" },
+    "3": { name: "C医院", time_slot: "", work_hours: "", location: "" }
+  };
+
+  var blob = buildDoctorScheduleImage(testAssignments, clinicDetailMap);
+  Logger.log("画像サイズ: " + blob.getBytes().length + " bytes");
+  Logger.log("MIME: " + blob.getContentType());
+
+  // Google Driveに保存して確認
+  var file = DriveApp.createFile(blob);
+  Logger.log("テスト画像URL: " + file.getUrl());
+}
+
+/**
+ * テスト用：カレンダーイベント作成テスト（CALENDAR_ID 設定が必要）
+ */
+function testCalendarEvents() {
+  if (!CALENDAR_ID) {
+    Logger.log("CALENDAR_ID が未設定です。テストを実行するには設定してください。");
+    return;
+  }
+
+  var calendar = CalendarApp.getCalendarById(CALENDAR_ID);
+  if (!calendar) {
+    Logger.log("カレンダーが見つかりません: " + CALENDAR_ID);
+    return;
+  }
+
+  Logger.log("カレンダー名: " + calendar.getName());
+
+  // テスト用イベントを1件作成
+  var tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  var dateStr = Utilities.formatDate(tomorrow, "Asia/Tokyo", "yyyy-MM-dd");
+
+  var start = new Date(dateStr + "T09:00:00+09:00");
+  var end = new Date(dateStr + "T13:00:00+09:00");
+
+  var event = calendar.createEvent("【外勤】テスト → テストクリニック", start, end, {
+    description: "テストイベント（削除可）"
+  });
+
+  Logger.log("テストイベント作成完了: " + event.getId());
+  Logger.log("日付: " + dateStr + " 09:00-13:00");
 }
