@@ -3,10 +3,13 @@ ML-based schedule readjustment module.
 RandomForestモデルで医員ごとの妥当な労力コストを予測し、
 scipy.optimize.linear_sum_assignmentで最適な割り当てを求める。
 """
+import hashlib
+import hmac
 import json
 import joblib
 import numpy as np
 import pandas as pd
+import streamlit as st
 from scipy.optimize import linear_sum_assignment
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
@@ -23,6 +26,19 @@ _suitability_model = None
 _MODEL_PATH = Path(__file__).parent / "model.pkl"
 _SUITABILITY_MODEL_PATH = Path(__file__).parent / "suitability_model.pkl"
 _MIN_TRAINING_ROWS = 50
+
+
+def _verify_model_integrity(path: Path, secret_key: str) -> bool:
+    """モデルファイルの SHA-256 チェックサムを検証。
+    secret_key が未設定（空文字）なら検証をスキップして True を返す。"""
+    expected = st.secrets.get(secret_key, "")
+    if not expected:
+        return True
+    sha256 = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            sha256.update(chunk)
+    return hmac.compare_digest(sha256.hexdigest(), expected)
 
 FEATURE_COLUMNS = [
     "採用年度",
@@ -62,6 +78,8 @@ def _load_or_train_model():
         _model = _train_model(df)
     else:
         if _MODEL_PATH.exists():
+            if not _verify_model_integrity(_MODEL_PATH, "model_pkl_sha256"):
+                raise RuntimeError("model.pkl の整合性チェックに失敗しました")
             _model = joblib.load(_MODEL_PATH)
         else:
             raise RuntimeError(
@@ -564,6 +582,8 @@ def _load_or_train_suitability_model():
         return _suitability_model
 
     if _SUITABILITY_MODEL_PATH.exists():
+        if not _verify_model_integrity(_SUITABILITY_MODEL_PATH, "suitability_model_pkl_sha256"):
+            raise RuntimeError("suitability_model.pkl の整合性チェックに失敗しました")
         _suitability_model = joblib.load(_SUITABILITY_MODEL_PATH)
         return _suitability_model
 

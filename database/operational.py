@@ -8,7 +8,8 @@ import streamlit as st
 
 from database.connection import (
     _get_all_records, _find_row_index, _retry, _clear_data_cache,
-    _register_cached, _safe_json_loads, _init_monthly_sheet, _next_id,
+    _register_cached, _safe_json_loads, _sanitize_cell_value,
+    _init_monthly_sheet, _next_id,
     _ws_cache_operational, _get_operational_spreadsheet,
     _OPERATIONAL_PREFIXES,
 )
@@ -91,7 +92,7 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
         "avoid_dates": json.dumps(avoid_dates or []),
         "preferred_clinics": json.dumps(preferred_clinics or []),
         "date_clinic_requests": json.dumps(date_clinic_requests or {}),
-        "free_text": free_text or "",
+        "free_text": _sanitize_cell_value(free_text or ""),
         "updated_at": now,
         "post_night_dates": json.dumps(post_night_dates or []),
     }

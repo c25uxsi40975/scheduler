@@ -29,4 +29,6 @@ from database.auth import (
     update_doctor_account_name,
     update_doctor_email, get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
+    save_reset_code, verify_reset_code,
+    get_doctor_email_by_account, get_doctor_id_by_account,
 )

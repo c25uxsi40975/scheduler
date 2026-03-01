@@ -11,6 +11,7 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
+from security import generate_temp_password
 # 優先度ラベル定義（weight値とラベルの対応）
 WEIGHT_TO_LABEL = {3.0: "必須", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
 LABEL_TO_WEIGHT = {"必須": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
@@ -83,10 +84,13 @@ def render(target_month, year, month):
     with col1:
         st.subheader("医員一覧")
         with st.expander("医員の追加・編集", expanded=False):
+            # 追加フォーム用の初期パスワードをセッションで管理
+            if "new_doctor_init_pw" not in st.session_state:
+                st.session_state.new_doctor_init_pw = generate_temp_password(12)
             with st.form("add_doctor_form", clear_on_submit=True):
                 new_doc = st.text_input("医員名")
                 new_account = st.text_input("医員ID（入局年度）", placeholder="例: 2024")
-                new_init_pw = st.text_input("初期パスワード", value="1111")
+                new_init_pw = st.text_input("初期パスワード", value=st.session_state.new_doctor_init_pw)
                 st.caption("初期アカウント名 = 医員ID。アカウント名はユーザーが後から変更可能です。")
                 if st.form_submit_button("追加", use_container_width=True):
                     if not new_doc.strip():
@@ -102,17 +106,20 @@ def render(target_month, year, month):
                         elif err == "duplicate_name":
                             st.error(f"医員名「{new_doc}」は既に登録されています")
                         else:
-                            st.success(f"「{new_doc}」を追加しました（ID: {new_account}）")
+                            st.success(f"「{new_doc}」を追加しました（ID: {new_account}、初期PW: {new_init_pw.strip()}）")
+                            # 次回追加時のために新しいパスワードを生成
+                            st.session_state.new_doctor_init_pw = generate_temp_password(12)
                             st.rerun()
 
             doctors_all = get_doctors(active_only=False)
             if doctors_all:
                 def _doc_label(d):
                     s = "有効" if d["is_active"] else "無効"
+                    login = "" if d.get("can_login", 1) else " [ログイン停止]"
                     pw = "🔑" if d.get("password_hash") else "⚠️"
                     acc = d.get("account", "")
                     acc_str = f" [ID:{acc}]" if acc else ""
-                    return f"{d['name']}{acc_str}（{s}）{pw}"
+                    return f"{d['name']}{acc_str}（{s}）{login}{pw}"
 
                 selected_doc = st.selectbox(
                     "医員を選択", doctors_all,
@@ -125,6 +132,7 @@ def render(target_month, year, month):
                     has_email = bool(d.get("email"))
                     marker = "row-active" if d['is_active'] else "row-inactive"
                     status_label = "有効" if d['is_active'] else "無効"
+                    login_label = "ログイン可" if d.get('can_login', 1) else "ログイン停止"
                     id_display = d.get("account", "") or "未設定"
                     aname_display = d.get("account_name", "") or id_display
                     email_display = d.get("email", "") or "未設定"
@@ -134,16 +142,25 @@ def render(target_month, year, month):
                     rank_display = rank_labels.get(d.get("job_rank", 0), "未設定")
                     with st.container(border=True):
                         st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                        st.markdown(f"**{d['name']}**　{status_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}　役職: {rank_display}")
-                        b1, b2, b3, b4, b5 = st.columns(5)
+                        st.markdown(f"**{d['name']}**　{status_label}　{login_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}　役職: {rank_display}")
+                        b1, b1b, b2, b3, b4, b5 = st.columns(6)
                         with b1:
                             if d['is_active']:
-                                if st.button("無効化", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
+                                if st.button("シフト除外", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
                                     update_doctor(d['id'], is_active=0)
                                     st.rerun()
                             else:
-                                if st.button("有効化", key=f"act_{d['id']}", use_container_width=True):
+                                if st.button("シフト有効", key=f"act_{d['id']}", use_container_width=True):
                                     update_doctor(d['id'], is_active=1)
+                                    st.rerun()
+                        with b1b:
+                            if d.get('can_login', 1):
+                                if st.button("ログイン停止", key=f"login_off_{d['id']}", type="secondary", use_container_width=True):
+                                    update_doctor(d['id'], can_login=0)
+                                    st.rerun()
+                            else:
+                                if st.button("ログイン許可", key=f"login_on_{d['id']}", use_container_width=True):
+                                    update_doctor(d['id'], can_login=1)
                                     st.rerun()
                         with b2:
                             btn_label = "PW再設定" if has_pw else "PW設定"

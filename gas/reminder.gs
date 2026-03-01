@@ -4,6 +4,7 @@
  * 機能:
  *   1. 毎週金曜18時に翌日（土曜）の外勤リマインダーをメール送信
  *   2. スケジュール確定時にWeb App経由で全医員に通知メール送信
+ *   3. パスワードリセットコードのメール送信
  *
  * セットアップ:
  *   1. 運用データ用スプレッドシートで「拡張機能 > Apps Script」を開く
@@ -62,6 +63,8 @@ function doPost(e) {
       sendDoctorConfirmation(data.year_month, data.doctor_name, data.doctor_email, data.date_summary, data.free_text);
     } else if (data.action === "all_preferences_complete") {
       sendAllCompleteNotification(data.year_month, data.doctor_count);
+    } else if (data.action === "password_reset_code") {
+      sendPasswordResetCode(data.account_name, data.doctor_email, data.reset_code);
     }
     return ContentService.createTextOutput(
       JSON.stringify({ status: "ok" })
@@ -201,6 +204,36 @@ function sendAllCompleteNotification(yearMonth, doctorCount) {
 
   var sent = sendToAdmins(subject, body);
   Logger.log("全員完了通知 送信完了: " + sent + " 件");
+}
+
+// ---- パスワードリセットコード送信 ----
+
+/**
+ * パスワードリセットコードを医員にメール送信
+ */
+function sendPasswordResetCode(accountName, doctorEmail, resetCode) {
+  if (!doctorEmail) {
+    Logger.log("パスワードリセット: メールアドレスなし (account: " + accountName + ")");
+    return;
+  }
+
+  var subject = "【外勤調整システム】パスワードリセットコード";
+  var body = accountName + " 様\n\n"
+    + "パスワードリセットが要求されました。\n"
+    + "以下のリセットコードをアプリの画面に入力してください。\n\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n"
+    + "  リセットコード: " + resetCode + "\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n\n"
+    + "※ このコードは15分間有効です。\n"
+    + "※ 心当たりがない場合はこのメールを無視してください。\n\n"
+    + "※このメールは外勤調整システムから自動送信されています。";
+
+  try {
+    GmailApp.sendEmail(doctorEmail, subject, body, { name: SENDER_NAME });
+    Logger.log("パスワードリセットコード 送信成功: " + accountName + " (" + doctorEmail + ")");
+  } catch (e) {
+    Logger.log("パスワードリセットコード 送信失敗: " + accountName + " - " + e.message);
+  }
 }
 
 // ---- 毎週金曜リマインダー ----

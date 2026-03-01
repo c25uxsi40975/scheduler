@@ -10,7 +10,7 @@ import streamlit as st
 from database.connection import (
     _get_sheet, _get_all_records, _find_row_index, _next_id,
     _col_letter, _retry, _clear_data_cache, _register_cached,
-    _safe_json_loads, _hash_password,
+    _safe_json_loads, _hash_password, _sanitize_cell_value,
     _ws_cache_operational, SHEET_HEADERS,
 )
 
@@ -51,6 +51,7 @@ def get_doctors(active_only=True):
         r["email"] = str(r.get("email", ""))
         r["password_hash"] = str(r.get("password_hash", ""))
         r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
+        r["can_login"] = _safe_int(r.get("can_login", 1), default=1)
         r["max_assignments"] = _safe_int(r.get("max_assignments", 0))
         r["job_rank"] = _safe_int(r.get("job_rank", 0))
         if active_only and not r["is_active"]:
@@ -74,9 +75,10 @@ def add_doctor(name, account="", initial_password="1111"):
     # 実際のヘッダー順序に基づいて行を構築（カラム追加時のずれ防止）
     actual_headers = _retry(ws.row_values, 1)
     values = {
-        "id": new_id, "name": name, "account": account,
-        "account_name": account, "email": "",
-        "password_hash": pw_hash, "is_active": 1,
+        "id": new_id, "name": _sanitize_cell_value(name),
+        "account": _sanitize_cell_value(account),
+        "account_name": _sanitize_cell_value(account), "email": "",
+        "password_hash": pw_hash, "is_active": 1, "can_login": 1,
         "created_at": now, "max_assignments": 4,
     }
     row = [values.get(h, "") for h in actual_headers]
@@ -85,7 +87,7 @@ def add_doctor(name, account="", initial_password="1111"):
     return None
 
 
-def update_doctor(doc_id, is_active=None, max_assignments=None, job_rank=None):
+def update_doctor(doc_id, is_active=None, max_assignments=None, job_rank=None, can_login=None):
     ws = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws, 1, doc_id)
     if not row_idx:
@@ -95,6 +97,9 @@ def update_doctor(doc_id, is_active=None, max_assignments=None, job_rank=None):
     if is_active is not None:
         col = actual_headers.index("is_active") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(is_active)]]})
+    if can_login is not None:
+        col = actual_headers.index("can_login") + 1
+        updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(can_login)]]})
     if max_assignments is not None:
         col = actual_headers.index("max_assignments") + 1
         updates.append({'range': f'{_col_letter(col)}{row_idx}', 'values': [[int(max_assignments)]]})

@@ -6,6 +6,7 @@ import streamlit as st
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
+import requests
 from database import (
     init_db, get_doctors,
     is_admin_password_set, set_admin_password, verify_admin_password,
@@ -14,8 +15,15 @@ from database import (
     update_doctor_email, update_doctor_account_name,
     get_open_month, set_open_month, get_input_deadline, set_input_deadline,
     get_confirmed_months,
+    save_reset_code, verify_reset_code,
+    get_doctor_email_by_account, get_doctor_id_by_account,
 )
 from optimizer import get_target_saturdays
+from security import (
+    check_rate_limit, record_failed_attempt, reset_rate_limit,
+    generate_reset_code, validate_password, validate_email,
+)
+from audit import log_event
 from pages import (
     admin_master, admin_preferences, admin_generate,
     admin_schedule, doctor_input, doctor_schedule,
@@ -60,6 +68,25 @@ if "doctor_id" not in st.session_state:
 if "doctor_authenticated" not in st.session_state:
     st.session_state.doctor_authenticated = False
 
+# ---- セッションタイムアウト（1時間） ----
+import time as _time
+_SESSION_TIMEOUT = 3600
+
+def _check_session_timeout():
+    """非活動1時間でセッションをタイムアウト"""
+    now = _time.time()
+    last = st.session_state.get("_last_activity", now)
+    if now - last > _SESSION_TIMEOUT and st.session_state.get("role"):
+        st.session_state.role = None
+        st.session_state.admin_authenticated = False
+        st.session_state.doctor_authenticated = False
+        st.session_state.doctor_id = None
+        st.warning("セッションがタイムアウトしました。再度ログインしてください。")
+        st.stop()
+    st.session_state["_last_activity"] = now
+
+_check_session_timeout()
+
 
 def _show_role_selection():
     """ロール選択画面"""
@@ -80,31 +107,128 @@ def _show_admin_login():
     st.markdown("---")
 
     if not is_admin_password_set():
-        st.info("管理者パスワードが未設定です。初回パスワードを設定してください。")
+        st.info("管理者パスワードが未設定です。初回セットアップを行います。")
+        setup_token_input = st.text_input(
+            "セットアップトークン", type="password", key="setup_token",
+            help="Streamlit Secretsに設定された setup_token を入力してください",
+        )
         pw1 = st.text_input("パスワード", type="password", key="pw_new1")
         pw2 = st.text_input("パスワード（確認）", type="password", key="pw_new2")
         if st.button("パスワードを設定", type="primary"):
-            if not pw1:
+            import hmac
+            expected_token = st.secrets.get("setup_token", "")
+            if not expected_token:
+                st.error("setup_token が Secrets に未設定です。管理者に連絡してください。")
+            elif not hmac.compare_digest(setup_token_input, expected_token):
+                st.error("セットアップトークンが正しくありません")
+            elif not pw1:
                 st.error("パスワードを入力してください")
             elif pw1 != pw2:
                 st.error("パスワードが一致しません")
             else:
-                set_admin_password(pw1)
-                st.session_state.admin_authenticated = True
-                st.success("パスワードを設定しました")
-                st.rerun()
+                pw_ok, pw_msg = validate_password(pw1)
+                if not pw_ok:
+                    st.error(pw_msg)
+                else:
+                    set_admin_password(pw1)
+                    log_event("admin_password_set", "admin", "初回セットアップ")
+                    st.session_state.admin_authenticated = True
+                    st.success("パスワードを設定しました")
+                    st.rerun()
     else:
-        pw = st.text_input("パスワード", type="password", key="pw_login")
-        if st.button("ログイン", type="primary"):
-            if verify_admin_password(pw):
-                st.session_state.admin_authenticated = True
-                st.rerun()
-            else:
-                st.error("パスワードが正しくありません")
+        allowed, remaining = check_rate_limit("admin")
+        if not allowed:
+            st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
+        else:
+            pw = st.text_input("パスワード", type="password", key="pw_login")
+            if st.button("ログイン", type="primary"):
+                if verify_admin_password(pw):
+                    reset_rate_limit("admin")
+                    log_event("admin_login_success", "admin")
+                    st.session_state.admin_authenticated = True
+                    st.rerun()
+                else:
+                    record_failed_attempt("admin")
+                    log_event("admin_login_failed", "admin")
+                    st.error("パスワードが正しくありません")
 
     st.markdown("---")
     if st.button("← 戻る"):
         st.session_state.role = None
+        st.rerun()
+
+
+def _show_password_reset():
+    """医員パスワードリセット画面"""
+    st.subheader("パスワードリセット")
+
+    step = st.session_state.get("_pw_reset_step", "account")
+
+    if step == "account":
+        account = st.text_input("アカウント名を入力", key="reset_account")
+        if st.button("リセットコードを送信", type="primary"):
+            if not account.strip():
+                st.error("アカウント名を入力してください")
+            else:
+                email = get_doctor_email_by_account(account.strip())
+                if email:
+                    code = generate_reset_code()
+                    save_reset_code(account.strip(), code)
+                    # GAS webhook でリセットコードをメール送信
+                    gas_url = st.secrets.get("gas_webapp_url", "")
+                    if gas_url:
+                        try:
+                            requests.post(gas_url, json={
+                                "action": "password_reset_code",
+                                "account_name": account.strip(),
+                                "doctor_email": email,
+                                "reset_code": code,
+                            }, timeout=10)
+                        except requests.RequestException:
+                            pass
+                    log_event("password_reset_requested", account.strip(), "リセットコード送信")
+                    st.session_state._pw_reset_step = "code"
+                    st.session_state._pw_reset_account = account.strip()
+                    st.success("リセットコードをメールに送信しました")
+                    st.rerun()
+                else:
+                    st.warning("メールアドレスが設定されていないアカウントです。管理者にお問い合わせください。")
+
+    elif step == "code":
+        account = st.session_state.get("_pw_reset_account", "")
+        st.info(f"アカウント「{account}」に紐づくメールアドレスにリセットコードを送信しました。")
+        code_input = st.text_input("リセットコード（6桁）", key="reset_code_input")
+        new_pw1 = st.text_input("新しいパスワード", type="password", key="reset_pw1")
+        new_pw2 = st.text_input("新しいパスワード（確認）", type="password", key="reset_pw2")
+        if st.button("パスワードを変更", type="primary"):
+            if not code_input.strip():
+                st.error("リセットコードを入力してください")
+            elif not new_pw1:
+                st.error("新しいパスワードを入力してください")
+            elif new_pw1 != new_pw2:
+                st.error("パスワードが一致しません")
+            else:
+                # パスワードポリシーはコード消費前に検証
+                pw_ok, pw_msg = validate_password(new_pw1)
+                if not pw_ok:
+                    st.error(pw_msg)
+                elif not verify_reset_code(account, code_input.strip()):
+                    st.error("リセットコードが正しくないか、期限切れです")
+                else:
+                    doc_id = get_doctor_id_by_account(account)
+                    if doc_id:
+                        set_doctor_individual_password(doc_id, new_pw1)
+                        log_event("password_reset_completed", account, "メール経由リセット")
+                        st.success("パスワードを変更しました。ログインしてください。")
+                        st.session_state.pop("_pw_reset_mode", None)
+                        st.session_state.pop("_pw_reset_step", None)
+                        st.session_state.pop("_pw_reset_account", None)
+                        st.rerun()
+
+    if st.button("← ログイン画面に戻る"):
+        st.session_state.pop("_pw_reset_mode", None)
+        st.session_state.pop("_pw_reset_step", None)
+        st.session_state.pop("_pw_reset_account", None)
         st.rerun()
 
 
@@ -113,26 +237,44 @@ def _show_doctor_login():
     st.title("医員ログイン")
     st.markdown("---")
 
-    account = st.text_input("アカウント名", key="doc_account_login")
-    pw = st.text_input("パスワード", type="password", key="doc_pw_login")
+    # パスワードリセットモード
+    if st.session_state.get("_pw_reset_mode"):
+        _show_password_reset()
+        return
 
-    if st.button("ログイン", type="primary"):
-        if not account:
-            st.error("アカウント名を入力してください")
-        elif not pw:
-            st.error("パスワードを入力してください")
-        else:
-            doctor = verify_doctor_by_account(account.strip(), pw)
-            if doctor:
-                st.session_state.doctor_authenticated = True
-                st.session_state.doctor_id = doctor["id"]
-                st.rerun()
+    allowed, remaining = check_rate_limit("doctor")
+    if not allowed:
+        st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
+    else:
+        account = st.text_input("アカウント名", key="doc_account_login")
+        pw = st.text_input("パスワード", type="password", key="doc_pw_login")
+
+        if st.button("ログイン", type="primary"):
+            if not account:
+                st.error("アカウント名を入力してください")
+            elif not pw:
+                st.error("パスワードを入力してください")
             else:
-                st.error("アカウント名またはパスワードが正しくありません")
+                doctor = verify_doctor_by_account(account.strip(), pw)
+                if doctor:
+                    reset_rate_limit("doctor")
+                    log_event("doctor_login_success", account.strip())
+                    st.session_state.doctor_authenticated = True
+                    st.session_state.doctor_id = doctor["id"]
+                    st.rerun()
+                else:
+                    record_failed_attempt("doctor")
+                    log_event("doctor_login_failed", account.strip())
+                    st.error("アカウント名またはパスワードが正しくありません")
+
+        if st.button("パスワードを忘れた方"):
+            st.session_state._pw_reset_mode = True
+            st.rerun()
 
     st.markdown("---")
     if st.button("← 戻る"):
         st.session_state.role = None
+        st.session_state.pop("_pw_reset_mode", None)
         st.rerun()
 
 
@@ -248,8 +390,13 @@ def _show_doctor_settings(doctor):
                     elif new_pw1 != new_pw2:
                         st.error("新しいパスワードが一致しません")
                     else:
-                        set_doctor_individual_password(doctor["id"], new_pw1)
-                        st.success("パスワードを変更しました")
+                        pw_ok, pw_msg = validate_password(new_pw1)
+                        if not pw_ok:
+                            st.error(pw_msg)
+                        else:
+                            set_doctor_individual_password(doctor["id"], new_pw1)
+                            log_event("doctor_password_changed", doctor.get("account_name", ""))
+                            st.success("パスワードを変更しました")
 
         with tab_email:
             with st.form("change_email_form"):
@@ -260,8 +407,11 @@ def _show_doctor_settings(doctor):
                     st.write("メールアドレスが未設定です")
                 new_email = st.text_input("メールアドレス", value=current_email)
                 if st.form_submit_button("メールアドレスを保存"):
-                    update_doctor_email(doctor["id"], new_email.strip())
-                    st.success("メールアドレスを保存しました")
+                    if new_email.strip() and not validate_email(new_email.strip()):
+                        st.error("メールアドレスの形式が正しくありません")
+                    else:
+                        update_doctor_email(doctor["id"], new_email.strip())
+                        st.success("メールアドレスを保存しました")
                     st.rerun()
 
         if st.button("設定を閉じる"):
@@ -297,11 +447,14 @@ elif st.session_state.role == "doctor":
     if not st.session_state.doctor_authenticated:
         _show_doctor_login()
     else:
-        doctors = get_doctors()
+        doctors = get_doctors(active_only=False)
         doctor = next((d for d in doctors if d["id"] == st.session_state.doctor_id), None)
-        if doctor is None:
+        if doctor is None or not doctor.get("can_login", 1):
             st.session_state.doctor_authenticated = False
             st.session_state.doctor_id = None
+            if doctor and not doctor.get("can_login", 1):
+                st.warning("ログインが停止されています。管理者にお問い合わせください。")
+                st.stop()
             st.rerun()
         else:
             # 医員用ヘッダー（対象月セレクタなし）

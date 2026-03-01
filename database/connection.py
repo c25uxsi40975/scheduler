@@ -4,8 +4,10 @@
 """
 import json
 import hashlib
+import hmac
 import time
 from datetime import datetime
+import bcrypt
 import gspread
 import streamlit as st
 
@@ -152,13 +154,35 @@ def _next_id(ws):
 
 
 def _hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+    """パスワードをbcryptでハッシュ化"""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    """パスワードを検証。bcrypt と レガシー SHA-256 の両方に対応。"""
+    if stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"):
+        return bcrypt.checkpw(password.encode("utf-8"), stored_hash.encode("utf-8"))
+    # レガシー SHA-256（64文字の16進数）— 定数時間比較
+    legacy_hash = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(stored_hash, legacy_hash)
+
+
+def _is_legacy_hash(stored_hash: str) -> bool:
+    """ハッシュがレガシー SHA-256 形式かどうかを判定"""
+    return not (stored_hash.startswith("$2b$") or stored_hash.startswith("$2a$"))
+
+
+def _sanitize_cell_value(value):
+    """先頭が数式トリガー文字のユーザー入力にプレフィックスを付与（多層防御）"""
+    if isinstance(value, str) and value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
 
 
 # ---- 初期化 ----
 
 SHEET_HEADERS = {
-    "医員マスタ": ["id", "name", "account", "account_name", "email", "password_hash", "is_active", "created_at", "max_assignments", "job_rank"],
+    "医員マスタ": ["id", "name", "account", "account_name", "email", "password_hash", "is_active", "created_at", "max_assignments", "job_rank", "can_login"],
     "外勤先マスタ": ["id", "name", "fee", "frequency", "preferred_doctors", "fixed_doctors", "excluded_doctors", "is_active", "created_at", "effort_cost", "work_hours", "time_slot", "location"],
     "優先度マスタ": ["doctor_id", "clinic_id", "weight"],
     "日別設定": ["clinic_id", "date", "required_doctors"],
@@ -225,20 +249,23 @@ def init_db():
                     ws.update([new_headers], "A1")
     _db_initialized = True
 
-    # 既存医員でパスワード未設定の場合、初期パスワード「1111」を設定（バッチ更新）
+    # 既存医員のマイグレーション（バッチ更新）
     ws = _get_sheet("医員マスタ")
     headers = ws.row_values(1)
     records = ws.get_all_values()
     updates = []
 
-    if "password_hash" in headers:
-        col_idx = headers.index("password_hash") + 1
-        default_pw_hash = _hash_password("1111")
-        col_l = _col_letter(col_idx)
+    # パスワード未設定の医員にはデフォルトを設定しない（管理者がリセットする運用）
+    # ※既にパスワードが設定済みの医員はそのまま（次回ログイン時にbcryptへ自動移行）
+
+    # can_login 未設定の場合、デフォルト値 1 を設定
+    if "can_login" in headers:
+        cl_idx = headers.index("can_login") + 1
+        cl_col_l = _col_letter(cl_idx)
         for i, row in enumerate(records[1:], start=2):
-            pw_val = row[col_idx - 1] if len(row) >= col_idx else ""
-            if not pw_val:
-                updates.append({'range': f'{col_l}{i}', 'values': [[default_pw_hash]]})
+            cl_val = row[cl_idx - 1] if len(row) >= cl_idx else ""
+            if not cl_val:
+                updates.append({'range': f'{cl_col_l}{i}', 'values': [[1]]})
 
     # 既存医員で account (ID) 未設定の場合、仮の入局年度を設定
     if "account" in headers:
