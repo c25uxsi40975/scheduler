@@ -6,60 +6,44 @@ from components.schedule_table import render_schedule_table, render_doctor_view_
 from components.schedule_image import generate_schedule_image, generate_schedule_pdf
 
 
-def _render_lightbox_image(img_data):
-    """画像をタップで拡大可能なモーダル付きで表示する"""
-    b64 = base64.b64encode(img_data).decode()
+def _render_open_links(img_data, pdf_data):
+    """拡大表示・PDF表示リンクを提供する（新しいタブで開く）"""
+    img_b64 = base64.b64encode(img_data).decode()
+    pdf_js = ""
+    pdf_link = ""
+    if pdf_data:
+        pdf_b64 = base64.b64encode(pdf_data).decode()
+        pdf_link = '<a id="sched-pdf-link" href="#" target="_blank" rel="noopener">PDFを開く</a>'
+        pdf_js = f"""
+        var pdfBlob = b64toBlob("{pdf_b64}", "application/pdf");
+        document.getElementById("sched-pdf-link").href = URL.createObjectURL(pdfBlob);
+        """
     html = f"""
     <style>
-    .sched-img-wrap img {{
-        width: 100%;
-        cursor: zoom-in;
-    }}
-    .sched-overlay {{
-        display: none;
-        position: fixed;
-        top: 0; left: 0; right: 0; bottom: 0;
-        background: rgba(0,0,0,0.85);
-        z-index: 999999;
-        justify-content: center;
-        align-items: center;
-        touch-action: pinch-zoom;
-    }}
-    .sched-overlay.active {{
-        display: flex;
-    }}
-    .sched-overlay img {{
-        max-width: 95vw;
-        max-height: 90vh;
-        object-fit: contain;
-        touch-action: pinch-zoom;
-    }}
-    .sched-overlay .close-btn {{
-        position: fixed;
-        top: 12px; right: 16px;
-        color: #fff;
-        font-size: 36px;
-        cursor: pointer;
-        z-index: 1000000;
-        line-height: 1;
-        background: rgba(0,0,0,0.5);
-        border-radius: 50%;
-        width: 44px; height: 44px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    .sched-actions {{ display: flex; gap: 10px; padding: 4px 0; }}
+    .sched-actions a {{
+        padding: 8px 16px; background: #f0f2f6; border: 1px solid #d0d0d0;
+        border-radius: 6px; text-decoration: none; color: #262730;
+        font-size: 14px; font-family: -apple-system, sans-serif;
     }}
     </style>
-    <div class="sched-img-wrap">
-        <img src="data:image/png;base64,{b64}"
-             onclick="this.parentElement.nextElementSibling.classList.add('active')" />
+    <div class="sched-actions">
+        <a id="sched-zoom-link" href="#" target="_blank" rel="noopener">拡大表示</a>
+        {pdf_link}
     </div>
-    <div class="sched-overlay"
-         onclick="if(event.target===this)this.classList.remove('active')">
-        <span class="close-btn"
-              onclick="this.parentElement.classList.remove('active')">&times;</span>
-        <img src="data:image/png;base64,{b64}" />
-    </div>
+    <script>
+    (function() {{
+        function b64toBlob(b64, mime) {{
+            var bin = atob(b64);
+            var u8 = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+            return new Blob([u8], {{type: mime}});
+        }}
+        var imgBlob = b64toBlob("{img_b64}", "image/png");
+        document.getElementById("sched-zoom-link").href = URL.createObjectURL(imgBlob);
+        {pdf_js}
+    }})();
+    </script>
     """
     st.html(html)
 
@@ -75,20 +59,12 @@ def render(target_month):
         doctors = get_doctors()
         clinics = get_clinics()
 
-        # スケジュール画像（モーダル拡大対応）
+        # スケジュール画像
         img_data = generate_schedule_image(sched, doctors, clinics, target_month)
         if img_data:
-            _render_lightbox_image(img_data)
-
-            # PDF ダウンロード
+            st.image(img_data, use_container_width=True)
             pdf_data = generate_schedule_pdf(sched, doctors, clinics, target_month)
-            if pdf_data:
-                st.download_button(
-                    "PDFをダウンロード",
-                    pdf_data,
-                    file_name=f"schedule_{target_month}.pdf",
-                    mime="application/pdf",
-                )
+            _render_open_links(img_data, pdf_data)
 
         # 詳細テーブル（折りたたみ）
         with st.expander("詳細テーブル表示"):
