@@ -20,6 +20,7 @@ from ml_adjuster import (
 from optimizer import get_target_saturdays, get_clinic_dates, PRIORITY_MANDATORY, PRIORITY_EXCLUDED, diagnose_infeasibility
 from pipeline import run_integrated_pipeline
 from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
+from components.display_utils import build_display_name_map, build_reverse_display_name_map
 
 
 def _append_training_rows(target_month, sched, doctors, clinics, confirmed_schedules):
@@ -232,7 +233,7 @@ def render(target_month, year, month):
         _clinics = get_clinics()
         _doctors = get_doctors()
         clinic_map = {c["id"]: c for c in _clinics}
-        doc_name_map = {d["id"]: d["name"] for d in _doctors}
+        doc_name_map = build_display_name_map(_doctors)
         clinic_name_map = {c["id"]: c["name"] for c in _clinics}
 
         # △日マップ（避けたい日）
@@ -380,7 +381,7 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
 
 def _check_soft_constraints(new_assignments, constraints, doctors):
     """ソフト制約違反の警告メッセージリストを返す"""
-    doc_name_map = {d["id"]: d["name"] for d in doctors}
+    doc_name_map = build_display_name_map(doctors)
     avoid_map = constraints["avoid_map"]
     max_assignments_map = constraints["max_assignments"]
     date_clinic_req_map = constraints["date_clinic_requests"]
@@ -463,8 +464,8 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
     assignments = sched["assignments"]
 
     # 名前⇔IDマップ
-    doc_name_to_id = {d["name"]: d["id"] for d in doctors}
-    doc_id_to_name = {d["id"]: d["name"] for d in doctors}
+    doc_id_to_name = build_display_name_map(doctors)
+    doc_name_to_id = build_reverse_display_name_map(doctors)
     clinic_id_to_name = {cid: c["name"] for cid, c in clinic_map.items()}
 
     # スケジュールの日付と外勤先を抽出
@@ -479,7 +480,7 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
     for a in assignments:
         slot_map[(a["date"], a["clinic_id"])] = a["doctor_id"]
 
-    all_doc_names = [""] + [d["name"] for d in doctors]
+    all_doc_names = [""] + [doc_id_to_name[d["id"]] for d in doctors]
 
     rows = []
     for ds in dates:

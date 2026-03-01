@@ -81,19 +81,14 @@ def _text_size(draw, text, font):
     return bb[2] - bb[0], bb[3] - bb[1]
 
 
-def generate_schedule_image(sched, doctors, clinics, year_month):
-    """スケジュールをスプレッドシート風の画像として生成する。
-
-    Args:
-        sched: スケジュールデータ (assignments 含む)
-        doctors: 医員リスト
-        clinics: 外勤先リスト
-        year_month: "YYYY-MM" 形式
+def _build_schedule_image(sched, doctors, clinics, year_month):
+    """スケジュールの PIL Image オブジェクトを生成する（内部共通関数）。
 
     Returns:
-        bytes | None: PNG 画像データ
+        Image | None: PIL Image オブジェクト
     """
-    doc_map = {d["id"]: d["name"] for d in doctors}
+    from components.display_utils import build_display_name_map
+    doc_map = build_display_name_map(doctors)
     clinic_map = {c["id"]: c["name"] for c in clinics}
 
     # ---- 割り当てデータ構築 ----
@@ -140,7 +135,7 @@ def generate_schedule_image(sched, doctors, clinics, year_month):
     bot_header = [""] + day_labels
     bot_rows = []
     for d in doc_sorted:
-        row = [d["name"]]
+        row = [doc_map.get(d["id"], d["name"])]
         for ds in dates_sorted:
             row.append(doc_sched.get(d["id"], {}).get(ds, ""))
         bot_rows.append(row)
@@ -255,8 +250,34 @@ def generate_schedule_image(sched, doctors, clinics, year_month):
     bot_y = margin + top_th + gap
     draw_table(margin, bot_y, bot_cw, bot_header, bot_rows)
 
-    # PNG 出力
+    return img
+
+
+def generate_schedule_image(sched, doctors, clinics, year_month):
+    """スケジュールをスプレッドシート風の PNG 画像として生成する。
+
+    Returns:
+        bytes | None: PNG 画像データ
+    """
+    img = _build_schedule_image(sched, doctors, clinics, year_month)
+    if img is None:
+        return None
     buf = io.BytesIO()
     img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def generate_schedule_pdf(sched, doctors, clinics, year_month):
+    """スケジュールを PDF として生成する。
+
+    Returns:
+        bytes | None: PDF データ
+    """
+    img = _build_schedule_image(sched, doctors, clinics, year_month)
+    if img is None:
+        return None
+    buf = io.BytesIO()
+    img.save(buf, format="PDF")
     buf.seek(0)
     return buf.getvalue()

@@ -490,8 +490,9 @@ def diagnose_infeasibility(
     """制約を満たせない原因の診断情報を返す"""
     issues = []
     overrides = date_overrides or {}
+    from components.display_utils import build_display_name_map
     clinic_name = {c["id"]: c["name"] for c in clinics}
-    doc_name = {d["id"]: d["name"] for d in doctors}
+    doc_name = build_display_name_map(doctors)
 
     # スロット一覧を構築: [(clinic_id, date_str, required)]
     slots = []

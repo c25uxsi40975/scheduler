@@ -2,11 +2,12 @@
 import streamlit as st
 import pandas as pd
 from datetime import date
+from components.display_utils import build_display_name_map
 
 
 def render_schedule_table(sched, doctors, clinics):
     """スケジュールをカレンダー形式のテーブルで表示する"""
-    doc_map = {d["id"]: d["name"] for d in doctors}
+    doc_map = build_display_name_map(doctors)
     clinic_map = {c["id"]: c["name"] for c in clinics}
 
     cal_data = {}
@@ -49,6 +50,8 @@ def render_doctor_view_table(sched, doctors):
     if not sched["assignments"]:
         return None
 
+    display_map = build_display_name_map(doctors)
+
     doc_sched = {}
     for a in sched["assignments"]:
         doc_sched.setdefault(a["doctor_id"], {})[a["date"]] = (
@@ -63,7 +66,7 @@ def render_doctor_view_table(sched, doctors):
 
     rows = []
     for d in sorted(doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
-        row = {"医員": d["name"]}
+        row = {"医員": display_map.get(d["id"], d["name"])}
         for ds in dates_sorted:
             row[date_labels[ds]] = doc_sched.get(d["id"], {}).get(ds, "-")
         rows.append(row)
@@ -110,12 +113,14 @@ def render_doctor_stats_table(sched, doctors, clinics):
             cumulative[did]["回数"] += s["回数"]
             cumulative[did]["報酬合計"] += s["報酬合計"]
 
+    display_map = build_display_name_map(doctors)
+
     rows = []
     for d in sorted(doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
         s = doc_stats.get(d["id"], {"回数": 0, "報酬合計": 0})
         c = cumulative.get(d["id"], {"回数": 0, "報酬合計": 0})
         rows.append({
-            "医員": d["name"],
+            "医員": display_map.get(d["id"], d["name"]),
             "今月回数": s["回数"],
             "今月報酬": f"¥{s['報酬合計']:,}",
             "累計回数": c["回数"],

@@ -10,6 +10,7 @@ from database import (
 )
 from ml_adjuster import ml_readjust, get_model_metrics, _clear_model
 from components.schedule_table import render_schedule_table
+from components.display_utils import build_display_name_map
 
 
 def render(target_month, year, month):
@@ -145,7 +146,7 @@ def _render_ml_results(result, doctors, clinics, target_month):
 
 def _render_comparison(confirmed_sched, ml_result, doctors, clinics):
     """確定スケジュールとML結果の比較表示。"""
-    doc_map = {d["id"]: d["name"] for d in doctors}
+    doc_map = build_display_name_map(doctors)
     clinic_map = {c["id"]: c["name"] for c in clinics}
 
     # 各スロットの割当をマップ化
@@ -185,6 +186,7 @@ def _render_doctor_detail(result, doctors, clinics):
     """医員別の予測値と実際の割当統計。"""
     st.subheader("医員別詳細")
 
+    doc_map = build_display_name_map(doctors)
     effort_map = {c["id"]: c.get("effort_cost", 0) for c in clinics}
     fee_map = {c["id"]: c.get("fee", 0) for c in clinics}
     predictions = result.get("predictions", {})
@@ -205,7 +207,7 @@ def _render_doctor_detail(result, doctors, clinics):
         avg_actual = np.mean(assigned_efforts) if assigned_efforts else 0
 
         rows.append({
-            "医員": d["name"],
+            "医員": doc_map.get(d["id"], d["name"]),
             "ML予測値": f"{pred:.1f}" if pred is not None else "-",
             "実割当平均労力": f"{avg_actual:.1f}" if count > 0 else "-",
             "差分": f"{abs(pred - avg_actual):.1f}" if pred is not None and count > 0 else "-",

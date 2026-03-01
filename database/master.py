@@ -54,6 +54,8 @@ def get_doctors(active_only=True):
         r["can_login"] = _safe_int(r.get("can_login", 1), default=1)
         r["max_assignments"] = _safe_int(r.get("max_assignments", 0))
         r["job_rank"] = _safe_int(r.get("job_rank", 0))
+        r["last_name"] = str(r.get("last_name", ""))
+        r["first_name"] = str(r.get("first_name", ""))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -61,14 +63,13 @@ def get_doctors(active_only=True):
     return result
 
 
-def add_doctor(name, account="", initial_password="1111"):
+def add_doctor(last_name, first_name, account="", initial_password="1111"):
     ws = _get_sheet("医員マスタ")
     # 重複チェック（ID）
     records = _get_all_records(ws)
     if account and any(str(r.get("account", "")) == account for r in records):
         return "duplicate_account"
-    if any(r["name"] == name for r in records):
-        return "duplicate_name"
+    name = last_name + first_name
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     pw_hash = _hash_password(initial_password)
@@ -76,6 +77,8 @@ def add_doctor(name, account="", initial_password="1111"):
     actual_headers = _retry(ws.row_values, 1)
     values = {
         "id": new_id, "name": _sanitize_cell_value(name),
+        "last_name": _sanitize_cell_value(last_name),
+        "first_name": _sanitize_cell_value(first_name),
         "account": _sanitize_cell_value(account),
         "account_name": _sanitize_cell_value(account), "email": "",
         "password_hash": pw_hash, "is_active": 1, "can_login": 1,

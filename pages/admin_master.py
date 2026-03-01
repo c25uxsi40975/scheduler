@@ -11,6 +11,7 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
+from components.display_utils import build_display_name_map
 # 優先度ラベル定義（weight値とラベルの対応）
 WEIGHT_TO_LABEL = {3.0: "必須", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
 LABEL_TO_WEIGHT = {"必須": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
@@ -84,25 +85,29 @@ def render(target_month, year, month):
         st.subheader("医員一覧")
         with st.expander("医員の追加・編集", expanded=False):
             with st.form("add_doctor_form", clear_on_submit=True):
-                new_doc = st.text_input("医員名")
+                name_cols = st.columns(2)
+                with name_cols[0]:
+                    new_last = st.text_input("名字")
+                with name_cols[1]:
+                    new_first = st.text_input("名前")
                 new_account = st.text_input("医員ID（入局年度）", placeholder="例: 2024")
                 new_init_pw = st.text_input("初期パスワード", value="aaaa1111")
                 st.caption("初期アカウント名 = 医員ID。アカウント名はユーザーが後から変更可能です。")
                 if st.form_submit_button("追加", use_container_width=True):
-                    if not new_doc.strip():
-                        st.error("医員名を入力してください")
+                    if not new_last.strip():
+                        st.error("名字を入力してください")
+                    elif not new_first.strip():
+                        st.error("名前を入力してください")
                     elif not new_account.strip():
                         st.error("医員IDを入力してください")
                     elif not new_init_pw.strip():
                         st.error("初期パスワードを入力してください")
                     else:
-                        err = add_doctor(new_doc.strip(), account=new_account.strip(), initial_password=new_init_pw.strip())
+                        err = add_doctor(new_last.strip(), new_first.strip(), account=new_account.strip(), initial_password=new_init_pw.strip())
                         if err == "duplicate_account":
                             st.error(f"医員ID「{new_account}」は既に使用されています")
-                        elif err == "duplicate_name":
-                            st.error(f"医員名「{new_doc}」は既に登録されています")
                         else:
-                            st.success(f"「{new_doc}」を追加しました（ID: {new_account}、初期PW: {new_init_pw.strip()}）")
+                            st.success(f"「{new_last}{new_first}」を追加しました（ID: {new_account}、初期PW: {new_init_pw.strip()}）")
                             st.rerun()
 
             doctors_all = get_doctors(active_only=False)
@@ -266,7 +271,7 @@ def render(target_month, year, month):
             tpl = CLINIC_TEMPLATES.get(selected_tpl, {})
 
             _add_form_doctors = get_doctors()
-            _add_doc_id_name = {d["id"]: d["name"] for d in _add_form_doctors}
+            _add_doc_id_name = build_display_name_map(_add_form_doctors)
             _add_doc_ids = [d["id"] for d in _add_form_doctors]
 
             with st.form("add_clinic_form", clear_on_submit=True):
@@ -320,7 +325,7 @@ def render(target_month, year, month):
                     tslot = c.get("time_slot", "")
                     loc = c.get("location", "")
                     _edit_docs = get_doctors()
-                    _edit_doc_id_name = {d["id"]: d["name"] for d in _edit_docs}
+                    _edit_doc_id_name = build_display_name_map(_edit_docs)
                     _edit_doc_ids = [d["id"] for d in _edit_docs]
 
                     with st.container(border=True):
@@ -441,6 +446,7 @@ def render(target_month, year, month):
         # 医員のソート: job_rank降順 → 名前順（上級医が上）
         rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
         sorted_doctors = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
+        _display_map = build_display_name_map(doctors)
 
         # --- 2A: 優先度マトリクス（編集可能）---
         st.caption(
@@ -458,7 +464,7 @@ def render(target_month, year, month):
         # DataFrameを構築（行=医員, 列=外勤先, 値=ラベル）
         matrix_data = {}
         for d in sorted_doctors:
-            row_label = f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
+            row_label = f"{_display_map.get(d['id'], d['name'])}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
             row = {}
             for c in clinics:
                 w = aff_map.get((d["id"], c["id"]), 1.0)
@@ -484,7 +490,7 @@ def render(target_month, year, month):
         if st.button("優先度を一括保存", type="primary", key="save_matrix"):
             updates = []
             for i, d in enumerate(sorted_doctors):
-                row_label = f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
+                row_label = f"{_display_map.get(d['id'], d['name'])}({rank_labels.get(d.get('job_rank', 0), '未設定')})"
                 for c in clinics:
                     new_label = edited_df.at[row_label, c["name"]]
                     new_w = LABEL_TO_WEIGHT.get(new_label, 1.0)
@@ -503,19 +509,17 @@ def render(target_month, year, month):
         has_special = False
         for c in clinics:
             mandatory_docs = [d for d in sorted_doctors if edited_df.at[
-                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+                f"{_display_map.get(d['id'], d['name'])}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
             ] == "必須"]
             nominated_docs = [d for d in sorted_doctors if edited_df.at[
-                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+                f"{_display_map.get(d['id'], d['name'])}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
             ] == "指名"]
             excluded_docs = [d for d in sorted_doctors if edited_df.at[
-                f"{d['name']}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
+                f"{_display_map.get(d['id'], d['name'])}({rank_labels.get(d.get('job_rank', 0), '未設定')})", c["name"]
             ] == "除外"]
 
             # 限定メンバー（外勤先マスタの fixed_doctors）
             fd = c.get("fixed_doctors") or []
-            doc_name_map = {d["id"]: d["name"] for d in sorted_doctors}
-
             if mandatory_docs or nominated_docs or excluded_docs or fd:
                 if not has_special:
                     st.markdown("---")
@@ -523,16 +527,16 @@ def render(target_month, year, month):
                     has_special = True
                 parts = [f"**{c['name']}**: "]
                 if fd:
-                    fd_names = ", ".join(doc_name_map.get(did, "?") for did in fd)
+                    fd_names = ", ".join(_display_map.get(did, "?") for did in fd)
                     parts.append(f"限定=[{fd_names}]")
                 if mandatory_docs:
-                    names = ", ".join(d["name"] for d in mandatory_docs)
+                    names = ", ".join(_display_map.get(d["id"], d["name"]) for d in mandatory_docs)
                     parts.append(f"必須=[{names}]")
                 if nominated_docs:
-                    names = ", ".join(d["name"] for d in nominated_docs)
+                    names = ", ".join(_display_map.get(d["id"], d["name"]) for d in nominated_docs)
                     parts.append(f"指名=[{names}]")
                 if excluded_docs:
-                    names = ", ".join(d["name"] for d in excluded_docs)
+                    names = ", ".join(_display_map.get(d["id"], d["name"]) for d in excluded_docs)
                     parts.append(f"除外=[{names}]")
                 st.caption(" / ".join(parts))
 
@@ -545,6 +549,7 @@ def render(target_month, year, month):
         st.write(f"**月回数上限の一括設定**")
         st.caption("各医員の月あたりの最大外勤回数を設定します（1〜4回）")
 
+        _dmap_3a = build_display_name_map(doctors)
         with st.form("batch_max_assignments"):
             max_cols = st.columns(min(len(doctors), 4))
             for i, d in enumerate(sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))):
@@ -554,7 +559,7 @@ def render(target_month, year, month):
                     if current_max < 1 or current_max > 4:
                         current_max = 4
                     st.number_input(
-                        f"{d['name']}({rank_labels_3a.get(d.get('job_rank', 0), '')})",
+                        f"{_dmap_3a.get(d['id'], d['name'])}({rank_labels_3a.get(d.get('job_rank', 0), '')})",
                         min_value=1, max_value=4, value=current_max,
                         key=f"max_assign_{d['id']}",
                     )
@@ -590,11 +595,12 @@ def render(target_month, year, month):
             SCHEDULE_STATUS = ["○", "当○", "△", "×"]
             rank_labels_3b = {0: "未設定", 1: "レジ", 2: "院生", 3: "フェロー"}
             sorted_docs_3b = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
+            _dmap_3b = build_display_name_map(doctors)
 
             # DataFrame 構築
             matrix_data = {}
             for d in sorted_docs_3b:
-                row_label = f"{d['name']}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
+                row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
                 pref = pref_map_3b.get(d["id"])
                 ng_set = set(pref.get("ng_dates", [])) if pref else set()
                 avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
@@ -630,7 +636,7 @@ def render(target_month, year, month):
             if st.button("日程を一括保存", type="primary", key="save_schedule_matrix"):
                 batch_items = []
                 for d in sorted_docs_3b:
-                    row_label = f"{d['name']}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
+                    row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
                     pref = pref_map_3b.get(d["id"])
                     old_ng = set(pref.get("ng_dates", [])) if pref else set()
                     old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
