@@ -2,7 +2,7 @@
 import streamlit as st
 from datetime import date
 from database import get_doctors, get_clinics, get_schedules
-from components.schedule_table import render_schedule_table, render_doctor_view_table
+from components.schedule_image import generate_schedule_image
 
 
 def render(doctor, target_month):
@@ -32,12 +32,19 @@ def render(doctor, target_month):
         else:
             st.info("今月の外勤割り当てはありません")
 
-        # 全体表示
+        # 全体スケジュール（画像表示）
         st.markdown("---")
         st.subheader("全体スケジュール")
-        render_schedule_table(sched, doctors, clinics)
-
-        # 医員別ビュー
-        render_doctor_view_table(sched, doctors)
+        img_data = generate_schedule_image(sched, doctors, clinics, target_month)
+        if img_data:
+            st.image(img_data, use_container_width=True)
+            st.download_button(
+                "画像をダウンロード",
+                img_data,
+                file_name=f"schedule_{target_month}.png",
+                mime="image/png",
+            )
+        else:
+            st.warning("スケジュール画像を生成できませんでした")
     else:
         st.info("まだスケジュールが確定されていません")
