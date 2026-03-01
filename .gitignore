@@ -2,6 +2,7 @@
 admin_password.txt
 *.json
 credentials/
+.streamlit/secrets.toml
 
 # ML model & reference data
 model.pkl

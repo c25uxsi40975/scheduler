@@ -13,13 +13,17 @@ from PIL import Image, ImageDraw, ImageFont
 
 # 日本語フォント検索パス
 _FONT_PATHS_REGULAR = [
+    # WSL / Windows
     "/mnt/c/Windows/Fonts/YuGothM.ttc",
     "/mnt/c/Windows/Fonts/YuGothR.ttc",
     "/mnt/c/Windows/Fonts/meiryo.ttc",
     "/mnt/c/Windows/Fonts/msgothic.ttc",
+    # Linux (Streamlit Cloud / Debian / Ubuntu)
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
     "/usr/share/fonts/truetype/fonts-japanese-gothic.ttf",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKjp-Regular.otf",
 ]
 
 _FONT_PATHS_BOLD = [
@@ -27,7 +31,26 @@ _FONT_PATHS_BOLD = [
     "/mnt/c/Windows/Fonts/meiryob.ttc",
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
     "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Bold.otf",
+    "/usr/share/fonts/truetype/noto/NotoSansCJKjp-Bold.otf",
 ]
+
+
+def _find_cjk_font():
+    """fc-list でシステム上の CJK フォントパスを動的に検索"""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["fc-list", ":lang=ja", "file"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in out.stdout.splitlines():
+            path = line.split(":")[0].strip()
+            if path and os.path.exists(path):
+                return path
+    except Exception:
+        pass
+    return None
 
 
 def _load_font(size, bold=False):
@@ -42,6 +65,13 @@ def _load_font(size, bold=False):
     # Bold が見つからない場合は Regular にフォールバック
     if bold:
         return _load_font(size, bold=False)
+    # fc-list で動的検索
+    fallback = _find_cjk_font()
+    if fallback:
+        try:
+            return ImageFont.truetype(fallback, size)
+        except Exception:
+            pass
     return None
 
 

@@ -11,7 +11,6 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
-from security import generate_temp_password
 # 優先度ラベル定義（weight値とラベルの対応）
 WEIGHT_TO_LABEL = {3.0: "必須", 2.0: "指名", 1.0: "任意", 0.0: "除外"}
 LABEL_TO_WEIGHT = {"必須": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
@@ -84,13 +83,10 @@ def render(target_month, year, month):
     with col1:
         st.subheader("医員一覧")
         with st.expander("医員の追加・編集", expanded=False):
-            # 追加フォーム用の初期パスワードをセッションで管理
-            if "new_doctor_init_pw" not in st.session_state:
-                st.session_state.new_doctor_init_pw = generate_temp_password(12)
             with st.form("add_doctor_form", clear_on_submit=True):
                 new_doc = st.text_input("医員名")
                 new_account = st.text_input("医員ID（入局年度）", placeholder="例: 2024")
-                new_init_pw = st.text_input("初期パスワード", value=st.session_state.new_doctor_init_pw)
+                new_init_pw = st.text_input("初期パスワード", value="aaaa1111")
                 st.caption("初期アカウント名 = 医員ID。アカウント名はユーザーが後から変更可能です。")
                 if st.form_submit_button("追加", use_container_width=True):
                     if not new_doc.strip():
@@ -107,8 +103,6 @@ def render(target_month, year, month):
                             st.error(f"医員名「{new_doc}」は既に登録されています")
                         else:
                             st.success(f"「{new_doc}」を追加しました（ID: {new_account}、初期PW: {new_init_pw.strip()}）")
-                            # 次回追加時のために新しいパスワードを生成
-                            st.session_state.new_doctor_init_pw = generate_temp_password(12)
                             st.rerun()
 
             doctors_all = get_doctors(active_only=False)
