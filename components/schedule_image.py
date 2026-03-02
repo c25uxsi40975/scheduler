@@ -81,7 +81,8 @@ def _text_size(draw, text, font):
     return bb[2] - bb[0], bb[3] - bb[1]
 
 
-def _build_schedule_image(sched, doctors, clinics, year_month):
+def _build_schedule_image(sched, doctors, clinics, year_month,
+                          highlight_doctor_id=None):
     """スケジュールの PIL Image オブジェクトを生成する（内部共通関数）。
 
     Returns:
@@ -118,14 +119,21 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
     _, month_str = year_month.split("-")
     month_label = f"{int(month_str)}月"
 
+    # ハイライト対象の医員表示名
+    hl_doc_name = doc_map.get(highlight_doctor_id) if highlight_doctor_id else None
+
     # ---- テーブルデータ構築 ----
     # 上部テーブル: 外勤先×日付
     top_header = [month_label] + all_clinic_names
     top_rows = []
+    top_hl_cells = set()  # ハイライトするセル (row, col)
     for i, ds in enumerate(dates_sorted):
         row = [day_labels[i]]
-        for cn in all_clinic_names:
-            row.append(cal_data[ds].get(cn, "×"))
+        for ci, cn in enumerate(all_clinic_names):
+            val = cal_data[ds].get(cn, "×")
+            row.append(val)
+            if hl_doc_name and val == hl_doc_name:
+                top_hl_cells.add((i, ci + 1))  # +1 for day label column
         top_rows.append(row)
 
     # 下部テーブル: 医員×日付
@@ -134,11 +142,14 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
     )
     bot_header = [""] + day_labels
     bot_rows = []
-    for d in doc_sorted:
+    highlight_row = None  # ハイライト対象の行インデックス
+    for idx, d in enumerate(doc_sorted):
         row = [doc_map.get(d["id"], d["name"])]
         for ds in dates_sorted:
             row.append(doc_sched.get(d["id"], {}).get(ds, ""))
         bot_rows.append(row)
+        if highlight_doctor_id and d["id"] == highlight_doctor_id:
+            highlight_row = idx
 
     # ---- フォント読み込み ----
     font_size = 16
@@ -195,6 +206,7 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
 
     line_color = (180, 180, 180)
     header_bg = (242, 242, 242)
+    highlight_bg = (255, 255, 200)  # 薄い黄色
 
     def draw_cell_text(x, y, w, text, f):
         """セル内にテキストを中央揃えで描画"""
@@ -205,7 +217,8 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
         ty = y + (cell_h - th) // 2
         draw.text((tx, ty), text, fill=(0, 0, 0), font=f)
 
-    def draw_table(x0, y0, col_ws, header, rows):
+    def draw_table(x0, y0, col_ws, header, rows, hl_row=None,
+                   hl_cells=None):
         """テーブルを描画"""
         tw = sum(col_ws)
         n_rows = 1 + len(rows)
@@ -215,6 +228,24 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
             [x0, y0, x0 + tw, y0 + cell_h],
             fill=header_bg,
         )
+
+        # ハイライト行背景
+        if hl_row is not None:
+            hy = y0 + (hl_row + 1) * cell_h
+            draw.rectangle(
+                [x0, hy, x0 + tw, hy + cell_h],
+                fill=highlight_bg,
+            )
+
+        # ハイライトセル背景
+        if hl_cells:
+            for (ri, ci) in hl_cells:
+                cx = x0 + sum(col_ws[:ci])
+                cy = y0 + (ri + 1) * cell_h
+                draw.rectangle(
+                    [cx, cy, cx + col_ws[ci], cy + cell_h],
+                    fill=highlight_bg,
+                )
 
         # 横罫線
         for r in range(n_rows + 1):
@@ -244,22 +275,25 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
                 cx += col_ws[ci]
 
     # 上部テーブル描画
-    draw_table(margin, margin, top_cw, top_header, top_rows)
+    draw_table(margin, margin, top_cw, top_header, top_rows,
+               hl_cells=top_hl_cells)
 
     # 下部テーブル描画
     bot_y = margin + top_th + gap
-    draw_table(margin, bot_y, bot_cw, bot_header, bot_rows)
+    draw_table(margin, bot_y, bot_cw, bot_header, bot_rows, hl_row=highlight_row)
 
     return img
 
 
-def generate_schedule_image(sched, doctors, clinics, year_month):
+def generate_schedule_image(sched, doctors, clinics, year_month,
+                            highlight_doctor_id=None):
     """スケジュールをスプレッドシート風の PNG 画像として生成する。
 
     Returns:
         bytes | None: PNG 画像データ
     """
-    img = _build_schedule_image(sched, doctors, clinics, year_month)
+    img = _build_schedule_image(sched, doctors, clinics, year_month,
+                                highlight_doctor_id=highlight_doctor_id)
     if img is None:
         return None
     buf = io.BytesIO()

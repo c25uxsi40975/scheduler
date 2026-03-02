@@ -176,13 +176,15 @@ _VIEWER_SCRIPT = """
 """
 
 
-def render_schedule_with_viewer(sched, doctors, clinics, target_month):
+def render_schedule_with_viewer(sched, doctors, clinics, target_month,
+                                highlight_doctor_id=None):
     """スケジュール画像をビューア付きで表示する。
 
     - インライン画像表示（st.image）
     - 画像タップ → フルスクリーンオーバーレイ（ピンチ拡大対応）
     """
-    img_data = generate_schedule_image(sched, doctors, clinics, target_month)
+    img_data = generate_schedule_image(sched, doctors, clinics, target_month,
+                                       highlight_doctor_id=highlight_doctor_id)
     if not img_data:
         return
 

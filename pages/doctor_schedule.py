@@ -35,6 +35,7 @@ def render(doctor, target_month):
         # 全体スケジュール（フルスクリーンビューア付き）
         st.markdown("---")
         st.subheader("全体スケジュール")
-        render_schedule_with_viewer(sched, doctors, clinics, target_month)
+        render_schedule_with_viewer(sched, doctors, clinics, target_month,
+                                    highlight_doctor_id=doctor["id"])
     else:
         st.info("まだスケジュールが確定されていません")
