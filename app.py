@@ -32,7 +32,7 @@ from pages import (
 
 # ---- 初期設定 ----
 st.set_page_config(
-    page_title="外勤調整システム",
+    page_title="土曜外勤調整システム",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -91,7 +91,7 @@ _check_session_timeout()
 
 def _show_role_selection():
     """ロール選択画面"""
-    st.title("外勤調整システム")
+    st.title("土曜外勤調整システム")
     st.markdown("---")
 
     if st.button("管理者としてログイン", use_container_width=True, type="primary"):
