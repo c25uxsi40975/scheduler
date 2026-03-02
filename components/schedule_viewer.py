@@ -43,10 +43,17 @@ def render_schedule_with_viewer(sched, doctors, clinics, target_month):
             img.style.cursor = 'zoom-in';
 
             img.addEventListener('click', function() {
-                /* Find the fullscreen button in Streamlit's toolbar */
-                var btn = container.querySelector('button[data-testid="StyledFullScreenButton"]')
-                    || container.querySelector('[data-testid="stElementToolbar"] button')
-                    || container.querySelector('button');
+                /*
+                 * Streamlit toolbar button is NOT inside stImage directly.
+                 * It's in a parent wrapper element. Walk up the DOM to find it.
+                 */
+                var btn = null;
+                var el = container;
+                for (var i = 0; i < 6 && el && !btn; i++) {
+                    btn = el.querySelector('button[data-testid="StyledFullScreenButton"]')
+                        || el.querySelector('[data-testid="stElementToolbar"] button');
+                    el = el.parentElement;
+                }
                 if (btn) btn.click();
             });
         }
