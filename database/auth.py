@@ -89,6 +89,18 @@ def set_doctor_individual_password(doctor_id, password: str):
     _clear_data_cache()
 
 
+def clear_must_change_pw(doctor_id):
+    """初回パスワード変更完了フラグをクリア"""
+    ws = _get_sheet("医員マスタ")
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if not row_idx:
+        return
+    actual_headers = _retry(ws.row_values, 1)
+    col_idx = actual_headers.index("must_change_pw") + 1
+    ws.update_cell(row_idx, col_idx, 0)
+    _clear_data_cache()
+
+
 def verify_doctor_individual_password(doctor_id, password: str) -> bool:
     """医員の個別パスワードを検証（キャッシュ済みデータを使用）"""
     doctors = get_doctors(active_only=False)

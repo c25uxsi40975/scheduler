@@ -158,6 +158,8 @@ def _calc_previous_earnings(clinics, target_year, target_month):
 
 
 def render(target_month, year, month):
+    if not st.session_state.get("admin_authenticated"):
+        st.stop()
     st.header(f"スケジュール生成 ({target_month})")
 
     doctors = get_doctors()

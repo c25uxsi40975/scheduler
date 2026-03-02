@@ -44,6 +44,8 @@ CLINIC_TEMPLATES = {
 
 
 def render(target_month, year, month):
+    if not st.session_state.get("admin_authenticated"):
+        st.stop()
     st.header("マスタ管理")
 
     # 行レベルの背景色CSS + スマホ向けコンパクト化

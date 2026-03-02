@@ -6,6 +6,8 @@ from optimizer import get_target_saturdays
 
 
 def render(target_month, year, month):
+    if not st.session_state.get("admin_authenticated"):
+        st.stop()
     st.header(f"希望状況一覧 ({target_month})")
 
     doctors = get_doctors()

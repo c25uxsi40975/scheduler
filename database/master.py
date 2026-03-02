@@ -56,6 +56,7 @@ def get_doctors(active_only=True):
         r["job_rank"] = _safe_int(r.get("job_rank", 0))
         r["last_name"] = str(r.get("last_name", ""))
         r["first_name"] = str(r.get("first_name", ""))
+        r["must_change_pw"] = _safe_int(r.get("must_change_pw", 0))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -63,7 +64,7 @@ def get_doctors(active_only=True):
     return result
 
 
-def add_doctor(last_name, first_name, account="", initial_password="1111"):
+def add_doctor(last_name, first_name, account="", initial_password="aaaa1111"):
     ws = _get_sheet("医員マスタ")
     # 重複チェック（ID）
     records = _get_all_records(ws)
@@ -82,7 +83,7 @@ def add_doctor(last_name, first_name, account="", initial_password="1111"):
         "account": _sanitize_cell_value(account),
         "account_name": _sanitize_cell_value(account), "email": "",
         "password_hash": pw_hash, "is_active": 1, "can_login": 1,
-        "created_at": now, "max_assignments": 4,
+        "created_at": now, "max_assignments": 4, "must_change_pw": 1,
     }
     row = [values.get(h, "") for h in actual_headers]
     ws.append_row(row)

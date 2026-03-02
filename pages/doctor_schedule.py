@@ -6,6 +6,8 @@ from components.schedule_viewer import render_schedule_with_viewer
 
 
 def render(doctor, target_month):
+    if not st.session_state.get("doctor_authenticated"):
+        st.stop()
     st.header(f"確定スケジュール ({target_month})")
 
     schedules = get_schedules(target_month)

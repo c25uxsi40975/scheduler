@@ -17,6 +17,7 @@ from database import (
     get_confirmed_months,
     save_reset_code, verify_reset_code,
     get_doctor_email_by_account, get_doctor_id_by_account,
+    clear_must_change_pw,
 )
 from optimizer import get_target_saturdays
 from security import (
@@ -456,6 +457,28 @@ elif st.session_state.role == "doctor":
                 st.warning("ログインが停止されています。管理者にお問い合わせください。")
                 st.stop()
             st.rerun()
+        elif doctor.get("must_change_pw", 0):
+            # 初回ログイン: パスワード変更を強制
+            st.warning("初回ログインのため、パスワードを変更してください。")
+            with st.form("force_change_pw_form"):
+                new_pw1 = st.text_input("新しいパスワード", type="password")
+                new_pw2 = st.text_input("新しいパスワード（確認）", type="password")
+                if st.form_submit_button("パスワードを変更", type="primary"):
+                    if not new_pw1:
+                        st.error("パスワードを入力してください")
+                    elif new_pw1 != new_pw2:
+                        st.error("パスワードが一致しません")
+                    else:
+                        pw_ok, pw_msg = validate_password(new_pw1)
+                        if not pw_ok:
+                            st.error(pw_msg)
+                        else:
+                            set_doctor_individual_password(doctor["id"], new_pw1)
+                            clear_must_change_pw(doctor["id"])
+                            log_event("doctor_password_changed", doctor.get("account_name", ""))
+                            st.success("パスワードを変更しました。画面を更新します...")
+                            st.rerun()
+            st.stop()
         else:
             # 医員用ヘッダー（対象月セレクタなし）
             col_title, col_settings, col_logout = st.columns([4, 1, 1])

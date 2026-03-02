@@ -62,6 +62,8 @@ DAY_STATUS_OPTIONS = ["○ 可能", "当直明け○ (PMのみ)", "△ できれ
 
 
 def render(doctor, target_month, year, month):
+    if not st.session_state.get("doctor_authenticated"):
+        st.stop()
     st.header(f"希望入力 ({target_month})")
     st.write(f"**{doctor['name']}** さんの希望を入力してください")
 
