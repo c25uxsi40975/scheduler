@@ -65,7 +65,7 @@ def render_doctor_view_table(sched, doctors):
     }
 
     rows = []
-    for d in sorted(doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
+    for d in sorted(doctors, key=lambda x: (x.get("account", ""), x["name"])):
         row = {"医員": display_map.get(d["id"], d["name"])}
         for ds in dates_sorted:
             row[date_labels[ds]] = doc_sched.get(d["id"], {}).get(ds, "-")
@@ -116,7 +116,7 @@ def render_doctor_stats_table(sched, doctors, clinics):
     display_map = build_display_name_map(doctors)
 
     rows = []
-    for d in sorted(doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])):
+    for d in sorted(doctors, key=lambda x: (x.get("account", ""), x["name"])):
         s = doc_stats.get(d["id"], {"回数": 0, "報酬合計": 0})
         c = cumulative.get(d["id"], {"回数": 0, "報酬合計": 0})
         rows.append({

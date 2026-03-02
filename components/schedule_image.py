@@ -130,7 +130,7 @@ def _build_schedule_image(sched, doctors, clinics, year_month):
 
     # 下部テーブル: 医員×日付
     doc_sorted = sorted(
-        doctors, key=lambda x: (-x.get("job_rank", 0), x["name"])
+        doctors, key=lambda x: (x.get("account", ""), x["name"])
     )
     bot_header = [""] + day_labels
     bot_rows = []
