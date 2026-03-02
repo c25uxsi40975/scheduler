@@ -2,8 +2,13 @@
 
 st.image() でインライン表示し、画像タップで Streamlit 内蔵の
 フルスクリーン表示をトリガーする。
+
+NOTE: st.html() は DOMPurify で <script> を除去するため使用不可。
+st.components.v1.html() は iframe (sandbox: allow-same-origin + allow-scripts)
+で実行されるため、window.parent.document 経由で親DOMにアクセスできる。
 """
 import streamlit as st
+import streamlit.components.v1 as components
 
 from components.schedule_image import generate_schedule_image
 
@@ -21,7 +26,9 @@ def render_schedule_with_viewer(sched, doctors, clinics, target_month):
     st.image(img_data, use_container_width=True)
 
     # 画像タップで Streamlit のフルスクリーンボタンをクリックさせる
-    st.html("""
+    # st.components.v1.html() は iframe 内で実行され、
+    # sandbox に allow-same-origin があるため window.parent.document にアクセス可能
+    components.html("""
     <script>
     (function() {
         var pDoc;
@@ -60,4 +67,4 @@ def render_schedule_with_viewer(sched, doctors, clinics, target_month):
         setup();
     })();
     </script>
-    """)
+    """, height=0)
