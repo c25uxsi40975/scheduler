@@ -91,7 +91,7 @@ _check_session_timeout()
 
 def _show_role_selection():
     """ロール選択画面"""
-    st.title("土曜外勤調整システム")
+    st.markdown("## 土曜外勤調整  \nシステム")
     st.markdown("---")
 
     if st.button("管理者としてログイン", use_container_width=True, type="primary"):
