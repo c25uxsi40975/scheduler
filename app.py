@@ -501,7 +501,7 @@ elif st.session_state.role == "doctor":
             st.stop()
         else:
             # 医員用ヘッダー（名前 + 設定・ログアウトボタン）
-            col_title, col_settings, col_logout = st.columns([4, 1, 1])
+            col_title, col_settings, col_logout = st.columns([3, 1, 2])
             with col_title:
                 st.markdown(f"**{doctor['name']}**")
             with col_settings:
