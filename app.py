@@ -480,12 +480,12 @@ elif st.session_state.role == "doctor":
                             st.rerun()
             st.stop()
         else:
-            # 医員用ヘッダー（対象月セレクタなし）
-            col_title, col_settings, col_logout = st.columns([4, 1, 1])
+            # 医員用ヘッダー（名前 + 設定・ログアウトボタン）
+            col_title, col_settings, col_logout = st.columns([10, 1, 2])
             with col_title:
                 st.markdown(f"**{doctor['name']}**")
             with col_settings:
-                if st.button("⚙ 設定", use_container_width=True):
+                if st.button("⚙", use_container_width=True, help="設定"):
                     st.session_state.show_doctor_settings = True
             with col_logout:
                 if st.button("ログアウト", use_container_width=True):
@@ -501,9 +501,15 @@ elif st.session_state.role == "doctor":
 
             st.markdown("---")
 
-            tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
+            section = st.radio(
+                "メニュー",
+                ["希望入力", "スケジュール確認"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="doctor_section",
+            )
 
-            with tab1:
+            if section == "希望入力":
                 open_month = get_open_month()
                 if open_month:
                     year, month = map(int, open_month.split("-"))
@@ -514,7 +520,7 @@ elif st.session_state.role == "doctor":
                 else:
                     st.info("管理者が対象月を設定するまでお待ちください。")
 
-            with tab2:
+            elif section == "スケジュール確認":
                 confirmed_months = get_confirmed_months()
                 if confirmed_months:
                     view_month = st.selectbox(
