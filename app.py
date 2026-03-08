@@ -520,11 +520,15 @@ elif st.session_state.role == "doctor":
             if section == "希望入力":
                 open_month = get_open_month()
                 if open_month:
-                    year, month = map(int, open_month.split("-"))
-                    deadline = get_input_deadline()
-                    deadline_text = f"　|　入力期限: {deadline}" if deadline else ""
-                    st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日{deadline_text}")
-                    doctor_input.render(doctor, open_month, year, month)
+                    confirmed = get_confirmed_months()
+                    if open_month in confirmed:
+                        st.info(f"{open_month} のスケジュールは確定済みです。希望の変更はできません。")
+                    else:
+                        year, month = map(int, open_month.split("-"))
+                        deadline = get_input_deadline()
+                        deadline_text = f"　|　入力期限: {deadline}" if deadline else ""
+                        st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日{deadline_text}")
+                        doctor_input.render(doctor, open_month, year, month)
                 else:
                     st.info("管理者が対象月を設定するまでお待ちください。")
 
