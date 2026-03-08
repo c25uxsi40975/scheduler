@@ -222,7 +222,7 @@ def render(target_month, year, month):
                         plan["satisfaction_score"]
                     )
 
-                st.success(f"{len(plans)}件の案を生成しました")
+                st.toast(f"{len(plans)}件の案を生成しました")
                 st.rerun()
 
     # 生成済みスケジュール表示
@@ -309,7 +309,7 @@ def render(target_month, year, month):
                                 # 確定後は次の月をデフォルト表示にする（widget keyは直接設定不可なので間接キーを使用）
                                 next_month = (date(year, month, 1) + relativedelta(months=1)).strftime("%Y-%m")
                                 st.session_state["_pending_target_month"] = next_month
-                                st.success("確定しました！")
+                                st.toast("確定しました！")
                                 st.rerun()
                         else:
                             st.success("確定済み")
@@ -537,7 +537,7 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
                 else:
                     update_schedule_assignments(sched["id"], new_assignments)
                     st.session_state.pop(editing_key, None)
-                    st.success("保存しました")
+                    st.toast("保存しました")
                     st.rerun()
     with btn_cols[1]:
         if st.button("キャンセル", key=f"cancel_edit_{sched['id']}"):
@@ -558,7 +558,7 @@ def _render_edit_mode(sched, doctors, clinic_map, editing_key, prefs, affinities
                 update_schedule_assignments(sched["id"], saved_confirm["assignments"])
                 st.session_state.pop(editing_key, None)
                 st.session_state.pop(confirm_save_key, None)
-                st.success("保存しました")
+                st.toast("保存しました")
                 st.rerun()
         with wc2:
             if st.button("編集に戻る", key=f"back_edit_{sched['id']}"):

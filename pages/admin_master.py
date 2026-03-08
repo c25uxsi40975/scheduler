@@ -109,7 +109,7 @@ def render(target_month, year, month):
                         if err == "duplicate_account":
                             st.error(f"医員ID「{new_account}」は既に使用されています")
                         else:
-                            st.success(f"「{new_last}{new_first}」を追加しました（ID: {new_account}、初期PW: {new_init_pw.strip()}）")
+                            st.toast(f"「{new_last}{new_first}」を追加しました")
                             st.rerun()
 
             doctors_all = get_doctors(active_only=False)
@@ -192,7 +192,7 @@ def render(target_month, year, month):
                                         st.error("パスワードが一致しません")
                                     else:
                                         set_doctor_individual_password(d['id'], pw1)
-                                        st.success(f"「{d['name']}」のパスワードを設定しました")
+                                        st.toast(f"「{d['name']}」のパスワードを設定しました")
                                         st.session_state.pop(f"setting_pw_{d['id']}", None)
                                         st.rerun()
                             with fc2:
@@ -209,7 +209,7 @@ def render(target_month, year, month):
                             with fc1:
                                 if st.form_submit_button("保存"):
                                     update_doctor_email(d['id'], new_email.strip())
-                                    st.success(f"「{d['name']}」のメールアドレスを保存しました")
+                                    st.toast(f"「{d['name']}」のメールアドレスを保存しました")
                                     st.session_state.pop(f"setting_email_{d['id']}", None)
                                     st.rerun()
                             with fc2:
@@ -225,7 +225,7 @@ def render(target_month, year, month):
                             if st.button("削除する", key=f"do_del_doc_{d['id']}", type="primary"):
                                 delete_doctor(d['id'])
                                 st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
-                                st.success("削除しました")
+                                st.toast("削除しました")
                                 st.rerun()
                         with dc2:
                             if st.button("キャンセル", key=f"cancel_del_doc_{d['id']}"):
@@ -251,7 +251,7 @@ def render(target_month, year, month):
                             with fc1:
                                 if st.form_submit_button("保存"):
                                     update_doctor(d['id'], job_rank=new_rank[0])
-                                    st.success(f"役職を{new_rank[1]}に設定しました")
+                                    st.toast(f"役職を{new_rank[1]}に設定しました")
                                     st.session_state.pop(f"setting_rank_{d['id']}", None)
                                     st.rerun()
                             with fc2:
@@ -423,7 +423,7 @@ def render(target_month, year, month):
                                         fixed_doctors=edit_limited,
                                     )
                                     st.session_state.pop(f"editing_cli_{c['id']}", None)
-                                    st.success("保存しました")
+                                    st.toast("保存しました")
                                     st.rerun()
                             with fc2:
                                 if st.form_submit_button("キャンセル"):
@@ -434,9 +434,8 @@ def render(target_month, year, month):
     doctors = get_doctors()
 
     # 保存成功メッセージ（前回の保存結果を表示）
-    _msg_area = st.empty()
     if st.session_state.get("_save_msg"):
-        _msg_area.success(st.session_state.pop("_save_msg"))
+        st.toast(st.session_state.pop("_save_msg"))
 
     # ---- セクション2: 外勤先の指名・優先度設定 ----
     st.markdown("---")

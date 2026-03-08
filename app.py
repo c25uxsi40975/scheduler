@@ -375,7 +375,8 @@ def _show_doctor_settings(doctor):
                         if err == "duplicate":
                             st.error(f"アカウント名「{new_aname}」は既に使用されています")
                         else:
-                            st.success("アカウント名を変更しました")
+                            st.toast("アカウント名を変更しました")
+                            st.session_state.pop("show_doctor_settings", None)
                             st.rerun()
 
         with tab_pw:
@@ -397,7 +398,9 @@ def _show_doctor_settings(doctor):
                         else:
                             set_doctor_individual_password(doctor["id"], new_pw1)
                             log_event("doctor_password_changed", doctor.get("account_name", ""))
-                            st.success("パスワードを変更しました")
+                            st.toast("パスワードを変更しました")
+                            st.session_state.pop("show_doctor_settings", None)
+                            st.rerun()
 
         with tab_email:
             with st.form("change_email_form"):
@@ -412,8 +415,9 @@ def _show_doctor_settings(doctor):
                         st.error("メールアドレスの形式が正しくありません")
                     else:
                         update_doctor_email(doctor["id"], new_email.strip())
-                        st.success("メールアドレスを保存しました")
-                    st.rerun()
+                        st.toast("メールアドレスを保存しました")
+                        st.session_state.pop("show_doctor_settings", None)
+                        st.rerun()
 
         if st.button("設定を閉じる"):
             st.session_state.pop("show_doctor_settings", None)
@@ -476,7 +480,7 @@ elif st.session_state.role == "doctor":
                             set_doctor_individual_password(doctor["id"], new_pw1)
                             clear_must_change_pw(doctor["id"])
                             log_event("doctor_password_changed", doctor.get("account_name", ""))
-                            st.success("パスワードを変更しました。画面を更新します...")
+                            st.toast("パスワードを変更しました")
                             st.rerun()
             st.stop()
         else:

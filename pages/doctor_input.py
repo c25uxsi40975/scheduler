@@ -134,13 +134,11 @@ def render(doctor, target_month, year, month):
             doctor["name"], doctor.get("email", ""), target_month,
             ng_dates, avoid_dates, free_text, saturdays, post_night_dates,
         )
-        st.session_state["_doc_saved"] = True
+        st.toast("保存しました！")
         st.rerun()
 
     # ---- 保存済み内容の表示 ----
     if existing:
-        if st.session_state.pop("_doc_saved", False):
-            st.success("保存しました！")
 
         st.markdown("---")
         st.subheader("現在の入力内容")
