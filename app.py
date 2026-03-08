@@ -69,6 +69,10 @@ if "doctor_id" not in st.session_state:
 if "doctor_authenticated" not in st.session_state:
     st.session_state.doctor_authenticated = False
 
+# ---- rerun 後のトースト通知 ----
+if "_toast_msg" in st.session_state:
+    st.toast(st.session_state.pop("_toast_msg"))
+
 # ---- セッションタイムアウト（1時間） ----
 import time as _time
 _SESSION_TIMEOUT = 3600
@@ -375,7 +379,7 @@ def _show_doctor_settings(doctor):
                         if err == "duplicate":
                             st.error(f"アカウント名「{new_aname}」は既に使用されています")
                         else:
-                            st.toast("アカウント名を変更しました")
+                            st.session_state["_toast_msg"] = "アカウント名を変更しました"
                             st.session_state.pop("show_doctor_settings", None)
                             st.rerun()
 
@@ -398,7 +402,7 @@ def _show_doctor_settings(doctor):
                         else:
                             set_doctor_individual_password(doctor["id"], new_pw1)
                             log_event("doctor_password_changed", doctor.get("account_name", ""))
-                            st.toast("パスワードを変更しました")
+                            st.session_state["_toast_msg"] = "パスワードを変更しました"
                             st.session_state.pop("show_doctor_settings", None)
                             st.rerun()
 
@@ -415,7 +419,7 @@ def _show_doctor_settings(doctor):
                         st.error("メールアドレスの形式が正しくありません")
                     else:
                         update_doctor_email(doctor["id"], new_email.strip())
-                        st.toast("メールアドレスを保存しました")
+                        st.session_state["_toast_msg"] = "メールアドレスを保存しました"
                         st.session_state.pop("show_doctor_settings", None)
                         st.rerun()
 
@@ -480,7 +484,7 @@ elif st.session_state.role == "doctor":
                             set_doctor_individual_password(doctor["id"], new_pw1)
                             clear_must_change_pw(doctor["id"])
                             log_event("doctor_password_changed", doctor.get("account_name", ""))
-                            st.toast("パスワードを変更しました")
+                            st.session_state["_toast_msg"] = "パスワードを変更しました"
                             st.rerun()
             st.stop()
         else:

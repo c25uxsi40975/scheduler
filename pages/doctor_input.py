@@ -134,7 +134,7 @@ def render(doctor, target_month, year, month):
             doctor["name"], doctor.get("email", ""), target_month,
             ng_dates, avoid_dates, free_text, saturdays, post_night_dates,
         )
-        st.toast("保存しました！")
+        st.session_state["_toast_msg"] = "保存しました！"
         st.rerun()
 
     # ---- 保存済み内容の表示 ----

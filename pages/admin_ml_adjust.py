@@ -52,7 +52,7 @@ def render(target_month, year, month):
     if metrics["training_rows"] >= metrics["min_required"]:
         if st.button("モデルを再学習", help="最新の学習データでモデルを再構築します"):
             _clear_model()
-            st.toast("モデルキャッシュをクリアしました")
+            st.session_state["_toast_msg"] = "モデルキャッシュをクリアしました"
             st.rerun()
 
     # ---- 実行ブロック ----
@@ -136,7 +136,7 @@ def _render_ml_results(result, doctors, clinics, target_month):
             result.get("effort_match_score", 0),
         )
         st.session_state.pop("ml_result", None)
-        st.toast("ML再調整結果を保存しました")
+        st.session_state["_toast_msg"] = "ML再調整結果を保存しました"
         st.rerun()
 
     if st.button("結果を破棄", key="discard_ml_result"):
