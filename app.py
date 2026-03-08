@@ -508,7 +508,7 @@ elif st.session_state.role == "doctor":
                 if st.button("⚙", use_container_width=True, help="設定"):
                     st.session_state.show_doctor_settings = True
             with col_logout:
-                if st.button("logout", use_container_width=True):
+                if st.button("ログアウト", use_container_width=True):
                     st.session_state.role = None
                     st.session_state.admin_authenticated = False
                     st.session_state.doctor_authenticated = False
