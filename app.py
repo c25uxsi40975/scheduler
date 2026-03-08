@@ -489,26 +489,30 @@ elif st.session_state.role == "doctor":
             st.stop()
         else:
             # 医員用ヘッダー（名前 + 設定・ログアウトボタン）
-            col_title, col_settings, col_logout = st.columns([10, 1, 2])
+            col_title, col_buttons = st.columns([3, 1])
             with col_title:
                 st.markdown(f"**{doctor['name']}**")
-            with col_settings:
-                if st.button("⚙", use_container_width=True, help="設定"):
-                    st.session_state.show_doctor_settings = True
-            with col_logout:
-                if st.button("ログアウト", use_container_width=True):
-                    st.session_state.role = None
-                    st.session_state.admin_authenticated = False
-                    st.session_state.doctor_authenticated = False
-                    st.session_state.doctor_id = None
-                    st.session_state.pop("show_doctor_settings", None)
-                    st.rerun()
+            with col_buttons:
+                btn1, btn2 = st.columns(2)
+                with btn1:
+                    if st.button("⚙", use_container_width=True, help="設定"):
+                        st.session_state.show_doctor_settings = True
+                with btn2:
+                    if st.button("logout", use_container_width=True):
+                        st.session_state.role = None
+                        st.session_state.admin_authenticated = False
+                        st.session_state.doctor_authenticated = False
+                        st.session_state.doctor_id = None
+                        st.session_state.pop("show_doctor_settings", None)
+                        st.rerun()
 
             if st.session_state.get("show_doctor_settings"):
                 _show_doctor_settings(doctor)
 
             st.markdown("---")
 
+            if "doctor_section" not in st.session_state:
+                st.session_state["doctor_section"] = "希望入力"
             section = st.radio(
                 "メニュー",
                 ["希望入力", "スケジュール確認"],
@@ -535,6 +539,7 @@ elif st.session_state.role == "doctor":
             elif section == "スケジュール確認":
                 confirmed_months = get_confirmed_months()
                 if confirmed_months:
+                    st.caption("表示する月を選択してください")
                     view_month = st.selectbox(
                         "月を選択", confirmed_months,
                         label_visibility="collapsed",
