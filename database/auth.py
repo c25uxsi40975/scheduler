@@ -224,6 +224,90 @@ def get_doctor_id_by_account(account_name: str) -> int | None:
     return None
 
 
+# ---- Sub-Admin Auth (副管理者認証) ----
+
+def is_subadmin_password_set(section: str) -> bool:
+    """副管理者パスワードが設定済みか"""
+    return _get_setting(f"subadmin_password_{section}") is not None
+
+
+def set_subadmin_password(section: str, password: str):
+    """副管理者パスワードを設定"""
+    _set_setting(f"subadmin_password_{section}", _hash_password(password))
+
+
+def verify_subadmin_password(section: str, password: str) -> bool:
+    """副管理者パスワードを検証"""
+    stored = _get_setting(f"subadmin_password_{section}")
+    if not stored:
+        return False
+    if not _verify_password(password, stored):
+        return False
+    if _is_legacy_hash(stored):
+        _set_setting(f"subadmin_password_{section}", _hash_password(password))
+    return True
+
+
+# ---- Weekday Open Settings (平日公開設定) ----
+
+def get_weekday_open_section(section: str):
+    """平日セクションの公開状態を取得"""
+    return _get_setting(f"weekday_open_{section}")
+
+
+def set_weekday_open_section(section: str, is_open: bool):
+    """平日セクションの公開状態を設定"""
+    _set_setting(f"weekday_open_{section}", "1" if is_open else "0")
+
+
+def get_weekday_deadline(section: str):
+    """平日セクションの希望入力期限を取得"""
+    return _get_setting(f"weekday_deadline_{section}")
+
+
+def set_weekday_deadline(section: str, deadline_date: str):
+    """平日セクションの希望入力期限を設定"""
+    _set_setting(f"weekday_deadline_{section}", deadline_date)
+
+
+# ---- Saturday Extra/Excluded Dates (土曜日の追加/除外日付) ----
+
+def get_saturday_extra_dates(year_month: str) -> list:
+    """土曜追加日付を取得"""
+    raw = _get_setting(f"saturday_extra_dates_{year_month}")
+    if raw:
+        try:
+            import json
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
+
+
+def set_saturday_extra_dates(year_month: str, dates: list):
+    """土曜追加日付を設定"""
+    import json
+    _set_setting(f"saturday_extra_dates_{year_month}", json.dumps(dates))
+
+
+def get_saturday_excluded_dates(year_month: str) -> list:
+    """土曜除外日付を取得"""
+    raw = _get_setting(f"saturday_excluded_dates_{year_month}")
+    if raw:
+        try:
+            import json
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
+
+
+def set_saturday_excluded_dates(year_month: str, dates: list):
+    """土曜除外日付を設定"""
+    import json
+    _set_setting(f"saturday_excluded_dates_{year_month}", json.dumps(dates))
+
+
 # ---- Open Month (対象月制御) ----
 
 @_register_cached

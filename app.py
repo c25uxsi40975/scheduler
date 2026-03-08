@@ -18,6 +18,9 @@ from database import (
     save_reset_code, verify_reset_code,
     get_doctor_email_by_account, get_doctor_id_by_account,
     clear_must_change_pw,
+    # 平日外勤
+    get_weekday_configs,
+    is_subadmin_password_set, verify_subadmin_password,
 )
 from optimizer import get_target_saturdays
 from security import (
@@ -29,6 +32,7 @@ from pages import (
     admin_master, admin_preferences, admin_generate,
     admin_schedule, doctor_input, doctor_schedule,
 )
+from pages import weekday_admin, weekday_doctor
 
 # ---- 初期設定 ----
 st.set_page_config(
@@ -64,10 +68,14 @@ if "role" not in st.session_state:
     st.session_state.role = None
 if "admin_authenticated" not in st.session_state:
     st.session_state.admin_authenticated = False
+if "admin_type" not in st.session_state:
+    st.session_state.admin_type = None  # "main" | "weekday_1" | "weekday_2" ...
 if "doctor_id" not in st.session_state:
     st.session_state.doctor_id = None
 if "doctor_authenticated" not in st.session_state:
     st.session_state.doctor_authenticated = False
+if "doctor_section" not in st.session_state:
+    st.session_state.doctor_section = None  # 医員の現在のセクション選択
 
 # ---- セッションタイムアウト（1時間） ----
 import time as _time
@@ -80,8 +88,10 @@ def _check_session_timeout():
     if now - last > _SESSION_TIMEOUT and st.session_state.get("role"):
         st.session_state.role = None
         st.session_state.admin_authenticated = False
+        st.session_state.admin_type = None
         st.session_state.doctor_authenticated = False
         st.session_state.doctor_id = None
+        st.session_state.doctor_section = None
         st.warning("セッションがタイムアウトしました。再度ログインしてください。")
         st.stop()
     st.session_state["_last_activity"] = now
@@ -91,7 +101,7 @@ _check_session_timeout()
 
 def _show_role_selection():
     """ロール選択画面"""
-    st.markdown("<h2>土曜外勤調整<br>システム</h2>", unsafe_allow_html=True)
+    st.markdown("<h2>外勤調整<br>システム</h2>", unsafe_allow_html=True)
     st.markdown("---")
 
     if st.button("管理者としてログイン", use_container_width=True, type="primary"):
@@ -102,61 +112,118 @@ def _show_role_selection():
         st.rerun()
 
 
-def _show_admin_login():
-    """管理者パスワード認証画面"""
-    st.title("管理者ログイン")
+def _show_admin_type_selection():
+    """管理者種別選択画面"""
+    st.markdown("<h2>管理者ログイン</h2>", unsafe_allow_html=True)
     st.markdown("---")
 
-    if not is_admin_password_set():
-        st.info("管理者パスワードが未設定です。初回セットアップを行います。")
-        setup_token_input = st.text_input(
-            "セットアップトークン", type="password", key="setup_token",
-            help="Streamlit Secretsに設定された setup_token を入力してください",
-        )
-        pw1 = st.text_input("パスワード", type="password", key="pw_new1")
-        pw2 = st.text_input("パスワード（確認）", type="password", key="pw_new2")
-        if st.button("パスワードを設定", type="primary"):
-            import hmac
-            expected_token = st.secrets.get("setup_token", "")
-            if not expected_token:
-                st.error("setup_token が Secrets に未設定です。管理者に連絡してください。")
-            elif not hmac.compare_digest(setup_token_input, expected_token):
-                st.error("セットアップトークンが正しくありません")
-            elif not pw1:
-                st.error("パスワードを入力してください")
-            elif pw1 != pw2:
-                st.error("パスワードが一致しません")
-            else:
-                pw_ok, pw_msg = validate_password(pw1)
-                if not pw_ok:
-                    st.error(pw_msg)
-                else:
-                    set_admin_password(pw1)
-                    log_event("admin_password_set", "admin", "初回セットアップ")
-                    st.session_state.admin_authenticated = True
-                    st.success("パスワードを設定しました")
+    if st.button("土曜管理者", use_container_width=True, type="primary"):
+        st.session_state.admin_type = "main"
+        st.rerun()
+
+    # 平日外勤セクションを動的に表示
+    try:
+        configs = get_weekday_configs()
+        for cfg in configs:
+            if cfg.get("is_active"):
+                label = f"{cfg['clinic_name']}管理者"
+                if st.button(label, use_container_width=True, type="primary",
+                             key=f"admin_type_{cfg['section']}"):
+                    st.session_state.admin_type = cfg["section"]
                     st.rerun()
-    else:
-        allowed, remaining = check_rate_limit("admin")
-        if not allowed:
-            st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
-        else:
-            pw = st.text_input("パスワード", type="password", key="pw_login")
-            if st.button("ログイン", type="primary"):
-                if verify_admin_password(pw):
-                    reset_rate_limit("admin")
-                    log_event("admin_login_success", "admin")
-                    st.session_state.admin_authenticated = True
-                    st.rerun()
-                else:
-                    record_failed_attempt("admin")
-                    log_event("admin_login_failed", "admin")
-                    st.error("パスワードが正しくありません")
+    except Exception:
+        pass  # 初回起動時にシートがまだない場合
 
     st.markdown("---")
     if st.button("← 戻る"):
         st.session_state.role = None
         st.rerun()
+
+
+def _show_admin_login():
+    """管理者パスワード認証画面"""
+    admin_type = st.session_state.admin_type
+
+    if admin_type == "main":
+        st.title("土曜管理者ログイン")
+    else:
+        cfg = None
+        try:
+            configs = get_weekday_configs()
+            cfg = next((c for c in configs if c["section"] == admin_type), None)
+        except Exception:
+            pass
+        title = f"{cfg['clinic_name']}管理者ログイン" if cfg else "管理者ログイン"
+        st.title(title)
+
+    st.markdown("---")
+
+    if admin_type == "main":
+        # 既存の主管理者ログインフロー
+        if not is_admin_password_set():
+            st.info("管理者パスワードが未設定です。初回セットアップを行います。")
+            setup_token_input = st.text_input(
+                "セットアップトークン", type="password", key="setup_token",
+                help="Streamlit Secretsに設定された setup_token を入力してください",
+            )
+            pw1 = st.text_input("パスワード", type="password", key="pw_new1")
+            pw2 = st.text_input("パスワード（確認）", type="password", key="pw_new2")
+            if st.button("パスワードを設定", type="primary"):
+                import hmac
+                expected_token = st.secrets.get("setup_token", "")
+                if not expected_token:
+                    st.error("setup_token が Secrets に未設定です。管理者に連絡してください。")
+                elif not hmac.compare_digest(setup_token_input, expected_token):
+                    st.error("セットアップトークンが正しくありません")
+                elif not pw1:
+                    st.error("パスワードを入力してください")
+                elif pw1 != pw2:
+                    st.error("パスワードが一致しません")
+                else:
+                    pw_ok, pw_msg = validate_password(pw1)
+                    if not pw_ok:
+                        st.error(pw_msg)
+                    else:
+                        set_admin_password(pw1)
+                        log_event("admin_password_set", "admin", "初回セットアップ")
+                        st.session_state.admin_authenticated = True
+                        st.success("パスワードを設定しました")
+                        st.rerun()
+        else:
+            _admin_password_form("admin", verify_admin_password)
+    else:
+        # 副管理者ログインフロー
+        if not is_subadmin_password_set(admin_type):
+            st.warning("副管理者パスワードが未設定です。主管理者に設定を依頼してください。")
+        else:
+            _admin_password_form(
+                f"subadmin_{admin_type}",
+                lambda pw: verify_subadmin_password(admin_type, pw),
+            )
+
+    st.markdown("---")
+    if st.button("← 戻る"):
+        st.session_state.admin_type = None
+        st.rerun()
+
+
+def _admin_password_form(rate_limit_key: str, verify_fn):
+    """管理者/副管理者共通のパスワード認証フォーム"""
+    allowed, remaining = check_rate_limit(rate_limit_key)
+    if not allowed:
+        st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
+    else:
+        pw = st.text_input("パスワード", type="password", key="pw_login")
+        if st.button("ログイン", type="primary"):
+            if verify_fn(pw):
+                reset_rate_limit(rate_limit_key)
+                log_event("admin_login_success", rate_limit_key)
+                st.session_state.admin_authenticated = True
+                st.rerun()
+            else:
+                record_failed_attempt(rate_limit_key)
+                log_event("admin_login_failed", rate_limit_key)
+                st.error("パスワードが正しくありません")
 
 
 def _show_password_reset():
@@ -310,8 +377,10 @@ def _show_admin_header():
         if st.button("ログアウト", use_container_width=True):
             st.session_state.role = None
             st.session_state.admin_authenticated = False
+            st.session_state.admin_type = None
             st.session_state.doctor_authenticated = False
             st.session_state.doctor_id = None
+            st.session_state.doctor_section = None
             st.rerun()
 
     year, month = map(int, target_month.split("-"))
@@ -420,14 +489,83 @@ def _show_doctor_settings(doctor):
             st.rerun()
 
 
+def _show_doctor_section_selection(doctor):
+    """医員のセクション選択画面"""
+    st.subheader("セクション選択")
+
+    if st.button("全体スケジュール", use_container_width=True, type="primary"):
+        st.session_state.doctor_section = "overall"
+        st.rerun()
+
+    if st.button("土曜", use_container_width=True, type="primary"):
+        st.session_state.doctor_section = "saturday"
+        st.rerun()
+
+    # 平日セクション（所属時のみ表示）
+    try:
+        configs = get_weekday_configs()
+        for cfg in configs:
+            if cfg.get("is_active") and doctor["id"] in cfg.get("assigned_doctors", []):
+                if st.button(cfg["clinic_name"], use_container_width=True, type="primary",
+                             key=f"doc_section_{cfg['section']}"):
+                    st.session_state.doctor_section = cfg["section"]
+                    st.rerun()
+    except Exception:
+        pass
+
+
+def _show_doctor_saturday(doctor):
+    """医員の土曜セクション（既存ロジック）"""
+    if st.button("← セクション選択に戻る", key="back_to_section_sat"):
+        st.session_state.doctor_section = None
+        st.rerun()
+
+    tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
+
+    with tab1:
+        open_month = get_open_month()
+        if open_month:
+            year, month = map(int, open_month.split("-"))
+            deadline = get_input_deadline()
+            deadline_text = f"　|　入力期限: {deadline}" if deadline else ""
+            st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日{deadline_text}")
+            doctor_input.render(doctor, open_month, year, month)
+        else:
+            st.info("管理者が対象月を設定するまでお待ちください。")
+
+    with tab2:
+        confirmed_months = get_confirmed_months()
+        if confirmed_months:
+            view_month = st.selectbox(
+                "月を選択", confirmed_months,
+                label_visibility="collapsed",
+            )
+            doctor_schedule.render(doctor, view_month)
+        else:
+            st.info("確定済みのスケジュールはまだありません。")
+
+
+def _show_doctor_overall_calendar(doctor):
+    """医員の全体スケジュールカレンダー"""
+    if st.button("← セクション選択に戻る", key="back_to_section_cal"):
+        st.session_state.doctor_section = None
+        st.rerun()
+
+    from components import calendar_view
+    calendar_view.render(doctor)
+
+
 # ---- メインルーティング ----
 if st.session_state.role is None:
     _show_role_selection()
 
 elif st.session_state.role == "admin":
-    if not st.session_state.admin_authenticated:
+    if st.session_state.admin_type is None:
+        _show_admin_type_selection()
+    elif not st.session_state.admin_authenticated:
         _show_admin_login()
-    else:
+    elif st.session_state.admin_type == "main":
+        # 主管理者: 既存の土曜管理 + 平日外勤設定
         target_month, year, month = _show_admin_header()
 
         tab1, tab2, tab3, tab4 = st.tabs([
@@ -443,6 +581,9 @@ elif st.session_state.role == "admin":
             admin_generate.render(target_month, year, month)
         with tab4:
             admin_schedule.render(target_month)
+    else:
+        # 副管理者: 平日外勤管理UI
+        weekday_admin.render(st.session_state.admin_type)
 
 elif st.session_state.role == "doctor":
     if not st.session_state.doctor_authenticated:
@@ -491,8 +632,10 @@ elif st.session_state.role == "doctor":
                 if st.button("ログアウト", use_container_width=True):
                     st.session_state.role = None
                     st.session_state.admin_authenticated = False
+                    st.session_state.admin_type = None
                     st.session_state.doctor_authenticated = False
                     st.session_state.doctor_id = None
+                    st.session_state.doctor_section = None
                     st.session_state.pop("show_doctor_settings", None)
                     st.rerun()
 
@@ -501,26 +644,13 @@ elif st.session_state.role == "doctor":
 
             st.markdown("---")
 
-            tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
-
-            with tab1:
-                open_month = get_open_month()
-                if open_month:
-                    year, month = map(int, open_month.split("-"))
-                    deadline = get_input_deadline()
-                    deadline_text = f"　|　入力期限: {deadline}" if deadline else ""
-                    st.caption(f"対象月: {open_month}　|　対象土曜日数: {len(get_target_saturdays(year, month))}日{deadline_text}")
-                    doctor_input.render(doctor, open_month, year, month)
-                else:
-                    st.info("管理者が対象月を設定するまでお待ちください。")
-
-            with tab2:
-                confirmed_months = get_confirmed_months()
-                if confirmed_months:
-                    view_month = st.selectbox(
-                        "月を選択", confirmed_months,
-                        label_visibility="collapsed",
-                    )
-                    doctor_schedule.render(doctor, view_month)
-                else:
-                    st.info("確定済みのスケジュールはまだありません。")
+            # セクション選択
+            section = st.session_state.get("doctor_section")
+            if section is None:
+                _show_doctor_section_selection(doctor)
+            elif section == "overall":
+                _show_doctor_overall_calendar(doctor)
+            elif section == "saturday":
+                _show_doctor_saturday(doctor)
+            else:
+                weekday_doctor.render(doctor, section)

@@ -1,4 +1,5 @@
 """管理者: マスタ管理タブ"""
+import json
 import pandas as pd
 import streamlit as st
 from database import (
@@ -9,6 +10,11 @@ from database import (
     get_clinic_date_overrides, set_clinic_date_overrides_batch,
     set_doctor_individual_password, update_doctor_email,
     get_all_preferences, upsert_preference, batch_upsert_preferences,
+    # 平日外勤
+    get_weekday_configs, add_weekday_config, update_weekday_config, delete_weekday_config,
+    set_subadmin_password, is_subadmin_password_set,
+    get_saturday_extra_dates, set_saturday_extra_dates,
+    get_saturday_excluded_dates, set_saturday_excluded_dates,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 from components.display_utils import build_display_name_map
@@ -815,3 +821,215 @@ def render(target_month, year, month):
                     else:
                         st.session_state["_save_msg"] = "変更はありませんでした"
                     st.rerun()
+
+    # ---- セクション4: 土曜対象日の追加・除外 ----
+    st.markdown("---")
+    st.subheader("土曜対象日の追加・除外")
+    st.caption("通常の土曜日に加え、翌月の日付を追加したり、年末年始等を除外できます")
+
+    import calendar as _cal
+    from datetime import date as _date
+
+    # 対象月の全土曜を取得（追加/除外なしのベース）
+    _base_sats = get_target_saturdays(year, month)
+    _extra = get_saturday_extra_dates(target_month)
+    _excluded = get_saturday_excluded_dates(target_month)
+
+    st.write(f"**{target_month} のベース土曜日**: {', '.join(s.strftime('%m/%d') for s in _base_sats) if _base_sats else 'なし'}")
+    if _extra:
+        st.write(f"**追加日**: {', '.join(_extra)}")
+    if _excluded:
+        st.write(f"**除外日**: {', '.join(_excluded)}")
+
+    with st.expander("追加・除外日の編集"):
+        # 追加日の入力（翌月の土曜日候補を表示）
+        next_month = month + 1 if month < 12 else 1
+        next_year = year if month < 12 else year + 1
+        next_month_sats = []
+        for day in range(1, _cal.monthrange(next_year, next_month)[1] + 1):
+            d = _date(next_year, next_month, day)
+            if d.weekday() == 5:  # Saturday
+                next_month_sats.append(d)
+
+        # 追加候補: 翌月の土曜日
+        extra_options = [d.isoformat() for d in next_month_sats]
+        current_extra = [d for d in _extra if d in extra_options]
+        new_extra = st.multiselect(
+            f"追加日（{next_year}-{next_month:02d}の土曜から選択）",
+            options=extra_options,
+            default=current_extra,
+            key="sat_extra_dates",
+        )
+
+        # 除外候補: ベース土曜日
+        exclude_options = [s.isoformat() for s in _base_sats]
+        current_excluded = [d for d in _excluded if d in exclude_options]
+        new_excluded = st.multiselect(
+            f"除外日（{target_month}の土曜から選択）",
+            options=exclude_options,
+            default=current_excluded,
+            key="sat_excluded_dates",
+        )
+
+        if st.button("土曜対象日を保存", type="primary", key="save_sat_dates"):
+            set_saturday_extra_dates(target_month, new_extra)
+            set_saturday_excluded_dates(target_month, new_excluded)
+            st.session_state["_save_msg"] = "土曜対象日の設定を保存しました"
+            st.rerun()
+
+    # ---- セクション5: 平日外勤設定 ----
+    st.markdown("---")
+    st.subheader("平日外勤設定")
+    st.caption("平日外勤セクション（医院ごと）の作成・編集・副管理者パスワード設定")
+
+    DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
+
+    # 新規セクション追加
+    with st.expander("セクションの追加", expanded=False):
+        with st.form("add_weekday_section_form", clear_on_submit=True):
+            new_clinic_name = st.text_input("医院名", placeholder="例: A医院")
+            day_options = list(DAY_NAMES.items())
+            new_days = st.multiselect(
+                "曜日",
+                options=[k for k, _ in day_options],
+                format_func=lambda x: DAY_NAMES[x],
+            )
+            _all_docs = get_doctors()
+            _doc_map = build_display_name_map(_all_docs)
+            _doc_ids = [d["id"] for d in _all_docs]
+            new_assigned = st.multiselect(
+                "所属メンバー",
+                options=_doc_ids,
+                format_func=lambda x: _doc_map.get(x, "?"),
+            )
+            if st.form_submit_button("セクションを追加", use_container_width=True):
+                if not new_clinic_name.strip():
+                    st.error("医院名を入力してください")
+                elif not new_days:
+                    st.error("曜日を1つ以上選択してください")
+                else:
+                    add_weekday_config(new_clinic_name.strip(), new_days, new_assigned)
+                    st.success(f"「{new_clinic_name}」を追加しました")
+                    st.rerun()
+
+    # 既存セクション一覧
+    try:
+        wk_configs = get_weekday_configs()
+    except Exception:
+        wk_configs = []
+
+    if wk_configs:
+        for cfg in wk_configs:
+            section = cfg["section"]
+            days_str = "・".join(DAY_NAMES.get(d, str(d)) for d in cfg.get("days_of_week", []))
+            status = "有効" if cfg.get("is_active") else "無効"
+            assigned = cfg.get("assigned_doctors", [])
+            _all_docs_sec = get_doctors()
+            _doc_map_sec = build_display_name_map(_all_docs_sec)
+            assigned_names = ", ".join(_doc_map_sec.get(did, "?") for did in assigned) if assigned else "未設定"
+            pw_set = is_subadmin_password_set(section)
+
+            with st.container(border=True):
+                st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　PW: {'設定済' if pw_set else '未設定'}")
+
+                bc1, bc2, bc3, bc4 = st.columns(4)
+                with bc1:
+                    if cfg.get("is_active"):
+                        if st.button("無効化", key=f"wk_deact_{section}", use_container_width=True):
+                            update_weekday_config(section, is_active=False)
+                            st.rerun()
+                    else:
+                        if st.button("有効化", key=f"wk_act_{section}", use_container_width=True):
+                            update_weekday_config(section, is_active=True)
+                            st.rerun()
+                with bc2:
+                    if st.button("編集", key=f"wk_edit_{section}", use_container_width=True):
+                        st.session_state[f"wk_editing_{section}"] = True
+                with bc3:
+                    if st.button("副管理者PW", key=f"wk_pw_{section}", use_container_width=True):
+                        st.session_state[f"wk_setting_pw_{section}"] = True
+                with bc4:
+                    if st.button("削除", key=f"wk_del_{section}", type="secondary", use_container_width=True):
+                        st.session_state[f"wk_confirm_del_{section}"] = True
+
+            # 編集フォーム
+            if st.session_state.get(f"wk_editing_{section}"):
+                with st.form(f"wk_edit_form_{section}"):
+                    edit_name = st.text_input("医院名", value=cfg["clinic_name"], key=f"wk_name_{section}")
+                    edit_days = st.multiselect(
+                        "曜日",
+                        options=[k for k, _ in list(DAY_NAMES.items())],
+                        default=cfg.get("days_of_week", []),
+                        format_func=lambda x: DAY_NAMES[x],
+                        key=f"wk_days_{section}",
+                    )
+                    _all_docs_edit = get_doctors()
+                    _doc_map_edit = build_display_name_map(_all_docs_edit)
+                    _doc_ids_edit = [d["id"] for d in _all_docs_edit]
+                    edit_assigned = st.multiselect(
+                        "所属メンバー",
+                        options=_doc_ids_edit,
+                        default=[did for did in assigned if did in [d["id"] for d in _all_docs_edit]],
+                        format_func=lambda x: _doc_map_edit.get(x, "?"),
+                        key=f"wk_assigned_{section}",
+                    )
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        if st.form_submit_button("保存"):
+                            if not edit_name.strip():
+                                st.error("医院名を入力してください")
+                            elif not edit_days:
+                                st.error("曜日を1つ以上選択してください")
+                            else:
+                                update_weekday_config(
+                                    section,
+                                    clinic_name=edit_name.strip(),
+                                    days_of_week=edit_days,
+                                    assigned_doctors=edit_assigned,
+                                )
+                                st.session_state.pop(f"wk_editing_{section}", None)
+                                st.success("保存しました")
+                                st.rerun()
+                    with fc2:
+                        if st.form_submit_button("キャンセル"):
+                            st.session_state.pop(f"wk_editing_{section}", None)
+                            st.rerun()
+
+            # 副管理者パスワード設定
+            if st.session_state.get(f"wk_setting_pw_{section}"):
+                with st.form(f"wk_pw_form_{section}"):
+                    pw1 = st.text_input("パスワード", type="password", key=f"wk_pw1_{section}")
+                    pw2 = st.text_input("パスワード（確認）", type="password", key=f"wk_pw2_{section}")
+                    fc1, fc2 = st.columns(2)
+                    with fc1:
+                        if st.form_submit_button("設定"):
+                            if not pw1:
+                                st.error("パスワードを入力してください")
+                            elif pw1 != pw2:
+                                st.error("パスワードが一致しません")
+                            else:
+                                set_subadmin_password(section, pw1)
+                                st.session_state.pop(f"wk_setting_pw_{section}", None)
+                                st.success(f"「{cfg['clinic_name']}」の副管理者パスワードを設定しました")
+                                st.rerun()
+                    with fc2:
+                        if st.form_submit_button("キャンセル"):
+                            st.session_state.pop(f"wk_setting_pw_{section}", None)
+                            st.rerun()
+
+            # 削除確認
+            if st.session_state.get(f"wk_confirm_del_{section}"):
+                st.warning(f"「{cfg['clinic_name']}」セクションを削除しますか？")
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    if st.button("削除する", key=f"wk_do_del_{section}", type="primary"):
+                        delete_weekday_config(section)
+                        st.session_state.pop(f"wk_confirm_del_{section}", None)
+                        st.success("削除しました")
+                        st.rerun()
+                with dc2:
+                    if st.button("キャンセル", key=f"wk_cancel_del_{section}"):
+                        st.session_state.pop(f"wk_confirm_del_{section}", None)
+                        st.rerun()
+    else:
+        st.info("平日外勤セクションはまだ登録されていません。")
