@@ -37,9 +37,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# サイドバーを完全に非表示
+# サイドバー非表示 & モバイルでの2-3カラム縦並び防止
 st.markdown(
-    "<style>[data-testid='stSidebar']{display:none}</style>",
+    """<style>
+    [data-testid='stSidebar']{display:none}
+    @media(max-width:640px){
+        [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"]:nth-last-child(2):first-child),
+        [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"]:nth-last-child(3):first-child){
+            flex-wrap:nowrap!important;
+        }
+    }
+    </style>""",
     unsafe_allow_html=True,
 )
 
@@ -489,22 +497,20 @@ elif st.session_state.role == "doctor":
             st.stop()
         else:
             # 医員用ヘッダー（名前 + 設定・ログアウトボタン）
-            col_title, col_buttons = st.columns([3, 1])
+            col_title, col_settings, col_logout = st.columns([4, 1, 1])
             with col_title:
                 st.markdown(f"**{doctor['name']}**")
-            with col_buttons:
-                btn1, btn2 = st.columns(2)
-                with btn1:
-                    if st.button("⚙", use_container_width=True, help="設定"):
-                        st.session_state.show_doctor_settings = True
-                with btn2:
-                    if st.button("logout", use_container_width=True):
-                        st.session_state.role = None
-                        st.session_state.admin_authenticated = False
-                        st.session_state.doctor_authenticated = False
-                        st.session_state.doctor_id = None
-                        st.session_state.pop("show_doctor_settings", None)
-                        st.rerun()
+            with col_settings:
+                if st.button("⚙", use_container_width=True, help="設定"):
+                    st.session_state.show_doctor_settings = True
+            with col_logout:
+                if st.button("logout", use_container_width=True):
+                    st.session_state.role = None
+                    st.session_state.admin_authenticated = False
+                    st.session_state.doctor_authenticated = False
+                    st.session_state.doctor_id = None
+                    st.session_state.pop("show_doctor_settings", None)
+                    st.rerun()
 
             if st.session_state.get("show_doctor_settings"):
                 _show_doctor_settings(doctor)
