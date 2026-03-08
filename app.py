@@ -46,6 +46,10 @@ st.markdown(
         [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"]:nth-last-child(3):first-child){
             flex-wrap:nowrap!important;
         }
+        [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"]:nth-last-child(2):first-child)>[data-testid="stColumn"],
+        [data-testid="stHorizontalBlock"]:has(>[data-testid="stColumn"]:nth-last-child(3):first-child)>[data-testid="stColumn"]{
+            width:auto!important;min-width:0!important;
+        }
     }
     </style>""",
     unsafe_allow_html=True,
