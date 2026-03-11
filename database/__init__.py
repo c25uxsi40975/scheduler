@@ -45,6 +45,7 @@ from database.weekday import (
     get_weekday_configs, get_weekday_config_by_section,
     add_weekday_config, update_weekday_config, delete_weekday_config,
     get_weekday_slots, add_weekday_slot, update_weekday_slot, delete_weekday_slot,
+    get_weekday_slot_overrides, set_weekday_slot_overrides_batch,
     get_target_dates, get_active_target_dates,
     set_target_dates, toggle_target_date,
     get_weekday_preferences, get_weekday_preference,

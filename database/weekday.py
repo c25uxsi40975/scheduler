@@ -299,6 +299,100 @@ def toggle_target_date(section: str, date_str: str, is_active: bool):
     _clear_data_cache()
 
 
+# ---- スロット日別設定（オーバーライド） ----
+
+def get_weekday_slot_overrides(section: str, year_month: str = None) -> dict:
+    """スロットの日別オーバーライドを取得
+
+    Returns:
+        {(slot_id, date_str): required_count}
+        required_count: 0=休診, 1=通常, 2=2人体制, ...
+    """
+    ws = _get_sheet("スケジュール対象日")
+    records = _get_all_records(ws)
+    result = {}
+    for r in records:
+        if str(r.get("section", "")) != section:
+            continue
+        slot_id = _safe_int(r.get("override_slot_id", 0))
+        if slot_id == 0:
+            continue
+        date_str = str(r.get("date", ""))
+        if year_month and not date_str.startswith(year_month):
+            continue
+        result[(slot_id, date_str)] = _safe_int(r.get("override_required", 1), default=1)
+    return result
+
+
+def set_weekday_slot_overrides_batch(section: str, changes: dict):
+    """スロットの日別オーバーライドを一括保存
+
+    changes: {(slot_id, date_str): required_count}
+    """
+    if not changes:
+        return
+
+    ws = _get_sheet("スケジュール対象日")
+    records = _get_all_records(ws)
+    actual_headers = _retry(ws.row_values, 1)
+
+    # override_slot_id, override_required カラムがなければ追加
+    for col_name in ("override_slot_id", "override_required"):
+        if col_name not in actual_headers:
+            ws.update_cell(1, len(actual_headers) + 1, col_name)
+            actual_headers.append(col_name)
+
+    slot_col = actual_headers.index("override_slot_id") + 1
+    req_col = actual_headers.index("override_required") + 1
+
+    # 既存のオーバーライド行を検索
+    existing = {}
+    for i, r in enumerate(records):
+        if str(r.get("section", "")) != section:
+            continue
+        sid = _safe_int(r.get("override_slot_id", 0))
+        if sid:
+            existing[(sid, str(r.get("date", "")))] = i + 2
+
+    # 対象日行（override_slot_id なし）の検索
+    date_rows = {}
+    for i, r in enumerate(records):
+        if str(r.get("section", "")) != section:
+            continue
+        if _safe_int(r.get("override_slot_id", 0)) == 0:
+            date_rows[str(r.get("date", ""))] = i + 2
+
+    updates = []
+    appends = []
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    for (sid, date_str), req in changes.items():
+        key = (sid, date_str)
+        if key in existing:
+            # 既存オーバーライド行を更新
+            row_num = existing[key]
+            updates.append({"range": f"{_col_letter(req_col)}{row_num}", "values": [[req]]})
+        else:
+            # 新規行としてオーバーライドを追加
+            new_id = _next_id(ws) + len(appends)
+            values = {
+                "id": new_id,
+                "section": section,
+                "date": date_str,
+                "is_active": 1,
+                "created_at": now,
+                "override_slot_id": sid,
+                "override_required": req,
+            }
+            appends.append([values.get(h, "") for h in actual_headers])
+
+    if updates:
+        _retry(ws.batch_update, updates)
+    if appends:
+        _retry(ws.append_rows, appends)
+    _clear_data_cache()
+
+
 # ---- 平日希望 CRUD ----
 
 _weekday_pref_headers = [

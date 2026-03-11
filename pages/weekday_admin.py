@@ -18,11 +18,12 @@ from database import (
     get_weekday_schedule, batch_save_weekday_assignments, delete_weekday_assignment,
     get_weekday_open_section, set_weekday_open_section,
     get_weekday_deadline, set_weekday_deadline,
+    get_weekday_slot_overrides, set_weekday_slot_overrides_batch,
 )
 from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
 
-DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
+DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
 
 def render(section: str):
@@ -82,8 +83,8 @@ def render(section: str):
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "メンバー管理", "対象日管理", "スロット管理", "希望状況一覧", "スケジュール作成",
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "メンバー管理", "対象日管理", "スロット管理", "日別設定", "希望状況一覧", "スケジュール作成",
     ])
 
     with tab1:
@@ -93,8 +94,10 @@ def render(section: str):
     with tab3:
         _render_slots(section, days_of_week)
     with tab4:
-        _render_preferences(section, assigned_doctor_ids)
+        _render_slot_overrides(section, days_of_week)
     with tab5:
+        _render_preferences(section, assigned_doctor_ids)
+    with tab6:
         _render_schedule(section, cfg, assigned_doctor_ids, days_of_week)
 
 
@@ -306,6 +309,86 @@ def _render_slots(section: str, days_of_week: list):
                         st.rerun()
 
 
+def _render_slot_overrides(section: str, days_of_week: list):
+    """日別設定タブ（休診・2人体制のオーバーライド）"""
+    st.subheader("日別設定")
+    st.caption("特定の日に休診にしたり、2人体制にしたりできます")
+
+    today = date.today()
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
+    ovr_month = st.selectbox("対象月", months, key=f"wkadm_ovr_month_{section}")
+
+    slots = get_weekday_slots(section)
+    active_slots = [s for s in slots if s.get("is_active", 1)]
+    if not active_slots:
+        st.info("スロットが登録されていません。「スロット管理」タブで設定してください。")
+        return
+
+    active_dates_str = get_active_target_dates(section)
+    year_m, month_m = map(int, ovr_month.split("-"))
+    target_dates = []
+    for ds in active_dates_str:
+        try:
+            dt = date.fromisoformat(ds)
+            if dt.year == year_m and dt.month == month_m:
+                target_dates.append(dt)
+        except ValueError:
+            pass
+    target_dates.sort()
+
+    if not target_dates:
+        st.info("この月の対象日がありません。")
+        return
+
+    overrides = get_weekday_slot_overrides(section, ovr_month)
+
+    OVERRIDE_OPTIONS = ["通常", "2人体制", "休診"]
+    REQ_MAP = {"通常": -1, "2人体制": 2, "休診": 0}  # -1 = デフォルト(オーバーライドなし)
+    REQ_TO_LABEL = {0: "休診", 2: "2人体制"}
+
+    # スロットごとに表示
+    changes = {}
+    for slot in active_slots:
+        dow_slots_dates = [dt for dt in target_dates if dt.weekday() == slot["day_of_week"]]
+        if not dow_slots_dates:
+            continue
+
+        st.write(f"**{slot['slot_name']}** ({DAY_NAMES.get(slot['day_of_week'], '')}曜　"
+                 f"{slot['start_time']}〜{slot['end_time']}　通常: {slot['required_count']}人)")
+
+        cols = st.columns(min(len(dow_slots_dates), 5))
+        for i, dt in enumerate(dow_slots_dates):
+            ds = dt.isoformat()
+            current_ovr = overrides.get((slot["id"], ds))
+            if current_ovr is not None:
+                current_label = REQ_TO_LABEL.get(current_ovr, "通常")
+            else:
+                current_label = "通常"
+
+            with cols[i % len(cols)]:
+                sel = st.radio(
+                    dt.strftime("%m/%d(%a)"),
+                    OVERRIDE_OPTIONS,
+                    index=OVERRIDE_OPTIONS.index(current_label),
+                    key=f"ovr_{section}_{slot['id']}_{ds}",
+                )
+                new_req = REQ_MAP[sel]
+                if new_req == -1:
+                    # 通常 → オーバーライドが既存なら削除相当（デフォルトに戻す）
+                    if current_ovr is not None:
+                        changes[(slot["id"], ds)] = slot["required_count"]
+                elif current_ovr is None or new_req != current_ovr:
+                    changes[(slot["id"], ds)] = new_req
+
+    if st.button("日別設定を保存", type="primary", key=f"save_ovr_{section}"):
+        if changes:
+            set_weekday_slot_overrides_batch(section, changes)
+            st.success(f"日別設定を保存しました（{len(changes)}件変更）")
+        else:
+            st.info("変更はありません")
+        st.rerun()
+
+
 def _render_preferences(section: str, assigned_doctor_ids: list):
     """希望状況一覧タブ"""
     st.subheader("希望状況一覧")
@@ -402,9 +485,13 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     st.write(f"対象日: {len(target_dates)}日　メンバー: {len(assigned_doctors)}名　スロット: {len(active_slots)}枠")
 
+    # オーバーライド取得
+    slot_overrides = get_weekday_slot_overrides(section, target_month)
+
     # 自動生成ボタン
     if st.button("自動生成", type="primary", key=f"auto_gen_{section}"):
-        result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs)
+        result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
+                                        slot_overrides=slot_overrides)
         if result is None:
             st.error("条件を満たすスケジュールが見つかりませんでした。制約を確認してください。")
         else:
@@ -436,8 +523,17 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         cols = st.columns(len(day_slots))
         for j, slot in enumerate(day_slots):
             with cols[j]:
+                # オーバーライド確認
+                ovr_req = slot_overrides.get((slot["id"], ds))
+                if ovr_req is not None and ovr_req == 0:
+                    st.caption(f"{slot['slot_name']}: 休診")
+                    continue
+                req_count = ovr_req if ovr_req is not None else slot["required_count"]
+                if ovr_req is not None:
+                    st.caption(f"({req_count}人体制)")
+
                 current_assigned = existing_map.get(ds, {}).get(slot["id"], [])
-                for k in range(slot["required_count"]):
+                for k in range(req_count):
                     current_val = current_assigned[k] if k < len(current_assigned) else 0
                     default_idx = doc_options.index(current_val) if current_val in doc_options else 0
                     st.selectbox(
@@ -458,8 +554,12 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 continue
             assignments[ds] = {}
             for slot in day_slots:
+                ovr_req = slot_overrides.get((slot["id"], ds))
+                if ovr_req is not None and ovr_req == 0:
+                    continue  # 休診
+                req_count = ovr_req if ovr_req is not None else slot["required_count"]
                 assigned = []
-                for k in range(slot["required_count"]):
+                for k in range(req_count):
                     val = st.session_state.get(f"sched_{section}_{ds}_{slot['id']}_{k}", 0)
                     if val and val != 0:
                         assigned.append(val)

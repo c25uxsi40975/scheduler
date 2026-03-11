@@ -68,10 +68,10 @@ def get_weekday_target_dates(
     month: int,
     days_of_week: list[int],
 ) -> list[date]:
-    """指定月の平日対象日を取得（祝日除外なし）"""
+    """指定月の平日対象日を取得（祝日除外）"""
     return get_target_dates(
         year, month, days_of_week=days_of_week,
-        exclude_holidays=False,
+        exclude_holidays=True,
     )
 
 
@@ -131,6 +131,7 @@ def solve_weekday_schedule(
     slots: list[dict],
     doctors: list[dict],
     preferences: list[dict],
+    slot_overrides: dict = None,
 ) -> dict | None:
     """平日スケジュールの自動割り当て
 
@@ -142,6 +143,8 @@ def solve_weekday_schedule(
         slots: スロット定義リスト [{id, slot_name, day_of_week, required_count, ...}]
         doctors: 医員リスト [{id, name, ...}]
         preferences: 希望リスト [{doctor_id, ng_dates, avoid_dates, ...}]
+        slot_overrides: 日別オーバーライド {(slot_id, date_str): required_count}
+                        0=休診, 他=人数
 
     Returns:
         {date_str: {slot_id: [doctor_id, ...]}} or None (infeasible)
@@ -149,6 +152,7 @@ def solve_weekday_schedule(
     if not target_dates or not slots or not doctors:
         return None
 
+    slot_overrides = slot_overrides or {}
     doc_ids = [d["id"] for d in doctors]
 
     # 各日付に適用されるスロットを特定（曜日ベース）
@@ -174,16 +178,26 @@ def solve_weekday_schedule(
     x = {}
     for dt, dt_slots in date_slots.items():
         for slot in dt_slots:
+            # 休診オーバーライドのスロットは変数を作らない
+            ovr_req = slot_overrides.get((slot["id"], dt.isoformat()))
+            if ovr_req is not None and ovr_req == 0:
+                continue
             for doc_id in doc_ids:
                 key = (doc_id, dt.isoformat(), slot["id"])
                 x[key] = pulp.LpVariable(f"x_{doc_id}_{dt.isoformat()}_{slot['id']}", cat="Binary")
 
     # ---- ハード制約 ----
 
-    # 1. 各スロットにrequired_count人
+    # 1. 各スロットにrequired_count人（オーバーライド優先）
     for dt, dt_slots in date_slots.items():
         for slot in dt_slots:
-            req = int(slot.get("required_count", 1))
+            ovr_req = slot_overrides.get((slot["id"], dt.isoformat()))
+            if ovr_req is not None:
+                if ovr_req == 0:
+                    continue  # 休診: 変数なし → 制約不要
+                req = ovr_req
+            else:
+                req = int(slot.get("required_count", 1))
             available = []
             for doc_id in doc_ids:
                 key = (doc_id, dt.isoformat(), slot["id"])
@@ -227,12 +241,15 @@ def solve_weekday_schedule(
                     doc_total.append(x[key])
         count_vars[doc_id] = pulp.lpSum(doc_total) if doc_total else 0
 
-    # 頻度均一化: 各医員の割り当て回数の分散を最小化
-    total_slots_needed = sum(
-        int(slot.get("required_count", 1))
-        for dt_slots in date_slots.values()
-        for slot in dt_slots
-    )
+    # 頻度均一化: 各医員の割り当て回数の分散を最小化（オーバーライド考慮）
+    total_slots_needed = 0
+    for dt, dt_slots in date_slots.items():
+        for slot in dt_slots:
+            ovr_req = slot_overrides.get((slot["id"], dt.isoformat()))
+            if ovr_req is not None:
+                total_slots_needed += ovr_req  # 0=休診なら加算なし
+            else:
+                total_slots_needed += int(slot.get("required_count", 1))
     n_docs = len(doc_ids)
     avg_count = total_slots_needed / n_docs if n_docs > 0 else 0
 
