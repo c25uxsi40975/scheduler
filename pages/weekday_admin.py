@@ -528,7 +528,9 @@ def _render_preferences(section: str, assigned_doctor_ids: list):
 def _render_proxy_preference_form(doc_id: int, section: str,
                                    active_dates: list, pref_map: dict,
                                    doc_map: dict):
-    """代行希望入力フォーム"""
+    """代行希望入力フォーム（テーブル形式: 行=日付, 列=スロット）"""
+    import pandas as pd
+
     pref = pref_map.get(doc_id)
     existing_ng = set(pref.get("ng_dates", []) if pref else [])
     existing_avoid = set(pref.get("avoid_dates", []) if pref else [])
@@ -536,58 +538,190 @@ def _render_proxy_preference_form(doc_id: int, section: str,
 
     SCHEDULE_STATUS = ["○", "△", "×"]
 
-    with st.form(f"proxy_pref_{section}_{doc_id}"):
-        st.write(f"**{doc_map.get(doc_id, '')}** の希望を入力（○=可能　△=できれば避けたい　×=NG）")
-        n_cols = min(len(active_dates), 5)
-        cols = st.columns(n_cols)
+    # スロット情報を取得
+    slots = get_weekday_slots(section)
+    active_slots = [s for s in slots if s.get("is_active", 1)]
 
-        for i, ds in enumerate(active_dates):
-            try:
-                dt = date.fromisoformat(ds)
-                label = dt.strftime("%m/%d(%a)")
-            except ValueError:
-                label = ds
+    # 曜日→スロットのマップ
+    dow_slots = {}
+    for s in active_slots:
+        dow = s["day_of_week"]
+        if dow not in dow_slots:
+            dow_slots[dow] = []
+        dow_slots[dow].append(s)
 
-            if ds in existing_ng:
-                default_idx = 2
-            elif ds in existing_avoid:
-                default_idx = 1
+    # 全スロット名（列ヘッダー用）— 曜日横断でユニーク名を収集
+    all_slot_names = []
+    seen = set()
+    for dow in sorted(dow_slots.keys()):
+        for s in dow_slots[dow]:
+            if s["slot_name"] not in seen:
+                all_slot_names.append(s["slot_name"])
+                seen.add(s["slot_name"])
+
+    st.write(f"**{doc_map.get(doc_id, '')}** の希望（○=可能　△=できれば避けたい　×=NG）")
+
+    if not all_slot_names:
+        st.info("スロットが登録されていません")
+        return
+
+    # テーブルデータ構築用: 各行のどのスロットが有効かを記録
+    date_slot_valid = []  # [{slot_name: bool}]
+
+    # セッション状態のテーブルキー
+    table_key = f"proxy_table_{section}_{doc_id}"
+
+    # テーブルデータ構築
+    rows = []
+    date_keys = []
+    for ds in active_dates:
+        try:
+            dt = date.fromisoformat(ds)
+            date_label = dt.strftime("%m/%d(%a)")
+            dow = dt.weekday()
+        except ValueError:
+            continue
+
+        if ds in existing_ng:
+            status = "×"
+        elif ds in existing_avoid:
+            status = "△"
+        else:
+            status = "○"
+
+        day_slot_names = {s["slot_name"] for s in dow_slots.get(dow, [])}
+        validity = {}
+
+        row = {"日付": date_label}
+        for sn in all_slot_names:
+            if sn in day_slot_names:
+                row[sn] = status
+                validity[sn] = True
             else:
-                default_idx = 0
+                row[sn] = "-"
+                validity[sn] = False
+        rows.append(row)
+        date_keys.append(ds)
+        date_slot_valid.append(validity)
 
-            with cols[i % n_cols]:
-                st.selectbox(
-                    label,
-                    options=SCHEDULE_STATUS,
-                    index=default_idx,
-                    key=f"proxy_{section}_{doc_id}_{ds}",
-                )
+    if not rows:
+        st.info("対象日がありません")
+        return
 
-        free_text = st.text_area(
-            "備考",
-            value=existing_free,
-            placeholder="例: 第3週は学会のため不可",
-            key=f"proxy_free_{section}_{doc_id}",
+    # ---- 一括操作ボタン ----
+    st.caption("一括操作")
+    # 全体
+    gc1, gc2, gc3 = st.columns(3)
+    with gc1:
+        if st.button("全て ○", key=f"proxy_all_ok_{section}_{doc_id}", use_container_width=True):
+            for i, row in enumerate(rows):
+                for sn in all_slot_names:
+                    if date_slot_valid[i].get(sn):
+                        row[sn] = "○"
+            st.session_state[table_key] = {"edited_rows": {
+                i: {sn: "○" for sn in all_slot_names if date_slot_valid[i].get(sn)}
+                for i in range(len(rows))
+            }}
+            st.rerun()
+    with gc2:
+        if st.button("全て ×", key=f"proxy_all_ng_{section}_{doc_id}", use_container_width=True):
+            st.session_state[table_key] = {"edited_rows": {
+                i: {sn: "×" for sn in all_slot_names if date_slot_valid[i].get(sn)}
+                for i in range(len(rows))
+            }}
+            st.rerun()
+    with gc3:
+        if st.button("全て △", key=f"proxy_all_avoid_{section}_{doc_id}", use_container_width=True):
+            st.session_state[table_key] = {"edited_rows": {
+                i: {sn: "△" for sn in all_slot_names if date_slot_valid[i].get(sn)}
+                for i in range(len(rows))
+            }}
+            st.rerun()
+
+    # スロット単位の操作
+    st.caption("スロット単位の一括操作")
+    for sn in all_slot_names:
+        sc1, sc2, sc3, sc4 = st.columns([2, 1, 1, 1])
+        with sc1:
+            st.markdown(f"**{sn}**")
+        with sc2:
+            if st.button("○", key=f"proxy_slot_ok_{section}_{doc_id}_{sn}", use_container_width=True):
+                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                for i in range(len(rows)):
+                    if date_slot_valid[i].get(sn):
+                        edits.setdefault(i, {})[sn] = "○"
+                st.session_state[table_key] = {"edited_rows": edits}
+                st.rerun()
+        with sc3:
+            if st.button("×", key=f"proxy_slot_ng_{section}_{doc_id}_{sn}", use_container_width=True):
+                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                for i in range(len(rows)):
+                    if date_slot_valid[i].get(sn):
+                        edits.setdefault(i, {})[sn] = "×"
+                st.session_state[table_key] = {"edited_rows": edits}
+                st.rerun()
+        with sc4:
+            if st.button("-", key=f"proxy_slot_off_{section}_{doc_id}_{sn}",
+                         use_container_width=True, help="無効化"):
+                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                for i in range(len(rows)):
+                    if date_slot_valid[i].get(sn):
+                        edits.setdefault(i, {})[sn] = "-"
+                st.session_state[table_key] = {"edited_rows": edits}
+                st.rerun()
+
+    st.markdown("---")
+
+    df = pd.DataFrame(rows)
+
+    column_config = {
+        "日付": st.column_config.TextColumn("日付", disabled=True, width="small"),
+    }
+    for sn in all_slot_names:
+        column_config[sn] = st.column_config.SelectboxColumn(
+            sn,
+            options=SCHEDULE_STATUS + ["-"],
+            width="small",
         )
 
-        if st.form_submit_button("希望を保存（代行）", type="primary"):
-            new_ng = []
-            new_avoid = []
-            for ds in active_dates:
-                val = st.session_state.get(f"proxy_{section}_{doc_id}_{ds}", "○")
-                if val == "×":
-                    new_ng.append(ds)
-                elif val == "△":
-                    new_avoid.append(ds)
+    edited_df = st.data_editor(
+        df,
+        column_config=column_config,
+        hide_index=True,
+        use_container_width=True,
+        key=table_key,
+    )
 
-            upsert_weekday_preference(
-                doc_id, section,
-                ng_dates=new_ng,
-                avoid_dates=new_avoid,
-                free_text=free_text,
-            )
-            st.success(f"{doc_map.get(doc_id, '')} の希望を保存しました")
-            st.rerun()
+    free_text = st.text_area(
+        "備考",
+        value=existing_free,
+        placeholder="例: 第3週は学会のため不可",
+        key=f"proxy_free_{section}_{doc_id}",
+    )
+
+    if st.button("希望を保存（代行）", type="primary", key=f"proxy_save_{section}_{doc_id}"):
+        new_ng = []
+        new_avoid = []
+        for i, ds in enumerate(date_keys):
+            if i >= len(edited_df):
+                break
+            row = edited_df.iloc[i]
+            statuses = [row[sn] for sn in all_slot_names if row.get(sn, "-") != "-"]
+            if not statuses:
+                continue
+            if "×" in statuses:
+                new_ng.append(ds)
+            elif "△" in statuses:
+                new_avoid.append(ds)
+
+        upsert_weekday_preference(
+            doc_id, section,
+            ng_dates=new_ng,
+            avoid_dates=new_avoid,
+            free_text=free_text,
+        )
+        st.success(f"{doc_map.get(doc_id, '')} の希望を保存しました")
+        st.rerun()
 
 
 def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
