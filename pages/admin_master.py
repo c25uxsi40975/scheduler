@@ -24,6 +24,33 @@ LABEL_TO_WEIGHT = {"必須": 3.0, "指名": 2.0, "任意": 1.0, "除外": 0.0}
 PRIORITY_LABELS = ["必須", "指名", "任意", "除外"]
 
 
+HOURS = list(range(25))  # 0〜24
+MINUTES_OPTIONS = [0, 30]
+
+
+def _time_select(label: str, default: str, key_prefix: str):
+    """X時Y分のプルダウンで時間を入力し "HH:MM" を返す"""
+    h_default, m_default = 9, 0
+    if default:
+        try:
+            parts = default.split(":")
+            h_default = int(parts[0])
+            m_default = int(parts[1]) if len(parts) > 1 else 0
+            if m_default not in MINUTES_OPTIONS:
+                m_default = 0
+        except (ValueError, IndexError):
+            pass
+    c1, c2 = st.columns(2)
+    with c1:
+        h = st.selectbox(f"{label}（時）", HOURS, index=h_default,
+                         key=f"{key_prefix}_h", label_visibility="collapsed")
+    with c2:
+        m = st.selectbox(f"{label}（分）", MINUTES_OPTIONS,
+                         index=MINUTES_OPTIONS.index(m_default),
+                         key=f"{key_prefix}_m", label_visibility="collapsed")
+    return f"{h:02d}:{m:02d}"
+
+
 FREQ_OPTIONS = [
     ("weekly", "毎週"),
     ("biweekly_odd", "隔週（奇数週）"),
@@ -297,6 +324,10 @@ def render(target_month, year, month):
                                          index=tslot_options.index(tpl_tslot) if tpl_tslot in tslot_options else 0,
                                          help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です")
                 new_loc = st.text_input("勤務地", value=tpl.get("location", ""))
+                st.caption("開始時間（カレンダー表示用）")
+                new_start_time = _time_select("開始", tpl.get("start_time", ""), "add_cli_start")
+                st.caption("終了時間（カレンダー表示用）")
+                new_end_time = _time_select("終了", tpl.get("end_time", ""), "add_cli_end")
                 new_limited = st.multiselect(
                     "限定メンバー", options=_add_doc_ids,
                     format_func=lambda x: _add_doc_id_name.get(x, "?"),
@@ -308,6 +339,7 @@ def render(target_month, year, month):
                             new_clinic.strip(), new_fee, new_freq[0],
                             effort_cost=new_effort, work_hours=new_hours,
                             time_slot=new_tslot, location=new_loc,
+                            start_time=new_start_time, end_time=new_end_time,
                             fixed_doctors=new_limited,
                         )
                         st.success(f"「{new_clinic}」を追加しました")
@@ -349,6 +381,10 @@ def render(target_month, year, month):
                             info_parts.append(f"{hours:.1f}h")
                         if tslot:
                             info_parts.append(tslot)
+                        cli_start = c.get("start_time", "")
+                        cli_end = c.get("end_time", "")
+                        if cli_start and cli_end:
+                            info_parts.append(f"{cli_start}〜{cli_end}")
                         if loc:
                             info_parts.append(loc)
                         fd_list = c.get("fixed_doctors") or []
@@ -410,6 +446,14 @@ def render(target_month, year, month):
                                 "勤務地", value=c.get("location", ""),
                                 key=f"loc_{c['id']}"
                             )
+                            st.caption("開始時間（カレンダー表示用）")
+                            edit_start_time = _time_select(
+                                "開始", c.get("start_time", ""),
+                                f"cli_start_{c['id']}")
+                            st.caption("終了時間（カレンダー表示用）")
+                            edit_end_time = _time_select(
+                                "終了", c.get("end_time", ""),
+                                f"cli_end_{c['id']}")
                             current_fd = c.get("fixed_doctors") or []
                             # default にはリスト内のIDのうち、現在有効な医員のみ
                             edit_limited = st.multiselect(
@@ -426,6 +470,7 @@ def render(target_month, year, month):
                                         c['id'], fee=edit_fee, frequency=edit_freq[0],
                                         effort_cost=edit_effort, work_hours=edit_hours,
                                         time_slot=edit_tslot, location=edit_loc,
+                                        start_time=edit_start_time, end_time=edit_end_time,
                                         fixed_doctors=edit_limited,
                                     )
                                     st.session_state.pop(f"editing_cli_{c['id']}", None)

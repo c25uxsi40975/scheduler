@@ -10,8 +10,10 @@ import streamlit as st
 from database import (
     get_weekday_configs,
     get_weekday_schedule,
+    get_weekday_slots,
     get_schedules,
     get_confirmed_months,
+    get_clinics,
 )
 
 
@@ -20,7 +22,7 @@ def render(doctor: dict):
     st.subheader("全体スケジュール")
 
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 4)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 12)]
     view_month = st.selectbox("月を選択", months, key="cal_view_month")
 
     year, month = map(int, view_month.split("-"))
@@ -43,6 +45,15 @@ def _get_saturday_entries(doctor: dict, year_month: str) -> dict:
     """
     entries = {}
     try:
+        # 外勤先の時間情報を取得
+        all_clinics = get_clinics(active_only=False)
+        clinic_time_map = {}
+        for c in all_clinics:
+            s_t = c.get("start_time", "")
+            e_t = c.get("end_time", "")
+            if s_t and e_t:
+                clinic_time_map[c["name"]] = f"{s_t}〜{e_t}"
+
         schedules = get_schedules(year_month)
         for sched in schedules:
             if not sched.get("is_confirmed"):
@@ -55,6 +66,7 @@ def _get_saturday_entries(doctor: dict, year_month: str) -> dict:
                             entries[date_str] = []
                         entries[date_str].append({
                             "clinic": clinic_name,
+                            "time": clinic_time_map.get(clinic_name, ""),
                             "section": "saturday",
                             "color": "#e3f2fd",
                         })
@@ -81,6 +93,15 @@ def _get_weekday_entries(doctor: dict, year_month: str) -> dict:
             clinic_name = cfg["clinic_name"]
             color = SECTION_COLORS[i % len(SECTION_COLORS)]
 
+            # スロットの時間情報を取得
+            slots = get_weekday_slots(section)
+            slot_time_map = {}
+            for sl in slots:
+                s_t = sl.get("start_time", "")
+                e_t = sl.get("end_time", "")
+                if s_t and e_t:
+                    slot_time_map[sl["id"]] = f"{s_t}〜{e_t}"
+
             schedule = get_weekday_schedule(year_month, section)
             for r in schedule:
                 if r["doctor_id"] == doctor["id"]:
@@ -90,6 +111,7 @@ def _get_weekday_entries(doctor: dict, year_month: str) -> dict:
                     entries[ds].append({
                         "clinic": clinic_name,
                         "slot": r.get("slot_name", ""),
+                        "time": slot_time_map.get(r.get("slot_id", 0), ""),
                         "section": section,
                         "color": color,
                     })
@@ -134,6 +156,8 @@ def _render_calendar_grid(year: int, month: int,
                     label = e["clinic"]
                     if e.get("slot"):
                         label += f' ({e["slot"]})'
+                    if e.get("time"):
+                        label += f'<br><span style="font-size:0.65rem;color:#666;">{e["time"]}</span>'
                     cell_content += (
                         f'<div style="background:{bg}; border-radius:3px; '
                         f'padding:1px 3px; margin:1px 0; font-size:0.75rem; '

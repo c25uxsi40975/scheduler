@@ -25,6 +25,32 @@ from components.display_utils import build_display_name_map
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
+HOURS = list(range(25))  # 0〜24
+MINUTES = [0, 30]
+
+
+def _time_select(label: str, default: str, key_prefix: str):
+    """X時Y分のプルダウンで時間を入力し "HH:MM" を返す"""
+    h_default, m_default = 9, 0
+    if default:
+        try:
+            parts = default.split(":")
+            h_default = int(parts[0])
+            m_default = int(parts[1]) if len(parts) > 1 else 0
+            if m_default not in MINUTES:
+                m_default = 0
+        except (ValueError, IndexError):
+            pass
+    c1, c2 = st.columns(2)
+    with c1:
+        h = st.selectbox(f"{label}（時）", HOURS, index=h_default,
+                         key=f"{key_prefix}_h", label_visibility="collapsed")
+    with c2:
+        m = st.selectbox(f"{label}（分）", MINUTES,
+                         index=MINUTES.index(m_default),
+                         key=f"{key_prefix}_m", label_visibility="collapsed")
+    return f"{h:02d}:{m:02d}"
+
 
 def render(section: str):
     """副管理者の平日外勤管理画面"""
@@ -135,7 +161,7 @@ def _render_target_dates(section: str, days_of_week: list):
     today = date.today()
     # 3ヶ月先まで生成
     all_dates = []
-    for m_offset in range(4):
+    for m_offset in range(12):
         dt = today + relativedelta(months=m_offset)
         month_dates = get_weekday_target_dates(dt.year, dt.month, days_of_week)
         all_dates.extend(month_dates)
@@ -220,20 +246,17 @@ def _render_slots(section: str, days_of_week: list):
                 options=days_of_week,
                 format_func=lambda x: DAY_NAMES.get(x, str(x)),
             )
-            sc1, sc2 = st.columns(2)
-            with sc1:
-                start_time = st.text_input("開始時間", placeholder="09:00")
-            with sc2:
-                end_time = st.text_input("終了時間", placeholder="12:00")
+            st.caption("開始時間")
+            start_time = _time_select("開始", "09:00", f"add_slot_start_{section}")
+            st.caption("終了時間")
+            end_time = _time_select("終了", "17:00", f"add_slot_end_{section}")
             req_count = st.number_input("必要人数", min_value=1, max_value=10, value=1)
             if st.form_submit_button("追加", use_container_width=True):
                 if not slot_name.strip():
                     st.error("スロット名を入力してください")
-                elif not start_time.strip() or not end_time.strip():
-                    st.error("開始・終了時間を入力してください")
                 else:
                     add_weekday_slot(section, slot_name.strip(), day_of_week,
-                                     start_time.strip(), end_time.strip(), req_count)
+                                     start_time, end_time, req_count)
                     st.success(f"スロット「{slot_name}」を追加しました")
                     st.rerun()
 
@@ -276,15 +299,17 @@ def _render_slots(section: str, days_of_week: list):
             if st.session_state.get(f"slot_editing_{s['id']}"):
                 with st.form(f"slot_edit_form_{s['id']}"):
                     e_name = st.text_input("スロット名", value=s["slot_name"], key=f"se_name_{s['id']}")
-                    e_start = st.text_input("開始時間", value=s["start_time"], key=f"se_start_{s['id']}")
-                    e_end = st.text_input("終了時間", value=s["end_time"], key=f"se_end_{s['id']}")
+                    st.caption("開始時間")
+                    e_start = _time_select("開始", s["start_time"], f"se_start_{s['id']}")
+                    st.caption("終了時間")
+                    e_end = _time_select("終了", s["end_time"], f"se_end_{s['id']}")
                     e_req = st.number_input("必要人数", min_value=1, max_value=10,
                                             value=s["required_count"], key=f"se_req_{s['id']}")
                     fc1, fc2 = st.columns(2)
                     with fc1:
                         if st.form_submit_button("保存"):
-                            update_weekday_slot(s["id"], slot_name=e_name.strip(),
-                                                start_time=e_start.strip(), end_time=e_end.strip(),
+                            update_weekday_slot(s["id"], slot_name=e_name,
+                                                start_time=e_start, end_time=e_end,
                                                 required_count=e_req)
                             st.session_state.pop(f"slot_editing_{s['id']}", None)
                             st.success("保存しました")
@@ -315,7 +340,7 @@ def _render_slot_overrides(section: str, days_of_week: list):
     st.caption("特定の日に休診にしたり、2人体制にしたりできます")
 
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(12)]
     ovr_month = st.selectbox("対象月", months, key=f"wkadm_ovr_month_{section}")
 
     slots = get_weekday_slots(section)
@@ -427,6 +452,91 @@ def _render_preferences(section: str, assigned_doctor_ids: list):
         else:
             st.write(f"**{name}**: 未入力")
 
+    # ---- 代行入力 ----
+    st.markdown("---")
+    st.subheader("代行入力")
+    st.caption("医員に代わって希望を入力できます")
+
+    proxy_doc_options = [d for d in assigned_doctor_ids]
+    if not proxy_doc_options:
+        st.info("メンバーが登録されていません")
+        return
+
+    proxy_doc_id = st.selectbox(
+        "対象医員",
+        proxy_doc_options,
+        format_func=lambda x: doc_map.get(x, f"ID:{x}"),
+        key=f"proxy_doc_{section}",
+    )
+
+    if proxy_doc_id:
+        _render_proxy_preference_form(proxy_doc_id, section, active_dates, pref_map, doc_map)
+
+
+def _render_proxy_preference_form(doc_id: int, section: str,
+                                   active_dates: list, pref_map: dict,
+                                   doc_map: dict):
+    """代行希望入力フォーム"""
+    pref = pref_map.get(doc_id)
+    existing_ng = set(pref.get("ng_dates", []) if pref else [])
+    existing_avoid = set(pref.get("avoid_dates", []) if pref else [])
+    existing_free = pref.get("free_text", "") if pref else ""
+
+    SCHEDULE_STATUS = ["○", "△", "×"]
+
+    with st.form(f"proxy_pref_{section}_{doc_id}"):
+        st.write(f"**{doc_map.get(doc_id, '')}** の希望を入力（○=可能　△=できれば避けたい　×=NG）")
+        n_cols = min(len(active_dates), 5)
+        cols = st.columns(n_cols)
+
+        for i, ds in enumerate(active_dates):
+            try:
+                dt = date.fromisoformat(ds)
+                label = dt.strftime("%m/%d(%a)")
+            except ValueError:
+                label = ds
+
+            if ds in existing_ng:
+                default_idx = 2
+            elif ds in existing_avoid:
+                default_idx = 1
+            else:
+                default_idx = 0
+
+            with cols[i % n_cols]:
+                st.selectbox(
+                    label,
+                    options=SCHEDULE_STATUS,
+                    index=default_idx,
+                    key=f"proxy_{section}_{doc_id}_{ds}",
+                )
+
+        free_text = st.text_area(
+            "備考",
+            value=existing_free,
+            placeholder="例: 第3週は学会のため不可",
+            key=f"proxy_free_{section}_{doc_id}",
+        )
+
+        if st.form_submit_button("希望を保存（代行）", type="primary"):
+            new_ng = []
+            new_avoid = []
+            for ds in active_dates:
+                val = st.session_state.get(f"proxy_{section}_{doc_id}_{ds}", "○")
+                if val == "×":
+                    new_ng.append(ds)
+                elif val == "△":
+                    new_avoid.append(ds)
+
+            upsert_weekday_preference(
+                doc_id, section,
+                ng_dates=new_ng,
+                avoid_dates=new_avoid,
+                free_text=free_text,
+            )
+            st.success(f"{doc_map.get(doc_id, '')} の希望を保存しました")
+            st.rerun()
+
 
 def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
     """スケジュール作成タブ"""
@@ -434,7 +544,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     # 対象月選択
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(4)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(12)]
     target_month = st.selectbox("対象月", months, key=f"wkadm_month_{section}")
 
     active_dates_str = get_active_target_dates(section)

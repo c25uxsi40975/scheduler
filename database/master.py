@@ -170,7 +170,8 @@ def get_clinics(active_only=True):
 
 
 def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_doctors=None,
-               excluded_doctors=None, effort_cost=0, work_hours=0, time_slot="", location=""):
+               excluded_doctors=None, effort_cost=0, work_hours=0, time_slot="", location="",
+               start_time="", end_time=""):
     ws = _get_sheet("外勤先マスタ")
     records = _get_all_records(ws)
     if any(r["name"] == name for r in records):
@@ -188,6 +189,7 @@ def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_do
         "is_active": 1, "created_at": now,
         "effort_cost": effort_cost, "work_hours": work_hours,
         "time_slot": time_slot, "location": location,
+        "start_time": start_time, "end_time": end_time,
     }
     row = [values.get(h, "") for h in actual_headers]
     ws.append_row(row)
