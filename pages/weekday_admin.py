@@ -251,11 +251,12 @@ def _render_target_dates(section: str, days_of_week: list):
                 date_strs = [d.isoformat() for d in dates]
                 current_active = all(existing_map.get(ds, 1) for ds in date_strs)
 
-                is_on = st.checkbox(
-                    week_label,
-                    value=current_active,
-                    key=f"wk_week_{section}_{week_key[0]}_{week_key[1]}",
-                )
+                cb_key = f"wk_week_{section}_{week_key[0]}_{week_key[1]}"
+                # 一括ボタンで既にセッション状態が設定済みなら value を渡さない
+                if cb_key in st.session_state:
+                    is_on = st.checkbox(week_label, key=cb_key)
+                else:
+                    is_on = st.checkbox(week_label, value=current_active, key=cb_key)
 
                 for ds in date_strs:
                     if is_on != bool(existing_map.get(ds, 1)):
