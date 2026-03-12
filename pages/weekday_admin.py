@@ -728,27 +728,48 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     """スケジュール作成タブ"""
     st.subheader("スケジュール作成")
 
-    # 対象月選択
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
-    target_month = st.selectbox("対象月", months, key=f"wkadm_month_{section}")
+
+    # 生成モード選択
+    gen_mode = st.radio(
+        "生成範囲",
+        ["月単位", "期間指定（複数月を均一化）"],
+        horizontal=True,
+        key=f"wkadm_gen_mode_{section}",
+    )
+
+    if gen_mode == "月単位":
+        target_month = st.selectbox("対象月", months, key=f"wkadm_month_{section}")
+        selected_months = [target_month]
+    else:
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            start_month = st.selectbox("開始月", months, key=f"wkadm_start_month_{section}")
+        with mc2:
+            start_idx = months.index(start_month) if start_month in months else 0
+            end_options = months[start_idx:]
+            end_month = st.selectbox("終了月", end_options, key=f"wkadm_end_month_{section}")
+        si = months.index(start_month)
+        ei = months.index(end_month)
+        selected_months = months[si:ei + 1]
 
     active_dates_str = get_active_target_dates(section)
-    year_m, month_m = map(int, target_month.split("-"))
 
-    # 対象月内の有効日付のみフィルタ
+    # 選択期間の全対象日をフィルタ
     target_dates = []
     for ds in active_dates_str:
         try:
             dt = date.fromisoformat(ds)
-            if dt.year == year_m and dt.month == month_m:
+            ym = dt.strftime("%Y-%m")
+            if ym in selected_months:
                 target_dates.append(dt)
         except ValueError:
             pass
     target_dates.sort()
 
     if not target_dates:
-        st.info("この月の対象日がありません。「対象日管理」タブで設定してください。")
+        st.info("この期間の対象日がありません。「対象日管理」タブで設定してください。")
         return
 
     slots = get_weekday_slots(section)
@@ -765,102 +786,169 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         st.info("メンバーが登録されていません。「メンバー管理」タブで設定してください。")
         return
 
-    # 既存スケジュール読み込み
-    existing_sched = get_weekday_schedule(target_month, section)
-    existing_map = {}  # {date_str: {slot_id: [doctor_id, ...]}}
-    for r in existing_sched:
-        ds = r["date"]
-        sid = r["slot_id"]
-        if ds not in existing_map:
-            existing_map[ds] = {}
-        if sid not in existing_map[ds]:
-            existing_map[ds][sid] = []
-        existing_map[ds][sid].append(r["doctor_id"])
-
     prefs = get_weekday_preferences(section)
 
-    st.write(f"対象日: {len(target_dates)}日　メンバー: {len(assigned_doctors)}名　スロット: {len(active_slots)}枠")
+    # 全選択月のオーバーライドを統合
+    all_slot_overrides = {}
+    for ym in selected_months:
+        ovr = get_weekday_slot_overrides(section, ym)
+        all_slot_overrides.update(ovr)
 
-    # オーバーライド取得
-    slot_overrides = get_weekday_slot_overrides(section, target_month)
+    # 既存スケジュール読み込み（全選択月分）
+    all_existing_sched = []
+    for ym in selected_months:
+        all_existing_sched.extend(get_weekday_schedule(ym, section))
+    existing_map = {}
+    for r in all_existing_sched:
+        ds = r["date"]
+        sid = r["slot_id"]
+        existing_map.setdefault(ds, {}).setdefault(sid, []).append(r["doctor_id"])
+
+    period_label = selected_months[0] if len(selected_months) == 1 else \
+        f"{selected_months[0]}〜{selected_months[-1]}"
+    st.write(f"対象期間: {period_label}　対象日: {len(target_dates)}日　"
+             f"メンバー: {len(assigned_doctors)}名　スロット: {len(active_slots)}枠")
+
+    # ---- アサイン状況サマリ（既存スケジュール） ----
+    _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
+                               target_dates, all_slot_overrides)
 
     # 自動生成ボタン
     if st.button("自動生成", type="primary", key=f"auto_gen_{section}"):
         result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
-                                        slot_overrides=slot_overrides)
+                                        slot_overrides=all_slot_overrides)
         if result is None:
             st.error("条件を満たすスケジュールが見つかりませんでした。制約を確認してください。")
         else:
-            batch_save_weekday_assignments(target_month, section, result)
+            # 月ごとに分割して保存
+            for ym in selected_months:
+                month_result = {ds: slots_map for ds, slots_map in result.items()
+                               if ds.startswith(ym)}
+                if month_result:
+                    batch_save_weekday_assignments(ym, section, month_result)
             st.success("スケジュールを自動生成しました")
             st.rerun()
 
     st.markdown("---")
 
-    # 手動編集マトリクス
+    # ---- 月ごとの手動編集 ----
     st.write("**スケジュール編集**")
     doc_ids = [d["id"] for d in assigned_doctors]
-    doc_options = [0] + doc_ids  # 0 = 未割当
+    doc_options = [0] + doc_ids
 
     def _doc_label(did):
         if did == 0:
             return "---"
         return doc_map.get(did, str(did))
 
-    # 日付×スロットのグリッド
-    for dt in target_dates:
-        ds = dt.isoformat()
-        dow = dt.weekday()
-        day_slots = [s for s in active_slots if s["day_of_week"] == dow]
-        if not day_slots:
+    # 月ごとにexpanderで表示
+    for ym in selected_months:
+        month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
+        if not month_dates:
             continue
 
-        st.write(f"**{dt.strftime('%m/%d(%a)')}**")
-        cols = st.columns(len(day_slots))
-        for j, slot in enumerate(day_slots):
-            with cols[j]:
-                # オーバーライド確認
-                ovr_req = slot_overrides.get((slot["id"], ds))
-                if ovr_req is not None and ovr_req == 0:
-                    st.caption(f"{slot['slot_name']}: 休診")
+        with st.expander(f"📅 {ym}", expanded=(len(selected_months) == 1)):
+            for dt in month_dates:
+                ds = dt.isoformat()
+                dow = dt.weekday()
+                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
+                if not day_slots:
                     continue
-                req_count = ovr_req if ovr_req is not None else slot["required_count"]
-                if ovr_req is not None:
-                    st.caption(f"({req_count}人体制)")
 
-                current_assigned = existing_map.get(ds, {}).get(slot["id"], [])
-                for k in range(req_count):
-                    current_val = current_assigned[k] if k < len(current_assigned) else 0
-                    default_idx = doc_options.index(current_val) if current_val in doc_options else 0
-                    st.selectbox(
-                        f"{slot['slot_name']} #{k+1}",
-                        options=doc_options,
-                        index=default_idx,
-                        format_func=_doc_label,
-                        key=f"sched_{section}_{ds}_{slot['id']}_{k}",
-                    )
+                st.write(f"**{dt.strftime('%m/%d(%a)')}**")
+                cols = st.columns(len(day_slots))
+                for j, slot in enumerate(day_slots):
+                    with cols[j]:
+                        ovr_req = all_slot_overrides.get((slot["id"], ds))
+                        if ovr_req is not None and ovr_req == 0:
+                            st.caption(f"{slot['slot_name']}: 休診")
+                            continue
+                        req_count = ovr_req if ovr_req is not None else slot["required_count"]
+                        if ovr_req is not None:
+                            st.caption(f"({req_count}人体制)")
+
+                        current_assigned = existing_map.get(ds, {}).get(slot["id"], [])
+                        for k in range(req_count):
+                            current_val = current_assigned[k] if k < len(current_assigned) else 0
+                            default_idx = doc_options.index(current_val) if current_val in doc_options else 0
+                            st.selectbox(
+                                f"{slot['slot_name']} #{k+1}",
+                                options=doc_options,
+                                index=default_idx,
+                                format_func=_doc_label,
+                                key=f"sched_{section}_{ds}_{slot['id']}_{k}",
+                            )
 
     if st.button("スケジュールを保存", type="primary", key=f"save_sched_{section}"):
-        assignments = {}
-        for dt in target_dates:
-            ds = dt.isoformat()
-            dow = dt.weekday()
-            day_slots = [s for s in active_slots if s["day_of_week"] == dow]
-            if not day_slots:
-                continue
-            assignments[ds] = {}
-            for slot in day_slots:
-                ovr_req = slot_overrides.get((slot["id"], ds))
-                if ovr_req is not None and ovr_req == 0:
-                    continue  # 休診
-                req_count = ovr_req if ovr_req is not None else slot["required_count"]
-                assigned = []
-                for k in range(req_count):
-                    val = st.session_state.get(f"sched_{section}_{ds}_{slot['id']}_{k}", 0)
-                    if val and val != 0:
-                        assigned.append(val)
-                assignments[ds][slot["id"]] = assigned
-
-        batch_save_weekday_assignments(target_month, section, assignments)
+        for ym in selected_months:
+            month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
+            assignments = {}
+            for dt in month_dates:
+                ds = dt.isoformat()
+                dow = dt.weekday()
+                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
+                if not day_slots:
+                    continue
+                assignments[ds] = {}
+                for slot in day_slots:
+                    ovr_req = all_slot_overrides.get((slot["id"], ds))
+                    if ovr_req is not None and ovr_req == 0:
+                        continue
+                    req_count = ovr_req if ovr_req is not None else slot["required_count"]
+                    assigned = []
+                    for k in range(req_count):
+                        val = st.session_state.get(f"sched_{section}_{ds}_{slot['id']}_{k}", 0)
+                        if val and val != 0:
+                            assigned.append(val)
+                    assignments[ds][slot["id"]] = assigned
+            if assignments:
+                batch_save_weekday_assignments(ym, section, assignments)
         st.success("スケジュールを保存しました")
         st.rerun()
+
+
+def _render_assignment_summary(existing_map: dict, assigned_doctors: list,
+                                doc_map: dict, active_slots: list,
+                                target_dates: list, slot_overrides: dict):
+    """医員ごとのアサイン回数サマリを表示"""
+    # 各医員のアサイン回数をカウント
+    count_map = {d["id"]: 0 for d in assigned_doctors}
+    for ds, slots_map in existing_map.items():
+        for sid, doc_ids in slots_map.items():
+            for did in doc_ids:
+                if did in count_map:
+                    count_map[did] += 1
+
+    # 合計必要スロット数
+    total_needed = 0
+    for dt in target_dates:
+        dow = dt.weekday()
+        for s in active_slots:
+            if s["day_of_week"] == dow:
+                ovr = slot_overrides.get((s["id"], dt.isoformat()))
+                if ovr is not None:
+                    total_needed += max(ovr, 0)
+                else:
+                    total_needed += s["required_count"]
+
+    total_assigned = sum(count_map.values())
+    n_docs = len(assigned_doctors)
+    avg = total_needed / n_docs if n_docs > 0 else 0
+
+    with st.expander("📊 アサイン状況", expanded=True):
+        st.caption(f"必要総枠: {total_needed}　割当済: {total_assigned}　"
+                   f"平均: {avg:.1f}回/人")
+
+        # 医員ごとの表示
+        sorted_docs = sorted(assigned_doctors, key=lambda d: -count_map.get(d["id"], 0))
+        for d in sorted_docs:
+            cnt = count_map.get(d["id"], 0)
+            name = doc_map.get(d["id"], str(d["id"]))
+            diff = cnt - avg
+            if abs(diff) < 0.5:
+                bar_color = "🟢"
+            elif diff > 0:
+                bar_color = "🔴" if diff > 1.5 else "🟡"
+            else:
+                bar_color = "🔵" if diff < -1.5 else "🟡"
+            st.write(f"{bar_color} **{name}**: {cnt}回　(平均比 {diff:+.1f})")
