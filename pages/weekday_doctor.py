@@ -135,7 +135,7 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
 def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     """スケジュール確認タブ"""
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 12)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
     view_month = st.selectbox("月を選択", months, key=f"wkdoc_view_month_{section}")
 
     schedule = get_weekday_schedule(view_month, section)
@@ -185,7 +185,7 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
     st.write("他のメンバーとシフトを交換できます")
 
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(12)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
     swap_month = st.selectbox("月を選択", months, key=f"wkdoc_swap_month_{section}")
 
     schedule = get_weekday_schedule(swap_month, section)

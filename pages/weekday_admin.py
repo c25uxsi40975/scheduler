@@ -159,9 +159,9 @@ def _render_target_dates(section: str, days_of_week: list):
     st.caption("スケジュール対象となる日付を週単位で管理します")
 
     today = date.today()
-    # 3ヶ月先まで生成
+    # 14ヶ月先まで生成
     all_dates = []
-    for m_offset in range(12):
+    for m_offset in range(14):
         dt = today + relativedelta(months=m_offset)
         month_dates = get_weekday_target_dates(dt.year, dt.month, days_of_week)
         all_dates.extend(month_dates)
@@ -178,39 +178,91 @@ def _render_target_dates(section: str, days_of_week: list):
     # 週単位でグループ化
     weeks = {}
     for dt in all_dates:
-        # ISO week
         week_key = dt.isocalendar()[:2]  # (year, week_number)
         monday = dt - timedelta(days=dt.weekday())
         if week_key not in weeks:
             weeks[week_key] = {"monday": monday, "dates": []}
         weeks[week_key]["dates"].append(dt)
 
-    # UIで表示
-    changes = {}
+    # 月ごとにグループ化
+    months_weeks = {}
     for week_key in sorted(weeks.keys()):
         week_info = weeks[week_key]
-        monday = week_info["monday"]
-        dates = week_info["dates"]
-        dates_str = ", ".join(d.strftime("%m/%d(%a)") for d in dates)
-        week_label = f"{monday.strftime('%Y-%m-%d')}週 ({dates_str})"
+        # 週の最初の対象日の月で分類
+        first_date = week_info["dates"][0]
+        month_key = first_date.strftime("%Y-%m")
+        if month_key not in months_weeks:
+            months_weeks[month_key] = []
+        months_weeks[month_key].append((week_key, week_info))
 
-        # 週の状態判定: 全日付がactiveか
-        date_strs = [d.isoformat() for d in dates]
-        current_active = all(existing_map.get(ds, 1) for ds in date_strs)
+    # ---- 一括操作ボタン ----
+    bc1, bc2 = st.columns(2)
+    with bc1:
+        if st.button("全選択", key=f"td_select_all_{section}", use_container_width=True):
+            for week_key in weeks:
+                st.session_state[f"wk_week_{section}_{week_key[0]}_{week_key[1]}"] = True
+            st.rerun()
+    with bc2:
+        if st.button("全選択解除", key=f"td_deselect_all_{section}", use_container_width=True):
+            for week_key in weeks:
+                st.session_state[f"wk_week_{section}_{week_key[0]}_{week_key[1]}"] = False
+            st.rerun()
 
-        is_on = st.checkbox(
-            week_label,
-            value=current_active,
-            key=f"wk_week_{section}_{week_key[0]}_{week_key[1]}",
+    # ---- 月ごとに表示 ----
+    changes = {}
+    for month_key in sorted(months_weeks.keys()):
+        month_week_list = months_weeks[month_key]
+        # 月内の全週がアクティブか判定
+        all_week_keys_in_month = [wk for wk, _ in month_week_list]
+        month_all_active = all(
+            all(existing_map.get(d.isoformat(), 1) for d in weeks[wk]["dates"])
+            for wk in all_week_keys_in_month
         )
 
-        for ds in date_strs:
-            if is_on != bool(existing_map.get(ds, 1)):
-                changes[ds] = is_on
+        try:
+            y, m = map(int, month_key.split("-"))
+            month_label = f"{y}年{m}月"
+        except ValueError:
+            month_label = month_key
+
+        with st.expander(month_label, expanded=False):
+            # 月一括選択ボタン
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                if st.button("この月を全選択", key=f"td_mon_sel_{section}_{month_key}",
+                             use_container_width=True):
+                    for wk in all_week_keys_in_month:
+                        st.session_state[f"wk_week_{section}_{wk[0]}_{wk[1]}"] = True
+                    st.rerun()
+            with mc2:
+                if st.button("この月を全解除", key=f"td_mon_desel_{section}_{month_key}",
+                             use_container_width=True):
+                    for wk in all_week_keys_in_month:
+                        st.session_state[f"wk_week_{section}_{wk[0]}_{wk[1]}"] = False
+                    st.rerun()
+
+            # 週ごとのチェックボックス
+            for week_key, week_info in month_week_list:
+                monday = week_info["monday"]
+                dates = week_info["dates"]
+                dates_str = ", ".join(d.strftime("%m/%d(%a)") for d in dates)
+                week_label = f"{monday.strftime('%Y-%m-%d')}週 ({dates_str})"
+
+                date_strs = [d.isoformat() for d in dates]
+                current_active = all(existing_map.get(ds, 1) for ds in date_strs)
+
+                is_on = st.checkbox(
+                    week_label,
+                    value=current_active,
+                    key=f"wk_week_{section}_{week_key[0]}_{week_key[1]}",
+                )
+
+                for ds in date_strs:
+                    if is_on != bool(existing_map.get(ds, 1)):
+                        changes[ds] = is_on
 
     if st.button("対象日を保存", type="primary", key=f"save_target_dates_{section}"):
         if changes:
-            # 全日付リストを set_target_dates で一括設定
             all_date_strs = [d.isoformat() for d in all_dates]
             active_dates = []
             for ds in all_date_strs:
@@ -222,7 +274,6 @@ def _render_target_dates(section: str, days_of_week: list):
             set_target_dates(section, all_date_strs, active_dates)
             st.success(f"対象日を保存しました（{len(changes)}件変更）")
         else:
-            # 初回: 既存データがない場合もセット
             if not existing:
                 all_date_strs = [d.isoformat() for d in all_dates]
                 set_target_dates(section, all_date_strs, all_date_strs)
@@ -340,7 +391,7 @@ def _render_slot_overrides(section: str, days_of_week: list):
     st.caption("特定の日に休診にしたり、2人体制にしたりできます")
 
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(12)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
     ovr_month = st.selectbox("対象月", months, key=f"wkadm_ovr_month_{section}")
 
     slots = get_weekday_slots(section)
@@ -544,7 +595,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     # 対象月選択
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(12)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
     target_month = st.selectbox("対象月", months, key=f"wkadm_month_{section}")
 
     active_dates_str = get_active_target_dates(section)

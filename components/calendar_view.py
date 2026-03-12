@@ -22,7 +22,7 @@ def render(doctor: dict):
     st.subheader("全体スケジュール")
 
     today = date.today()
-    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 12)]
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
     view_month = st.selectbox("月を選択", months, key="cal_view_month")
 
     year, month = map(int, view_month.split("-"))
