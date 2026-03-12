@@ -28,7 +28,7 @@ def _safe_json_loads(val, default=None):
 
 # ---- スプレッドシート接続（2系統） ----
 
-_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_")
+_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_", "平日希望_", "平日スケジュール_", "シフト交換_")
 
 
 def _is_operational_sheet(name: str) -> bool:
@@ -207,6 +207,19 @@ SHEET_HEADERS = {
         "労力差", "過去ペア回数", "優先度重み", "給与ランク積",
         # Target
         "割当結果",
+    ],
+    # ---- 平日外勤マスタ ----
+    "平日外勤設定": [
+        "id", "section", "clinic_name", "days_of_week",
+        "assigned_doctors", "is_active", "created_at",
+    ],
+    "平日スロットマスタ": [
+        "id", "section", "slot_name", "day_of_week",
+        "start_time", "end_time", "required_count",
+        "is_active", "created_at",
+    ],
+    "スケジュール対象日": [
+        "id", "section", "date", "is_active", "created_at",
     ],
 }
 

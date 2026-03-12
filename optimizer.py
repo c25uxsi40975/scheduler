@@ -8,6 +8,8 @@ import jpholiday
 import pulp
 import numpy as np
 
+from scheduling_utils import get_target_saturdays as _get_target_saturdays_base
+
 
 # 優先度の weight 値定義（4ラベル）
 PRIORITY_MANDATORY = 3.0   # 必須: 月1回以上割り当て
@@ -19,15 +21,9 @@ PRIORITY_EXCLUDED = 0.0    # 除外: 割当不可
 PRIORITY_FIXED = PRIORITY_MANDATORY
 
 
-def get_target_saturdays(year: int, month: int) -> list[date]:
-    """指定月の土曜日を取得（祝日除外）"""
-    saturdays = []
-    d = date(year, month, 1)
-    while d.month == month:
-        if d.weekday() == 5 and not jpholiday.is_holiday(d):
-            saturdays.append(d)
-        d += timedelta(days=1)
-    return saturdays
+def get_target_saturdays(year: int, month: int, excluded=None, extra=None) -> list[date]:
+    """指定月の土曜日を取得（祝日除外）— scheduling_utils の共通関数を利用"""
+    return _get_target_saturdays_base(year, month, excluded=excluded, extra=extra)
 
 
 def get_clinic_dates(clinic: dict, saturdays: list[date]) -> list[date]:
