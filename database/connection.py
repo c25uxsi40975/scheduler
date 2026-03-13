@@ -26,9 +26,10 @@ def _safe_json_loads(val, default=None):
     return default
 
 
-# ---- スプレッドシート接続（2系統） ----
+# ---- スプレッドシート接続（3系統: マスタ / 土曜運用 / 平日セクション別） ----
 
-_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_", "平日希望_", "平日スケジュール_", "シフト交換_")
+# 土曜運用シートのプレフィクス（平日系はセクション別SSへルーティング）
+_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_")
 
 
 def _is_operational_sheet(name: str) -> bool:
@@ -96,6 +97,21 @@ def _clear_data_cache():
     """データベース読み取りキャッシュをクリア"""
     for func in _CACHED_FUNCTIONS:
         func.clear()
+    _clear_weekday_ss_cache()
+
+
+def _clear_weekday_ss_cache(section: str = None):
+    """平日セクション別スプレッドシートキャッシュをクリア
+
+    section を指定すると該当セクションのみクリア。
+    None の場合は全セクションをクリア。
+    """
+    if section:
+        _weekday_spreadsheet_cache.pop(section, None)
+        _ws_cache_weekday.pop(section, None)
+    else:
+        _weekday_spreadsheet_cache.clear()
+        _ws_cache_weekday.clear()
 
 
 def _col_letter(col_idx):
@@ -105,13 +121,60 @@ def _col_letter(col_idx):
 
 _ws_cache_master = {}
 _ws_cache_operational = {}
+_weekday_spreadsheet_cache = {}  # {section: Spreadsheet}
+_ws_cache_weekday = {}           # {section: {sheet_name: ws}}
 
 
 def _get_ws_cache(sheet_name: str) -> dict:
-    """シート名に対応するキャッシュを返す"""
+    """シート名に対応するキャッシュを返す（マスタ or 土曜運用）"""
     if _is_operational_sheet(sheet_name):
         return _ws_cache_operational
     return _ws_cache_master
+
+
+def _get_weekday_spreadsheet(section: str):
+    """セクション別の平日運用スプレッドシートを取得（キャッシュ付き）"""
+    if section in _weekday_spreadsheet_cache:
+        return _weekday_spreadsheet_cache[section]
+    # 平日外勤設定から spreadsheet_key を取得
+    ws = _get_sheet("平日外勤設定")
+    records = _get_all_records(ws)
+    ss_key = ""
+    for r in records:
+        if str(r.get("section", "")) == section:
+            ss_key = str(r.get("spreadsheet_key", "")).strip()
+            break
+    if not ss_key:
+        raise ValueError(
+            f"セクション '{section}' のスプレッドシートキーが未設定です。"
+            "主管理者画面でスプレッドシートIDを設定してください。"
+        )
+    gc = _get_gspread_client()
+    ss = gc.open_by_key(ss_key)
+    _weekday_spreadsheet_cache[section] = ss
+    return ss
+
+
+def _get_weekday_sheet(name: str, section: str):
+    """セクション別の平日運用シートを取得（キャッシュ+リトライ付き）"""
+    cache = _ws_cache_weekday.setdefault(section, {})
+    if name in cache:
+        return cache[name]
+    ss = _get_weekday_spreadsheet(section)
+    try:
+        ws = _retry(ss.worksheet, name)
+    except gspread.WorksheetNotFound:
+        ws = ss.add_worksheet(title=name, rows=100, cols=20)
+    cache[name] = ws
+    return ws
+
+
+def _init_weekday_sheet(name: str, section: str, headers: list):
+    """セクション別の平日運用シートを初期化（ヘッダー設定付き）"""
+    ws = _get_weekday_sheet(name, section)
+    if not _retry(ws.row_values, 1):
+        ws.update([headers], "A1")
+    return ws
 
 
 def _get_sheet(name):
@@ -212,6 +275,7 @@ SHEET_HEADERS = {
     "平日外勤設定": [
         "id", "section", "clinic_name", "days_of_week",
         "assigned_doctors", "subadmin_doctors", "is_active", "created_at",
+        "spreadsheet_key",
     ],
     "平日スロットマスタ": [
         "id", "section", "slot_name", "day_of_week",
@@ -260,6 +324,27 @@ def init_db():
                 if missing:
                     new_headers = existing_headers + missing
                     ws.update([new_headers], "A1")
+    # 平日セクション別スプレッドシートのキャッシュ構築
+    ws_weekday_cfg = _ws_cache_master.get("平日外勤設定")
+    if ws_weekday_cfg:
+        try:
+            cfg_records = _retry(ws_weekday_cfg.get_all_records)
+            gc = _get_gspread_client()
+            for cfg in cfg_records:
+                sec = str(cfg.get("section", "")).strip()
+                ss_key = str(cfg.get("spreadsheet_key", "")).strip()
+                if sec and ss_key:
+                    try:
+                        ss = gc.open_by_key(ss_key)
+                        _weekday_spreadsheet_cache[sec] = ss
+                        _ws_cache_weekday[sec] = {}
+                        for ws_item in _retry(ss.worksheets):
+                            _ws_cache_weekday[sec][ws_item.title] = ws_item
+                    except Exception:
+                        pass  # SS未作成やアクセス権なしの場合はスキップ
+        except Exception:
+            pass
+
     _db_initialized = True
 
     # 既存医員のマイグレーション（バッチ更新）

@@ -10,7 +10,8 @@ from database.connection import (
     _get_sheet, _get_all_records, _find_row_index, _next_id,
     _col_letter, _retry, _clear_data_cache, _register_cached,
     _safe_json_loads, _sanitize_cell_value,
-    _init_monthly_sheet, _ws_cache_operational,
+    _get_weekday_sheet, _init_weekday_sheet, _clear_weekday_ss_cache,
+    _get_gspread_client,
 )
 from database.master import get_doctors
 
@@ -52,6 +53,7 @@ def get_weekday_configs():
         r["assigned_doctors"] = _safe_json_loads(r.get("assigned_doctors", "[]"))
         r["subadmin_doctors"] = _safe_json_loads(r.get("subadmin_doctors", "[]"))
         r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
+        r["spreadsheet_key"] = str(r.get("spreadsheet_key", "")).strip()
         result.append(r)
     return result
 
@@ -68,7 +70,7 @@ def get_weekday_config_by_section(section: str):
 def add_weekday_config(clinic_name: str, days_of_week: list[int],
                        assigned_doctors: list[int] = None,
                        subadmin_doctors: list[int] = None):
-    """平日外勤セクションを追加"""
+    """平日外勤セクションを追加（スプレッドシートを自動作成）"""
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
     # section キーを自動生成
@@ -77,6 +79,11 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int],
     while f"weekday_{idx}" in existing_sections:
         idx += 1
     section = f"weekday_{idx}"
+
+    # スプレッドシートを自動作成
+    gc = _get_gspread_client()
+    ss = gc.create(f"外勤調整_平日_{clinic_name}")
+    spreadsheet_key = ss.id
 
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -90,6 +97,7 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int],
         "subadmin_doctors": json.dumps(subadmin_doctors or []),
         "is_active": 1,
         "created_at": now,
+        "spreadsheet_key": spreadsheet_key,
     }
     row = [values.get(h, "") for h in actual_headers]
     ws.append_row(row)
@@ -121,16 +129,36 @@ def update_weekday_config(section: str, **kwargs):
     if updates:
         _retry(ws.batch_update, updates)
     _clear_data_cache()
+    if "spreadsheet_key" in kwargs:
+        _clear_weekday_ss_cache(section)
 
 
 def delete_weekday_config(section: str):
-    """平日外勤セクションを削除"""
+    """平日外勤セクションを削除（関連スロット・対象日もカスケード削除）"""
+    # 関連スロットを削除
+    slots = get_weekday_slots(section)
+    for slot in slots:
+        delete_weekday_slot(slot["id"])
+
+    # 関連対象日を削除
+    ws_td = _get_sheet("スケジュール対象日")
+    td_records = _get_all_records(ws_td)
+    rows_to_delete = []
+    for i, r in enumerate(td_records):
+        if str(r.get("section", "")) == section:
+            rows_to_delete.append(i + 2)
+    for row in sorted(rows_to_delete, reverse=True):
+        ws_td.delete_rows(row)
+
+    # セクション設定行を削除
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
     for i, r in enumerate(records):
         if r.get("section") == section:
             ws.delete_rows(i + 2)
             break
+
+    _clear_weekday_ss_cache(section)
     _clear_data_cache()
 
 
@@ -407,7 +435,7 @@ _weekday_pref_headers = [
 def _get_weekday_pref_sheet(section: str):
     """セクション別の平日希望シートを取得/作成"""
     name = f"平日希望_{section}"
-    return _init_monthly_sheet(name, _weekday_pref_headers)
+    return _init_weekday_sheet(name, section, _weekday_pref_headers)
 
 
 @_register_cached
@@ -469,17 +497,17 @@ _weekday_sched_headers = [
 ]
 
 
-def _get_weekday_sched_sheet(year_month: str):
-    """月別平日スケジュールシートを取得/作成"""
+def _get_weekday_sched_sheet(year_month: str, section: str):
+    """月別平日スケジュールシートを取得/作成（セクション別SS）"""
     name = f"平日スケジュール_{year_month}"
-    return _init_monthly_sheet(name, _weekday_sched_headers)
+    return _init_weekday_sheet(name, section, _weekday_sched_headers)
 
 
 @_register_cached
 @st.cache_data(ttl=120)
-def get_weekday_schedule(year_month: str, section: str = None):
+def get_weekday_schedule(year_month: str, section: str):
     """平日スケジュールを取得"""
-    ws = _get_weekday_sched_sheet(year_month)
+    ws = _get_weekday_sched_sheet(year_month, section)
     records = _get_all_records(ws)
     result = []
     for r in records:
@@ -505,7 +533,7 @@ def batch_save_weekday_assignments(year_month: str, section: str, assignments: d
         section: セクションキー
         assignments: {date_str: {slot_id: [doctor_id, ...]}}
     """
-    ws = _get_weekday_sched_sheet(year_month)
+    ws = _get_weekday_sched_sheet(year_month, section)
     records = _get_all_records(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     doctors = get_doctors(active_only=False)
@@ -548,9 +576,9 @@ def batch_save_weekday_assignments(year_month: str, section: str, assignments: d
     _clear_data_cache()
 
 
-def delete_weekday_assignment(year_month: str, assignment_id: int):
+def delete_weekday_assignment(year_month: str, section: str, assignment_id: int):
     """平日スケジュールの1行を削除"""
-    ws = _get_weekday_sched_sheet(year_month)
+    ws = _get_weekday_sched_sheet(year_month, section)
     row_idx = _find_row_index(ws, 1, assignment_id)
     if row_idx:
         ws.delete_rows(row_idx)
@@ -567,10 +595,10 @@ _swap_headers = [
 ]
 
 
-def _get_swap_sheet(year_month: str):
-    """月別シフト交換シートを取得/作成"""
+def _get_swap_sheet(year_month: str, section: str):
+    """月別シフト交換シートを取得/作成（セクション別SS）"""
     name = f"シフト交換_{year_month}"
-    return _init_monthly_sheet(name, _swap_headers)
+    return _init_weekday_sheet(name, section, _swap_headers)
 
 
 def execute_swap(year_month: str, section: str,
@@ -581,7 +609,7 @@ def execute_swap(year_month: str, section: str,
     1. 平日スケジュールシートで2つの割り当てを入れ替え
     2. シフト交換シートにログを記録
     """
-    ws_sched = _get_weekday_sched_sheet(year_month)
+    ws_sched = _get_weekday_sched_sheet(year_month, section)
     records = _get_all_records(ws_sched)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     doctors = get_doctors(active_only=False)
@@ -621,7 +649,7 @@ def execute_swap(year_month: str, section: str,
         _retry(ws_sched.batch_update, updates)
 
     # シフト交換ログに記録
-    ws_swap = _get_swap_sheet(year_month)
+    ws_swap = _get_swap_sheet(year_month, section)
     swap_id = _next_id(ws_swap)
     swap_headers = _retry(ws_swap.row_values, 1)
     swap_values = {
@@ -644,9 +672,9 @@ def execute_swap(year_month: str, section: str,
 
 @_register_cached
 @st.cache_data(ttl=120)
-def get_swap_history(year_month: str, section: str = None):
+def get_swap_history(year_month: str, section: str):
     """シフト交換履歴を取得"""
-    ws = _get_swap_sheet(year_month)
+    ws = _get_swap_sheet(year_month, section)
     records = _get_all_records(ws)
     result = []
     for r in records:
