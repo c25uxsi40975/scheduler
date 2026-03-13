@@ -82,6 +82,13 @@ function doPost(e) {
     } else if (data.action === "password_reset_code") {
       sendPasswordResetCode(data.account_name, data.doctor_email, data.reset_code);
 
+    // スプレッドシート作成
+    } else if (data.action === "create_spreadsheet") {
+      var result = createSpreadsheetForSection(data.title, data.share_with);
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: "ok", spreadsheet_id: result.id, url: result.url })
+      ).setMimeType(ContentService.MimeType.JSON);
+
     // 平日関連
     } else if (data.action === "weekday_schedule_confirmed") {
       sendWeekdayScheduleConfirmed(data);
@@ -221,6 +228,22 @@ function getClinicMap(ss) {
     map[String(data[i][colId])] = String(data[i][colName]);
   }
   return map;
+}
+
+// ---- スプレッドシート作成 ----
+
+/**
+ * 平日セクション用スプレッドシートを作成し、サービスアカウントに編集権限を付与
+ * @param {string} title - スプレッドシート名
+ * @param {string} shareWith - 共有先メールアドレス（サービスアカウント）
+ * @returns {{id: string, url: string}}
+ */
+function createSpreadsheetForSection(title, shareWith) {
+  var ss = SpreadsheetApp.create(title);
+  if (shareWith) {
+    ss.addEditor(shareWith);
+  }
+  return { id: ss.getId(), url: ss.getUrl() };
 }
 
 // ---- テスト用 ----

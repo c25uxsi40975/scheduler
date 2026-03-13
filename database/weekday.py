@@ -4,6 +4,7 @@
 """
 import json
 from datetime import datetime
+import requests
 import streamlit as st
 
 from database.connection import (
@@ -64,6 +65,24 @@ def get_weekday_config_by_section(section: str):
         if c["section"] == section:
             return c
     return None
+
+
+def create_weekday_spreadsheet(title: str) -> str:
+    """GAS Web App経由で平日セクション用スプレッドシートを作成し、IDを返す"""
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        raise RuntimeError("gas_webapp_url が Secrets に設定されていません")
+    sa_email = st.secrets["gcp_service_account"]["client_email"]
+    resp = requests.post(gas_url, json={
+        "action": "create_spreadsheet",
+        "title": title,
+        "share_with": sa_email,
+    }, timeout=30)
+    resp.raise_for_status()
+    result = resp.json()
+    if result.get("status") != "ok":
+        raise RuntimeError(f"GAS エラー: {result.get('message', '不明')}")
+    return result["spreadsheet_id"]
 
 
 def add_weekday_config(clinic_name: str, days_of_week: list[int],
