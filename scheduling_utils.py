@@ -297,6 +297,31 @@ def solve_weekday_schedule(
                 monthly_dev_plus[(doc_id, ym)] = dp
                 monthly_dev_minus[(doc_id, ym)] = dm
 
+    # 週内重複ペナルティ: 同じ週に同じ医員が複数回入るのを抑制
+    from collections import defaultdict as _defaultdict
+    week_dates = _defaultdict(list)
+    for dt in date_slots:
+        # ISO週番号でグループ化
+        week_dates[dt.isocalendar()[:2]].append(dt)
+
+    week_penalty = []
+    for week_key, w_dates in week_dates.items():
+        if len(w_dates) <= 1:
+            continue
+        for doc_id in doc_ids:
+            week_vars = []
+            for dt in w_dates:
+                for slot in date_slots[dt]:
+                    key = (doc_id, dt.isoformat(), slot["id"])
+                    if key in x:
+                        week_vars.append(x[key])
+            if len(week_vars) > 1:
+                # 週内合計が2以上ならペナルティ（超過分のみ）
+                wp = pulp.LpVariable(f"wpen_{doc_id}_{week_key[0]}_{week_key[1]}", lowBound=0)
+                prob += pulp.lpSum(week_vars) - 1 <= wp, \
+                    f"week_over_{doc_id}_{week_key[0]}_{week_key[1]}"
+                week_penalty.append(wp)
+
     # 避けたい日ペナルティ
     avoid_penalty = []
     for doc_id in doc_ids:
@@ -309,11 +334,13 @@ def solve_weekday_schedule(
                     if key in x:
                         avoid_penalty.append(x[key])
 
-    # 目標: 期間全体の均一化（重み10） + 月別均一化（重み5） + 避けたい日ペナルティ（重み1）
+    # 目標: 期間全体の均一化（重み10） + 月別均一化（重み5）
+    #        + 週内重複回避（重み3） + 避けたい日ペナルティ（重み1）
     prob += (
         10 * pulp.lpSum(dev_plus[d] + dev_minus[d] for d in doc_ids)
         + 5 * pulp.lpSum(monthly_dev_plus[k] + monthly_dev_minus[k]
                          for k in monthly_dev_plus)
+        + 3 * pulp.lpSum(week_penalty)
         + pulp.lpSum(avoid_penalty)
     )
 
