@@ -834,12 +834,15 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
             st.session_state["_toast_msg"] = "スケジュール案を生成しました。内容を確認して確定してください。"
             st.rerun()
 
+    doc_ids = [d["id"] for d in assigned_doctors]
+    doc_options = [0] + doc_ids
+
     # ---- プレビュー表示 ----
     preview_result = st.session_state.get(preview_key)
     if preview_result:
         st.markdown("---")
         st.subheader("生成プレビュー")
-        st.info("内容を確認し、問題なければ「確定して保存」を押してください。")
+        st.info("カレンダー上で割り当てを編集できます。確認後「確定して保存」を押してください。")
 
         # プレビューのアサイン状況サマリ
         _render_assignment_summary(preview_result, assigned_doctors, doc_map, active_slots,
@@ -848,16 +851,23 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         # NG日・避けたい日の警告
         _render_preview_warnings(preview_result, assigned_doctors, doc_map, prefs)
 
-        # プレビューテーブル表示
-        _render_preview_table(preview_result, target_dates, active_slots,
-                              all_slot_overrides, doc_map)
+        # カレンダー形式で編集可能なプレビュー
+        _render_calendar_editor(
+            preview_result, target_dates, active_slots, all_slot_overrides,
+            doc_map, doc_options, section, f"prev_{section}", days_of_week,
+        )
 
         # 確定 / 破棄ボタン
         btn_cols = st.columns(2)
         with btn_cols[0]:
             if st.button("確定して保存", type="primary", key=f"confirm_preview_{section}"):
+                # カレンダーのselectboxから最新の値を読み取り
+                final_result = _collect_calendar_result(
+                    target_dates, active_slots, all_slot_overrides,
+                    f"prev_{section}",
+                )
                 for ym in selected_months:
-                    month_result = {ds: slots_map for ds, slots_map in preview_result.items()
+                    month_result = {ds: slots_map for ds, slots_map in final_result.items()
                                    if ds.startswith(ym)}
                     if month_result:
                         batch_save_weekday_assignments(ym, section, month_result)
@@ -883,78 +893,23 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     st.markdown("---")
 
-    # ---- 月ごとの手動編集（既存スケジュール） ----
+    # ---- スケジュール編集（既存） ----
     st.write("**スケジュール編集**")
-    doc_ids = [d["id"] for d in assigned_doctors]
-    doc_options = [0] + doc_ids
-
-    def _doc_label(did):
-        if did == 0:
-            return "---"
-        return doc_map.get(did, str(did))
-
-    # 月ごとにexpanderで表示
-    for ym in selected_months:
-        month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
-        if not month_dates:
-            continue
-
-        with st.expander(f"📅 {ym}", expanded=(len(selected_months) == 1)):
-            for dt in month_dates:
-                ds = dt.isoformat()
-                dow = dt.weekday()
-                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
-                if not day_slots:
-                    continue
-
-                st.write(f"**{dt.strftime('%m/%d(%a)')}**")
-                cols = st.columns(len(day_slots))
-                for j, slot in enumerate(day_slots):
-                    with cols[j]:
-                        ovr_req = all_slot_overrides.get((slot["id"], ds))
-                        if ovr_req is not None and ovr_req == 0:
-                            st.caption(f"{slot['slot_name']}: 休診")
-                            continue
-                        req_count = ovr_req if ovr_req is not None else slot["required_count"]
-                        if ovr_req is not None:
-                            st.caption(f"({req_count}人体制)")
-
-                        current_assigned = existing_map.get(ds, {}).get(slot["id"], [])
-                        for k in range(req_count):
-                            current_val = current_assigned[k] if k < len(current_assigned) else 0
-                            default_idx = doc_options.index(current_val) if current_val in doc_options else 0
-                            st.selectbox(
-                                f"{slot['slot_name']} #{k+1}",
-                                options=doc_options,
-                                index=default_idx,
-                                format_func=_doc_label,
-                                key=f"sched_{section}_{ds}_{slot['id']}_{k}",
-                            )
+    _render_calendar_editor(
+        existing_map, target_dates, active_slots, all_slot_overrides,
+        doc_map, doc_options, section, f"sched_{section}", days_of_week,
+    )
 
     if st.button("スケジュールを保存", type="primary", key=f"save_sched_{section}"):
+        final_result = _collect_calendar_result(
+            target_dates, active_slots, all_slot_overrides,
+            f"sched_{section}",
+        )
         for ym in selected_months:
-            month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
-            assignments = {}
-            for dt in month_dates:
-                ds = dt.isoformat()
-                dow = dt.weekday()
-                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
-                if not day_slots:
-                    continue
-                assignments[ds] = {}
-                for slot in day_slots:
-                    ovr_req = all_slot_overrides.get((slot["id"], ds))
-                    if ovr_req is not None and ovr_req == 0:
-                        continue
-                    req_count = ovr_req if ovr_req is not None else slot["required_count"]
-                    assigned = []
-                    for k in range(req_count):
-                        val = st.session_state.get(f"sched_{section}_{ds}_{slot['id']}_{k}", 0)
-                        if val and val != 0:
-                            assigned.append(val)
-                    assignments[ds][slot["id"]] = assigned
-            if assignments:
-                batch_save_weekday_assignments(ym, section, assignments)
+            month_result = {ds: slots_map for ds, slots_map in final_result.items()
+                           if ds.startswith(ym)}
+            if month_result:
+                batch_save_weekday_assignments(ym, section, month_result)
         st.success("スケジュールを保存しました")
         st.rerun()
 
@@ -1031,35 +986,104 @@ def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
                    + "、".join(avoid_hits))
 
 
-def _render_preview_table(preview_result: dict, target_dates: list,
-                           active_slots: list, slot_overrides: dict,
-                           doc_map: dict):
-    """プレビュー結果をテーブル形式で表示"""
-    # 月ごとにグループ化
+def _render_calendar_editor(
+    schedule_data: dict, target_dates: list, active_slots: list,
+    slot_overrides: dict, doc_map: dict, doc_options: list,
+    section: str, key_prefix: str, days_of_week: list,
+):
+    """カレンダー形式でスケジュールを表示・編集
+
+    Args:
+        schedule_data: {date_str: {slot_id: [doctor_id, ...]}}
+        doc_options: [0] + [doc_id, ...] (0=未割り当て)
+        key_prefix: selectboxキーの接頭辞（preview / edit で分離）
+        days_of_week: セクションの対象曜日リスト [0,2,4] etc.
+    """
+    sorted_dow = sorted(days_of_week)
+    dow_labels = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
+
+    def _doc_label(did):
+        if did == 0:
+            return "---"
+        return doc_map.get(did, str(did))
+
     months = sorted(set(dt.strftime("%Y-%m") for dt in target_dates))
 
     for ym in months:
-        month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
+        month_dates = sorted(dt for dt in target_dates if dt.strftime("%Y-%m") == ym)
         if not month_dates:
             continue
 
-        with st.expander(f"📅 {ym}", expanded=True):
-            for dt in month_dates:
-                ds = dt.isoformat()
-                dow = dt.weekday()
-                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
-                if not day_slots:
-                    continue
+        # 週ごとにグループ化
+        weeks = {}
+        for dt in month_dates:
+            week_num = dt.isocalendar()[1]
+            week_monday = dt - timedelta(days=dt.weekday())
+            weeks.setdefault((week_monday, week_num), {})[dt.weekday()] = dt
 
-                day_assignments = preview_result.get(ds, {})
-                parts = []
-                for slot in day_slots:
-                    ovr_req = slot_overrides.get((slot["id"], ds))
-                    if ovr_req is not None and ovr_req == 0:
-                        parts.append(f"{slot['slot_name']}: 休診")
-                        continue
-                    assigned = day_assignments.get(slot["id"], [])
-                    names = [doc_map.get(did, str(did)) for did in assigned]
-                    parts.append(f"{slot['slot_name']}: {', '.join(names) if names else '---'}")
+        with st.expander(f"{ym}", expanded=True):
+            # ヘッダー行
+            header_cols = st.columns(len(sorted_dow))
+            for ci, dow in enumerate(sorted_dow):
+                header_cols[ci].markdown(f"**{dow_labels[dow]}**")
 
-                st.write(f"**{dt.strftime('%m/%d(%a)')}** — " + "　|　".join(parts))
+            for (week_monday, _), week_days in sorted(weeks.items()):
+                day_cols = st.columns(len(sorted_dow))
+                for ci, dow in enumerate(sorted_dow):
+                    with day_cols[ci]:
+                        if dow not in week_days:
+                            st.write("")
+                            continue
+                        dt = week_days[dow]
+                        ds = dt.isoformat()
+                        day_slots = [s for s in active_slots
+                                     if s.get("day_of_week") == dow and s.get("is_active", 1)]
+
+                        st.markdown(f"**{dt.strftime('%m/%d')}**")
+                        for slot in day_slots:
+                            ovr_req = slot_overrides.get((slot["id"], ds))
+                            if ovr_req is not None and ovr_req == 0:
+                                st.caption(f"{slot['slot_name']}: 休診")
+                                continue
+                            req_count = ovr_req if ovr_req is not None else int(slot.get("required_count", 1))
+                            current = schedule_data.get(ds, {}).get(slot["id"], [])
+                            label = slot["slot_name"] if len(day_slots) > 1 else ""
+                            for k in range(req_count):
+                                cur_val = current[k] if k < len(current) else 0
+                                idx = doc_options.index(cur_val) if cur_val in doc_options else 0
+                                sb_label = f"{label} #{k+1}" if label else f"#{k+1}" if req_count > 1 else slot["slot_name"]
+                                st.selectbox(
+                                    sb_label,
+                                    options=doc_options,
+                                    index=idx,
+                                    format_func=_doc_label,
+                                    key=f"{key_prefix}_{ds}_{slot['id']}_{k}",
+                                    label_visibility="collapsed" if not label and req_count == 1 else "visible",
+                                )
+                        st.markdown("---")
+
+
+def _collect_calendar_result(target_dates: list, active_slots: list,
+                              slot_overrides: dict, key_prefix: str) -> dict:
+    """カレンダーエディタのselectbox値からスケジュール結果を収集"""
+    result = {}
+    for dt in target_dates:
+        ds = dt.isoformat()
+        dow = dt.weekday()
+        day_slots = [s for s in active_slots
+                     if s.get("day_of_week") == dow and s.get("is_active", 1)]
+        if not day_slots:
+            continue
+        result[ds] = {}
+        for slot in day_slots:
+            ovr_req = slot_overrides.get((slot["id"], ds))
+            if ovr_req is not None and ovr_req == 0:
+                continue
+            req_count = ovr_req if ovr_req is not None else int(slot.get("required_count", 1))
+            assigned = []
+            for k in range(req_count):
+                val = st.session_state.get(f"{key_prefix}_{ds}_{slot['id']}_{k}", 0)
+                if val and val != 0:
+                    assigned.append(val)
+            result[ds][slot["id"]] = assigned
+    return result
