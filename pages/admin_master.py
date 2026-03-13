@@ -12,7 +12,6 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
     # 平日外勤
     get_weekday_configs, add_weekday_config, update_weekday_config, delete_weekday_config,
-    set_subadmin_password, is_subadmin_password_set,
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,
 )
@@ -971,10 +970,11 @@ def render(target_month, year, month):
             _all_docs_sec = get_doctors()
             _doc_map_sec = build_display_name_map(_all_docs_sec)
             assigned_names = ", ".join(_doc_map_sec.get(did, "?") for did in assigned) if assigned else "未設定"
-            pw_set = is_subadmin_password_set(section)
+            subadmins = cfg.get("subadmin_doctors", [])
+            subadmin_names = ", ".join(_doc_map_sec.get(did, "?") for did in subadmins) if subadmins else "未設定"
 
             with st.container(border=True):
-                st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　PW: {'設定済' if pw_set else '未設定'}")
+                st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　副管理者: {subadmin_names}")
 
                 bc1, bc2, bc3, bc4 = st.columns(4)
                 with bc1:
@@ -990,8 +990,8 @@ def render(target_month, year, month):
                     if st.button("編集", key=f"wk_edit_{section}", use_container_width=True):
                         st.session_state[f"wk_editing_{section}"] = True
                 with bc3:
-                    if st.button("副管理者PW", key=f"wk_pw_{section}", use_container_width=True):
-                        st.session_state[f"wk_setting_pw_{section}"] = True
+                    if st.button("副管理者設定", key=f"wk_subadmin_{section}", use_container_width=True):
+                        st.session_state[f"wk_setting_subadmin_{section}"] = True
                 with bc4:
                     if st.button("削除", key=f"wk_del_{section}", type="secondary", use_container_width=True):
                         st.session_state[f"wk_confirm_del_{section}"] = True
@@ -1039,26 +1039,34 @@ def render(target_month, year, month):
                             st.session_state.pop(f"wk_editing_{section}", None)
                             st.rerun()
 
-            # 副管理者パスワード設定
-            if st.session_state.get(f"wk_setting_pw_{section}"):
-                with st.form(f"wk_pw_form_{section}"):
-                    pw1 = st.text_input("パスワード", type="password", key=f"wk_pw1_{section}")
-                    pw2 = st.text_input("パスワード（確認）", type="password", key=f"wk_pw2_{section}")
+            # 副管理者設定（医員を最大2名選択）
+            if st.session_state.get(f"wk_setting_subadmin_{section}"):
+                with st.form(f"wk_subadmin_form_{section}"):
+                    st.caption("副管理者を最大2名まで指定できます")
+                    _all_docs_sub = get_doctors()
+                    _doc_map_sub = build_display_name_map(_all_docs_sub)
+                    _doc_ids_sub = [d["id"] for d in _all_docs_sub]
+                    current_subadmins = cfg.get("subadmin_doctors", [])
+                    edit_subadmins = st.multiselect(
+                        "副管理者",
+                        options=_doc_ids_sub,
+                        default=[did for did in current_subadmins if did in _doc_ids_sub],
+                        format_func=lambda x: _doc_map_sub.get(x, "?"),
+                        key=f"wk_subadmin_sel_{section}",
+                    )
                     fc1, fc2 = st.columns(2)
                     with fc1:
-                        if st.form_submit_button("設定"):
-                            if not pw1:
-                                st.error("パスワードを入力してください")
-                            elif pw1 != pw2:
-                                st.error("パスワードが一致しません")
+                        if st.form_submit_button("保存"):
+                            if len(edit_subadmins) > 2:
+                                st.error("副管理者は最大2名までです")
                             else:
-                                set_subadmin_password(section, pw1)
-                                st.session_state.pop(f"wk_setting_pw_{section}", None)
-                                st.success(f"「{cfg['clinic_name']}」の副管理者パスワードを設定しました")
+                                update_weekday_config(section, subadmin_doctors=edit_subadmins)
+                                st.session_state.pop(f"wk_setting_subadmin_{section}", None)
+                                st.session_state["_toast_msg"] = f"「{cfg['clinic_name']}」の副管理者を設定しました"
                                 st.rerun()
                     with fc2:
                         if st.form_submit_button("キャンセル"):
-                            st.session_state.pop(f"wk_setting_pw_{section}", None)
+                            st.session_state.pop(f"wk_setting_subadmin_{section}", None)
                             st.rerun()
 
             # 削除確認

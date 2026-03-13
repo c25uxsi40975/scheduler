@@ -211,7 +211,7 @@ SHEET_HEADERS = {
     # ---- 平日外勤マスタ ----
     "平日外勤設定": [
         "id", "section", "clinic_name", "days_of_week",
-        "assigned_doctors", "is_active", "created_at",
+        "assigned_doctors", "subadmin_doctors", "is_active", "created_at",
     ],
     "平日スロットマスタ": [
         "id", "section", "slot_name", "day_of_week",

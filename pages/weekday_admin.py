@@ -4,6 +4,7 @@
 主管理者も admin_type でセクション指定してアクセス可能
 """
 import json
+import requests
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
 import streamlit as st
@@ -813,25 +814,69 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
                                target_dates, all_slot_overrides)
 
+    preview_key = f"wkadm_preview_{section}"
+
     # 自動生成ボタン
-    if st.button("自動生成", type="primary", key=f"auto_gen_{section}"):
+    if st.button("スケジュール案を生成", type="primary", key=f"auto_gen_{section}"):
         result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
                                         slot_overrides=all_slot_overrides)
         if result is None:
             st.error("条件を満たすスケジュールが見つかりませんでした。制約を確認してください。")
         else:
-            # 月ごとに分割して保存
-            for ym in selected_months:
-                month_result = {ds: slots_map for ds, slots_map in result.items()
-                               if ds.startswith(ym)}
-                if month_result:
-                    batch_save_weekday_assignments(ym, section, month_result)
-            st.success("スケジュールを自動生成しました")
+            st.session_state[preview_key] = result
+            st.session_state["_toast_msg"] = "スケジュール案を生成しました。内容を確認して確定してください。"
             st.rerun()
+
+    # ---- プレビュー表示 ----
+    preview_result = st.session_state.get(preview_key)
+    if preview_result:
+        st.markdown("---")
+        st.subheader("生成プレビュー")
+        st.info("内容を確認し、問題なければ「確定して保存」を押してください。")
+
+        # プレビューのアサイン状況サマリ
+        _render_assignment_summary(preview_result, assigned_doctors, doc_map, active_slots,
+                                   target_dates, all_slot_overrides)
+
+        # NG日・避けたい日の警告
+        _render_preview_warnings(preview_result, assigned_doctors, doc_map, prefs)
+
+        # プレビューテーブル表示
+        _render_preview_table(preview_result, target_dates, active_slots,
+                              all_slot_overrides, doc_map)
+
+        # 確定 / 破棄ボタン
+        btn_cols = st.columns(2)
+        with btn_cols[0]:
+            if st.button("確定して保存", type="primary", key=f"confirm_preview_{section}"):
+                for ym in selected_months:
+                    month_result = {ds: slots_map for ds, slots_map in preview_result.items()
+                                   if ds.startswith(ym)}
+                    if month_result:
+                        batch_save_weekday_assignments(ym, section, month_result)
+                # 確定通知
+                gas_url = st.secrets.get("gas_webapp_url", "")
+                if gas_url:
+                    try:
+                        requests.post(gas_url, json={
+                            "action": "weekday_schedule_confirmed",
+                            "section": section,
+                            "clinic_name": cfg["clinic_name"],
+                            "year_months": selected_months,
+                        }, timeout=10)
+                    except requests.RequestException:
+                        pass
+                del st.session_state[preview_key]
+                st.session_state["_toast_msg"] = "スケジュールを確定しました"
+                st.rerun()
+        with btn_cols[1]:
+            if st.button("破棄", key=f"discard_preview_{section}"):
+                del st.session_state[preview_key]
+                st.rerun()
 
     st.markdown("---")
 
-    # ---- 月ごとの手動編集 ----
+    # ---- 月ごとの手動編集（既存スケジュール） ----
     st.write("**スケジュール編集**")
     doc_ids = [d["id"] for d in assigned_doctors]
     doc_options = [0] + doc_ids
@@ -952,3 +997,62 @@ def _render_assignment_summary(existing_map: dict, assigned_doctors: list,
             else:
                 bar_color = "🔵" if diff < -1.5 else "🟡"
             st.write(f"{bar_color} **{name}**: {cnt}回　(平均比 {diff:+.1f})")
+
+
+def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
+                              doc_map: dict, prefs: list):
+    """プレビュー結果のNG日・避けたい日警告を表示"""
+    from scheduling_utils import is_ng_date, is_avoid_date
+
+    ng_hits = []
+    avoid_hits = []
+    for ds, slots_map in preview_result.items():
+        for sid, doc_ids in slots_map.items():
+            for did in doc_ids:
+                name = doc_map.get(did, str(did))
+                d_obj = date.fromisoformat(ds)
+                label = f"{name} → {d_obj.strftime('%m/%d')}"
+                if is_ng_date(did, ds, prefs):
+                    ng_hits.append(label)
+                if is_avoid_date(did, ds, prefs):
+                    avoid_hits.append(label)
+
+    if ng_hits:
+        st.error(f"NG日に割り当てがあります（{len(ng_hits)}件）: " + "、".join(ng_hits))
+    if avoid_hits:
+        st.warning(f"△（できれば避けたい）日に割り当てがあります（{len(avoid_hits)}件）: "
+                   + "、".join(avoid_hits))
+
+
+def _render_preview_table(preview_result: dict, target_dates: list,
+                           active_slots: list, slot_overrides: dict,
+                           doc_map: dict):
+    """プレビュー結果をテーブル形式で表示"""
+    # 月ごとにグループ化
+    months = sorted(set(dt.strftime("%Y-%m") for dt in target_dates))
+
+    for ym in months:
+        month_dates = [dt for dt in target_dates if dt.strftime("%Y-%m") == ym]
+        if not month_dates:
+            continue
+
+        with st.expander(f"📅 {ym}", expanded=True):
+            for dt in month_dates:
+                ds = dt.isoformat()
+                dow = dt.weekday()
+                day_slots = [s for s in active_slots if s["day_of_week"] == dow]
+                if not day_slots:
+                    continue
+
+                day_assignments = preview_result.get(ds, {})
+                parts = []
+                for slot in day_slots:
+                    ovr_req = slot_overrides.get((slot["id"], ds))
+                    if ovr_req is not None and ovr_req == 0:
+                        parts.append(f"{slot['slot_name']}: 休診")
+                        continue
+                    assigned = day_assignments.get(slot["id"], [])
+                    names = [doc_map.get(did, str(did)) for did in assigned]
+                    parts.append(f"{slot['slot_name']}: {', '.join(names) if names else '---'}")
+
+                st.write(f"**{dt.strftime('%m/%d(%a)')}** — " + "　|　".join(parts))

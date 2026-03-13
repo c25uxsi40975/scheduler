@@ -88,6 +88,8 @@ if "doctor_authenticated" not in st.session_state:
     st.session_state.doctor_authenticated = False
 if "doctor_section" not in st.session_state:
     st.session_state.doctor_section = None  # 医員の現在のセクション選択
+if "subadmin_doctor" not in st.session_state:
+    st.session_state.subadmin_doctor = None  # 副管理者としてログインした医員dict
 
 # ---- rerun 後のトースト通知 ----
 if "_toast_msg" in st.session_state:
@@ -105,6 +107,7 @@ def _check_session_timeout():
         st.session_state.role = None
         st.session_state.admin_authenticated = False
         st.session_state.admin_type = None
+        st.session_state.subadmin_doctor = None
         st.session_state.doctor_authenticated = False
         st.session_state.doctor_id = None
         st.session_state.doctor_section = None
@@ -208,14 +211,19 @@ def _show_admin_login():
         else:
             _admin_password_form("admin", verify_admin_password)
     else:
-        # 副管理者ログインフロー
-        if not is_subadmin_password_set(admin_type):
-            st.warning("副管理者パスワードが未設定です。主管理者に設定を依頼してください。")
+        # 副管理者ログインフロー（医員アカウントで認証）
+        subadmin_ids = cfg.get("subadmin_doctors", []) if cfg else []
+        if not subadmin_ids:
+            # フォールバック: 旧パスワード方式（移行期間）
+            if is_subadmin_password_set(admin_type):
+                _admin_password_form(
+                    f"subadmin_{admin_type}",
+                    lambda pw: verify_subadmin_password(admin_type, pw),
+                )
+            else:
+                st.warning("副管理者が未設定です。主管理者に設定を依頼してください。")
         else:
-            _admin_password_form(
-                f"subadmin_{admin_type}",
-                lambda pw: verify_subadmin_password(admin_type, pw),
-            )
+            _subadmin_login_form(admin_type, subadmin_ids)
 
     st.markdown("---")
     if st.button("← 戻る"):
@@ -240,6 +248,34 @@ def _admin_password_form(rate_limit_key: str, verify_fn):
                 record_failed_attempt(rate_limit_key)
                 log_event("admin_login_failed", rate_limit_key)
                 st.error("パスワードが正しくありません")
+
+
+def _subadmin_login_form(admin_type: str, subadmin_ids: list):
+    """副管理者ログインフォーム（医員アカウントで認証）"""
+    rate_key = f"subadmin_{admin_type}"
+    allowed, remaining = check_rate_limit(rate_key)
+    if not allowed:
+        st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
+        return
+
+    account = st.text_input("アカウント名", key="subadmin_account")
+    pw = st.text_input("パスワード", type="password", key="subadmin_pw")
+    if st.button("ログイン", type="primary"):
+        doctor = verify_doctor_by_account(account.strip(), pw)
+        if doctor and doctor["id"] in subadmin_ids:
+            reset_rate_limit(rate_key)
+            log_event("admin_login_success", rate_key, f"doctor_id={doctor['id']}")
+            st.session_state.admin_authenticated = True
+            st.session_state.subadmin_doctor = doctor
+            st.rerun()
+        else:
+            record_failed_attempt(rate_key)
+            if doctor:
+                log_event("admin_login_failed", rate_key, "not_subadmin")
+                st.error("このアカウントは副管理者として登録されていません")
+            else:
+                log_event("admin_login_failed", rate_key)
+                st.error("アカウント名またはパスワードが正しくありません")
 
 
 def _show_password_reset():

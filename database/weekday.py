@@ -50,6 +50,7 @@ def get_weekday_configs():
         r["clinic_name"] = str(r.get("clinic_name", ""))
         r["days_of_week"] = _safe_json_loads(r.get("days_of_week", "[]"))
         r["assigned_doctors"] = _safe_json_loads(r.get("assigned_doctors", "[]"))
+        r["subadmin_doctors"] = _safe_json_loads(r.get("subadmin_doctors", "[]"))
         r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
         result.append(r)
     return result
@@ -64,7 +65,9 @@ def get_weekday_config_by_section(section: str):
     return None
 
 
-def add_weekday_config(clinic_name: str, days_of_week: list[int], assigned_doctors: list[int] = None):
+def add_weekday_config(clinic_name: str, days_of_week: list[int],
+                       assigned_doctors: list[int] = None,
+                       subadmin_doctors: list[int] = None):
     """平日外勤セクションを追加"""
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
@@ -84,6 +87,7 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int], assigned_docto
         "clinic_name": _sanitize_cell_value(clinic_name),
         "days_of_week": json.dumps(days_of_week),
         "assigned_doctors": json.dumps(assigned_doctors or []),
+        "subadmin_doctors": json.dumps(subadmin_doctors or []),
         "is_active": 1,
         "created_at": now,
     }
@@ -107,7 +111,7 @@ def update_weekday_config(section: str, **kwargs):
     actual_headers = _retry(ws.row_values, 1)
     updates = []
     for key, val in kwargs.items():
-        if key in ("days_of_week", "assigned_doctors"):
+        if key in ("days_of_week", "assigned_doctors", "subadmin_doctors"):
             val = json.dumps(val)
         if key == "clinic_name":
             val = _sanitize_cell_value(val)

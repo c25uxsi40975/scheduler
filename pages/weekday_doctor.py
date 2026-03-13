@@ -11,7 +11,7 @@ from database import (
     get_doctors,
     get_weekday_config_by_section,
     get_active_target_dates,
-    get_weekday_preference, upsert_weekday_preference,
+    get_weekday_preference, get_weekday_preferences, upsert_weekday_preference,
     get_weekday_schedule,
     get_weekday_slots,
     get_weekday_open_section, get_weekday_deadline,
@@ -128,6 +128,46 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
                 avoid_dates=new_avoid,
                 free_text=free_text,
             )
+
+            # メール通知
+            gas_url = st.secrets.get("gas_webapp_url", "")
+            if gas_url:
+                # 希望入力確認メール
+                date_summary = ""
+                if new_ng:
+                    date_summary += f"NG日: {', '.join(new_ng)}\n"
+                if new_avoid:
+                    date_summary += f"避けたい日: {', '.join(new_avoid)}\n"
+                if not date_summary:
+                    date_summary = "すべて○"
+                try:
+                    requests.post(gas_url, json={
+                        "action": "weekday_preference_confirmed",
+                        "section": section,
+                        "clinic_name": cfg["clinic_name"],
+                        "doctor_name": doctor["name"],
+                        "doctor_email": doctor.get("email", ""),
+                        "date_summary": date_summary,
+                        "free_text": free_text or "",
+                    }, timeout=10)
+                except requests.RequestException:
+                    pass
+
+                # 全員入力完了チェック
+                try:
+                    assigned_ids = cfg.get("assigned_doctors", [])
+                    all_prefs = get_weekday_preferences(section)
+                    submitted_ids = {p["doctor_id"] for p in all_prefs}
+                    if assigned_ids and all(did in submitted_ids for did in assigned_ids):
+                        requests.post(gas_url, json={
+                            "action": "weekday_all_preferences_complete",
+                            "section": section,
+                            "clinic_name": cfg["clinic_name"],
+                            "doctor_count": len(assigned_ids),
+                        }, timeout=10)
+                except (requests.RequestException, Exception):
+                    pass
+
             st.success("希望を保存しました")
             st.rerun()
 
