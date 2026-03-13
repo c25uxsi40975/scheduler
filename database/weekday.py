@@ -133,6 +133,25 @@ def update_weekday_config(section: str, **kwargs):
         _clear_weekday_ss_cache(section)
 
 
+def _batch_delete_rows(ws, row_indices):
+    """複数行を一括削除（1-indexed, 逆順でAPIバッチ送信）"""
+    if not row_indices:
+        return
+    requests = []
+    for row in sorted(row_indices, reverse=True):
+        requests.append({
+            "deleteDimension": {
+                "range": {
+                    "sheetId": ws.id,
+                    "dimension": "ROWS",
+                    "startIndex": row - 1,  # 0-based
+                    "endIndex": row,
+                }
+            }
+        })
+    _retry(ws.spreadsheet.batch_update, {"requests": requests})
+
+
 def delete_weekday_config(section: str):
     """平日外勤セクションを削除（関連スロット・対象日もカスケード削除）"""
     # 関連スロットを削除
@@ -140,23 +159,27 @@ def delete_weekday_config(section: str):
     for slot in slots:
         delete_weekday_slot(slot["id"])
 
-    # 関連対象日を削除
+    # 関連対象日を削除（get_all_valuesで実行番号を正確に取得）
     ws_td = _get_sheet("スケジュール対象日")
-    td_records = _get_all_records(ws_td)
-    rows_to_delete = []
-    for i, r in enumerate(td_records):
-        if str(r.get("section", "")) == section:
-            rows_to_delete.append(i + 2)
-    for row in sorted(rows_to_delete, reverse=True):
-        _retry(ws_td.delete_rows, row)
+    all_vals = _retry(ws_td.get_all_values)
+    if len(all_vals) > 1:
+        headers = all_vals[0]
+        sec_col = headers.index("section") if "section" in headers else -1
+        if sec_col >= 0:
+            rows = [i + 1 for i, row in enumerate(all_vals[1:], start=1)
+                    if row[sec_col] == section]
+            _batch_delete_rows(ws_td, rows)
 
     # セクション設定行を削除
     ws = _get_sheet("平日外勤設定")
-    records = _get_all_records(ws)
-    for i, r in enumerate(records):
-        if r.get("section") == section:
-            _retry(ws.delete_rows, i + 2)
-            break
+    all_vals = _retry(ws.get_all_values)
+    if len(all_vals) > 1:
+        headers = all_vals[0]
+        sec_col = headers.index("section") if "section" in headers else -1
+        if sec_col >= 0:
+            rows = [i + 1 for i, row in enumerate(all_vals[1:], start=1)
+                    if row[sec_col] == section]
+            _batch_delete_rows(ws, rows)
 
     _clear_weekday_ss_cache(section)
     _clear_data_cache()
