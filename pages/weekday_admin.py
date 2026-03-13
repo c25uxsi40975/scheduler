@@ -819,7 +819,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     # ---- アサイン状況サマリ（既存スケジュール） ----
     _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
-                               target_dates, all_slot_overrides)
+                               target_dates, all_slot_overrides, selected_months)
 
     preview_key = f"wkadm_preview_{section}"
 
@@ -846,7 +846,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
         # プレビューのアサイン状況サマリ
         _render_assignment_summary(preview_result, assigned_doctors, doc_map, active_slots,
-                                   target_dates, all_slot_overrides)
+                                   target_dates, all_slot_overrides, selected_months)
 
         # NG日・避けたい日の警告
         _render_preview_warnings(preview_result, assigned_doctors, doc_map, prefs)
@@ -891,74 +891,157 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 del st.session_state[preview_key]
                 st.rerun()
 
-    st.markdown("---")
-
-    # ---- スケジュール編集（既存） ----
-    st.write("**スケジュール編集**")
-    _render_calendar_editor(
-        existing_map, target_dates, active_slots, all_slot_overrides,
-        doc_map, doc_options, section, f"sched_{section}", days_of_week,
-    )
-
-    if st.button("スケジュールを保存", type="primary", key=f"save_sched_{section}"):
-        final_result = _collect_calendar_result(
-            target_dates, active_slots, all_slot_overrides,
-            f"sched_{section}",
+    # ---- 確定済みスケジュール確認 ----
+    if existing_map:
+        st.markdown("---")
+        st.subheader("確定済みスケジュール")
+        _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
+                                   target_dates, all_slot_overrides, selected_months)
+        _render_month_tabs(
+            existing_map, target_dates, active_slots, all_slot_overrides,
+            doc_map, section, days_of_week, selected_months,
         )
-        for ym in selected_months:
-            month_result = {ds: slots_map for ds, slots_map in final_result.items()
-                           if ds.startswith(ym)}
-            if month_result:
-                batch_save_weekday_assignments(ym, section, month_result)
-        st.success("スケジュールを保存しました")
-        st.rerun()
 
 
 def _render_assignment_summary(existing_map: dict, assigned_doctors: list,
                                 doc_map: dict, active_slots: list,
-                                target_dates: list, slot_overrides: dict):
-    """医員ごとのアサイン回数サマリを表示"""
-    # 各医員のアサイン回数をカウント
+                                target_dates: list, slot_overrides: dict,
+                                selected_months: list):
+    """医員ごとのアサイン回数サマリを表示（期間全体＋月別）"""
+    import pandas as pd
+
+    n_docs = len(assigned_doctors)
+    if n_docs == 0:
+        return
+
+    # 期間全体のカウント
     count_map = {d["id"]: 0 for d in assigned_doctors}
+    # 月別カウント
+    month_count = {ym: {d["id"]: 0 for d in assigned_doctors} for ym in selected_months}
+
     for ds, slots_map in existing_map.items():
+        ym = ds[:7]
         for sid, doc_ids in slots_map.items():
             for did in doc_ids:
                 if did in count_map:
                     count_map[did] += 1
+                    if ym in month_count:
+                        month_count[ym][did] += 1
 
-    # 合計必要スロット数
+    # 合計必要スロット数（全体＋月別）
     total_needed = 0
+    month_needed = {ym: 0 for ym in selected_months}
     for dt in target_dates:
         dow = dt.weekday()
+        ym = dt.strftime("%Y-%m")
         for s in active_slots:
             if s["day_of_week"] == dow:
                 ovr = slot_overrides.get((s["id"], dt.isoformat()))
-                if ovr is not None:
-                    total_needed += max(ovr, 0)
-                else:
-                    total_needed += s["required_count"]
+                req = max(ovr, 0) if ovr is not None else s["required_count"]
+                total_needed += req
+                if ym in month_needed:
+                    month_needed[ym] += req
 
     total_assigned = sum(count_map.values())
-    n_docs = len(assigned_doctors)
     avg = total_needed / n_docs if n_docs > 0 else 0
 
     with st.expander("📊 アサイン状況", expanded=True):
         st.caption(f"必要総枠: {total_needed}　割当済: {total_assigned}　"
                    f"平均: {avg:.1f}回/人")
 
-        # 医員ごとの表示
+        # テーブル形式で表示
+        rows = []
         sorted_docs = sorted(assigned_doctors, key=lambda d: -count_map.get(d["id"], 0))
         for d in sorted_docs:
-            cnt = count_map.get(d["id"], 0)
-            name = doc_map.get(d["id"], str(d["id"]))
+            did = d["id"]
+            name = doc_map.get(did, str(did))
+            cnt = count_map[did]
             diff = cnt - avg
             if abs(diff) < 0.5:
-                bar_color = "🟢"
+                icon = "🟢"
             elif diff > 0:
-                bar_color = "🔴" if diff > 1.5 else "🟡"
+                icon = "🔴" if diff > 1.5 else "🟡"
             else:
-                bar_color = "🔵" if diff < -1.5 else "🟡"
-            st.write(f"{bar_color} **{name}**: {cnt}回　(平均比 {diff:+.1f})")
+                icon = "🔵" if diff < -1.5 else "🟡"
+            row = {"": f"{icon} {name}", "合計": cnt}
+            for ym in selected_months:
+                row[ym] = month_count[ym].get(did, 0)
+            rows.append(row)
+
+        # 合計行
+        total_row = {"": "**合計**", "合計": total_assigned}
+        avg_row = {"": "平均", "合計": f"{avg:.1f}"}
+        needed_row = {"": "必要枠", "合計": total_needed}
+        for ym in selected_months:
+            m_total = sum(month_count[ym].values())
+            m_needed = month_needed.get(ym, 0)
+            m_avg = m_needed / n_docs if n_docs > 0 else 0
+            total_row[ym] = m_total
+            avg_row[ym] = f"{m_avg:.1f}"
+            needed_row[ym] = m_needed
+        rows.append(needed_row)
+        rows.append(total_row)
+        rows.append(avg_row)
+
+        df = pd.DataFrame(rows)
+        st.dataframe(df, hide_index=True, use_container_width=True)
+
+
+def _render_month_tabs(
+    schedule_data: dict, target_dates: list, active_slots: list,
+    slot_overrides: dict, doc_map: dict, section: str,
+    days_of_week: list, selected_months: list,
+):
+    """月ごとのタブでスケジュールを閲覧表示（読み取り専用）"""
+    sorted_dow = sorted(days_of_week)
+    dow_labels = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
+
+    tabs = st.tabs(selected_months)
+    for tab, ym in zip(tabs, selected_months):
+        with tab:
+            month_dates = sorted(dt for dt in target_dates if dt.strftime("%Y-%m") == ym)
+            if not month_dates:
+                st.info("この月の対象日はありません")
+                continue
+
+            weeks = {}
+            for dt in month_dates:
+                week_num = dt.isocalendar()[1]
+                week_monday = dt - timedelta(days=dt.weekday())
+                weeks.setdefault((week_monday, week_num), {})[dt.weekday()] = dt
+
+            # ヘッダー
+            header_cols = st.columns(len(sorted_dow))
+            for ci, dow in enumerate(sorted_dow):
+                header_cols[ci].markdown(f"**{dow_labels[dow]}**")
+
+            for (week_monday, _), week_days in sorted(weeks.items()):
+                day_cols = st.columns(len(sorted_dow))
+                for ci, dow in enumerate(sorted_dow):
+                    with day_cols[ci]:
+                        if dow not in week_days:
+                            st.write("")
+                            continue
+                        dt = week_days[dow]
+                        ds = dt.isoformat()
+                        day_slots = [s for s in active_slots
+                                     if s.get("day_of_week") == dow and s.get("is_active", 1)]
+
+                        st.markdown(f"**{dt.strftime('%m/%d')}**")
+                        for slot in day_slots:
+                            ovr_req = slot_overrides.get((slot["id"], ds))
+                            if ovr_req is not None and ovr_req == 0:
+                                st.caption(f"{slot['slot_name']}: 休診")
+                                continue
+                            current = schedule_data.get(ds, {}).get(slot["id"], [])
+                            label = slot["slot_name"] if len(day_slots) > 1 else ""
+                            names = [doc_map.get(did, str(did)) for did in current if did]
+                            display = ", ".join(names) if names else "未割当"
+                            if label:
+                                st.caption(f"{label}: {display}")
+                            else:
+                                st.write(display)
+                        st.markdown("---")
 
 
 def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
