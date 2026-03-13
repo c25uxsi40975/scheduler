@@ -11,7 +11,6 @@ from database.connection import (
     _col_letter, _retry, _clear_data_cache, _register_cached,
     _safe_json_loads, _sanitize_cell_value,
     _get_weekday_sheet, _init_weekday_sheet, _clear_weekday_ss_cache,
-    _get_gspread_client,
 )
 from database.master import get_doctors
 
@@ -69,8 +68,9 @@ def get_weekday_config_by_section(section: str):
 
 def add_weekday_config(clinic_name: str, days_of_week: list[int],
                        assigned_doctors: list[int] = None,
-                       subadmin_doctors: list[int] = None):
-    """平日外勤セクションを追加（スプレッドシートを自動作成）"""
+                       subadmin_doctors: list[int] = None,
+                       spreadsheet_key: str = ""):
+    """平日外勤セクションを追加"""
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
     # section キーを自動生成
@@ -79,11 +79,6 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int],
     while f"weekday_{idx}" in existing_sections:
         idx += 1
     section = f"weekday_{idx}"
-
-    # スプレッドシートを自動作成
-    gc = _get_gspread_client()
-    ss = _retry(gc.create, f"外勤調整_平日_{clinic_name}")
-    spreadsheet_key = ss.id
 
     new_id = _next_id(ws)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

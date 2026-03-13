@@ -14,10 +14,28 @@ def render():
     st.subheader("平日外勤セクション管理")
     st.caption("平日外勤セクション（医院ごと）の作成・編集・副管理者設定")
 
+    # サービスアカウントのメールアドレスを取得
+    try:
+        _sa_email = st.secrets["gcp_service_account"]["client_email"]
+    except Exception:
+        _sa_email = "（設定から確認してください）"
+
     # 新規セクション追加
     with st.expander("セクションの追加", expanded=False):
+        st.markdown(
+            "**事前準備: スプレッドシートの作成**\n"
+            "1. Google Driveで空のスプレッドシートを作成（推奨名: `外勤調整_平日_○○医院`）\n"
+            f"2. スプレッドシートを以下のサービスアカウントに**編集者**として共有:\n"
+            f"   `{_sa_email}`\n"
+            "3. スプレッドシートのURLからキーをコピー\n"
+            "   `https://docs.google.com/spreadsheets/d/`**ここがキー**`/edit`"
+        )
         with st.form("add_weekday_section_form", clear_on_submit=True):
             new_clinic_name = st.text_input("医院名", placeholder="例: A医院")
+            new_ss_key = st.text_input(
+                "スプレッドシートキー",
+                placeholder="例: 1aBcDeFgHiJkLmNoPqRsTuVwXyZ...",
+            )
             day_options = list(DAY_NAMES.items())
             new_days = st.multiselect(
                 "曜日",
@@ -32,16 +50,20 @@ def render():
                 options=_doc_ids,
                 format_func=lambda x: _doc_map.get(x, "?"),
             )
-            st.info("スプレッドシートはセクション作成時に自動作成されます。")
             if st.form_submit_button("セクションを追加", use_container_width=True):
                 if not new_clinic_name.strip():
                     st.error("医院名を入力してください")
+                elif not new_ss_key.strip():
+                    st.error("スプレッドシートキーを入力してください")
                 elif not new_days:
                     st.error("曜日を1つ以上選択してください")
                 else:
                     try:
-                        add_weekday_config(new_clinic_name.strip(), new_days, new_assigned)
-                        st.success(f"「{new_clinic_name}」を追加しました（スプレッドシートを自動作成済み）")
+                        add_weekday_config(
+                            new_clinic_name.strip(), new_days, new_assigned,
+                            spreadsheet_key=new_ss_key.strip(),
+                        )
+                        st.success(f"「{new_clinic_name}」を追加しました")
                         st.rerun()
                     except Exception as e:
                         st.error(f"セクション追加に失敗しました: {e}")
