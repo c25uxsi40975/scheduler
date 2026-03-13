@@ -609,34 +609,33 @@ def _render_proxy_preference_form(doc_id: int, section: str,
         st.info("対象日がありません")
         return
 
+    # 一括操作用の別キー（data_editorのwidgetキーと分離）
+    bulk_key = f"proxy_bulk_{section}_{doc_id}"
+
     # ---- 一括操作ボタン ----
     st.caption("一括操作")
     # 全体
     gc1, gc2, gc3 = st.columns(3)
     with gc1:
         if st.button("全て ○", key=f"proxy_all_ok_{section}_{doc_id}", use_container_width=True):
-            for i, row in enumerate(rows):
-                for sn in all_slot_names:
-                    if date_slot_valid[i].get(sn):
-                        row[sn] = "○"
-            st.session_state[table_key] = {"edited_rows": {
+            st.session_state[bulk_key] = {
                 i: {sn: "○" for sn in all_slot_names if date_slot_valid[i].get(sn)}
                 for i in range(len(rows))
-            }}
+            }
             st.rerun()
     with gc2:
         if st.button("全て ×", key=f"proxy_all_ng_{section}_{doc_id}", use_container_width=True):
-            st.session_state[table_key] = {"edited_rows": {
+            st.session_state[bulk_key] = {
                 i: {sn: "×" for sn in all_slot_names if date_slot_valid[i].get(sn)}
                 for i in range(len(rows))
-            }}
+            }
             st.rerun()
     with gc3:
         if st.button("全て △", key=f"proxy_all_avoid_{section}_{doc_id}", use_container_width=True):
-            st.session_state[table_key] = {"edited_rows": {
+            st.session_state[bulk_key] = {
                 i: {sn: "△" for sn in all_slot_names if date_slot_valid[i].get(sn)}
                 for i in range(len(rows))
-            }}
+            }
             st.rerun()
 
     # スロット単位の操作
@@ -647,31 +646,38 @@ def _render_proxy_preference_form(doc_id: int, section: str,
             st.markdown(f"**{sn}**")
         with sc2:
             if st.button("○", key=f"proxy_slot_ok_{section}_{doc_id}_{sn}", use_container_width=True):
-                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                edits = dict(st.session_state.get(bulk_key, {}))
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "○"
-                st.session_state[table_key] = {"edited_rows": edits}
+                st.session_state[bulk_key] = edits
                 st.rerun()
         with sc3:
             if st.button("×", key=f"proxy_slot_ng_{section}_{doc_id}_{sn}", use_container_width=True):
-                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                edits = dict(st.session_state.get(bulk_key, {}))
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "×"
-                st.session_state[table_key] = {"edited_rows": edits}
+                st.session_state[bulk_key] = edits
                 st.rerun()
         with sc4:
             if st.button("-", key=f"proxy_slot_off_{section}_{doc_id}_{sn}",
                          use_container_width=True, help="無効化"):
-                edits = st.session_state.get(table_key, {}).get("edited_rows", {})
+                edits = dict(st.session_state.get(bulk_key, {}))
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "-"
-                st.session_state[table_key] = {"edited_rows": edits}
+                st.session_state[bulk_key] = edits
                 st.rerun()
 
     st.markdown("---")
+
+    # 一括操作の結果をDataFrameに反映
+    bulk_edits = st.session_state.pop(bulk_key, None)
+    if bulk_edits:
+        for i, col_vals in bulk_edits.items():
+            for col, val in col_vals.items():
+                rows[int(i)][col] = val
 
     df = pd.DataFrame(rows)
 
