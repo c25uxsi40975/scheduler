@@ -262,6 +262,41 @@ def solve_weekday_schedule(
         prob += count_vars[doc_id] - avg_count == dev_plus[doc_id] - dev_minus[doc_id], \
             f"dev_{doc_id}"
 
+    # 月別均一化: 各月内でも割り当てが偏らないようにする
+    from collections import defaultdict
+    month_dates = defaultdict(list)
+    for dt in date_slots:
+        month_dates[dt.strftime("%Y-%m")].append(dt)
+
+    monthly_dev_plus = {}
+    monthly_dev_minus = {}
+    if len(month_dates) > 1:
+        for ym, m_dates in month_dates.items():
+            # この月の必要スロット数を算出
+            month_total = 0
+            for dt in m_dates:
+                for slot in date_slots[dt]:
+                    ovr_req = slot_overrides.get((slot["id"], dt.isoformat()))
+                    if ovr_req is not None:
+                        month_total += ovr_req
+                    else:
+                        month_total += int(slot.get("required_count", 1))
+            month_avg = month_total / n_docs if n_docs > 0 else 0
+
+            for doc_id in doc_ids:
+                doc_month_total = []
+                for dt in m_dates:
+                    for slot in date_slots[dt]:
+                        key = (doc_id, dt.isoformat(), slot["id"])
+                        if key in x:
+                            doc_month_total.append(x[key])
+                m_count = pulp.lpSum(doc_month_total) if doc_month_total else 0
+                dp = pulp.LpVariable(f"mdev_p_{doc_id}_{ym}", lowBound=0)
+                dm = pulp.LpVariable(f"mdev_m_{doc_id}_{ym}", lowBound=0)
+                prob += m_count - month_avg == dp - dm, f"mdev_{doc_id}_{ym}"
+                monthly_dev_plus[(doc_id, ym)] = dp
+                monthly_dev_minus[(doc_id, ym)] = dm
+
     # 避けたい日ペナルティ
     avoid_penalty = []
     for doc_id in doc_ids:
@@ -274,9 +309,11 @@ def solve_weekday_schedule(
                     if key in x:
                         avoid_penalty.append(x[key])
 
-    # 目標: 頻度分散最小化（重み10） + 避けたい日ペナルティ（重み1）
+    # 目標: 期間全体の均一化（重み10） + 月別均一化（重み5） + 避けたい日ペナルティ（重み1）
     prob += (
         10 * pulp.lpSum(dev_plus[d] + dev_minus[d] for d in doc_ids)
+        + 5 * pulp.lpSum(monthly_dev_plus[k] + monthly_dev_minus[k]
+                         for k in monthly_dev_plus)
         + pulp.lpSum(avoid_penalty)
     )
 
