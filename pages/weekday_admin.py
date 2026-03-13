@@ -848,6 +848,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         _render_calendar_editor(
             preview_result, target_dates, active_slots, all_slot_overrides,
             doc_map, doc_options, section, f"prev_{section}", days_of_week,
+            prefs=prefs,
         )
 
         # selectboxの現在値からサマリ・警告を表示（手動編集をリアルタイム反映）
@@ -1071,6 +1072,7 @@ def _render_calendar_editor(
     schedule_data: dict, target_dates: list, active_slots: list,
     slot_overrides: dict, doc_map: dict, doc_options: list,
     section: str, key_prefix: str, days_of_week: list,
+    prefs: list | None = None,
 ):
     """カレンダー形式でスケジュールを表示・編集
 
@@ -1079,14 +1081,34 @@ def _render_calendar_editor(
         doc_options: [0] + [doc_id, ...] (0=未割り当て)
         key_prefix: selectboxキーの接頭辞（preview / edit で分離）
         days_of_week: セクションの対象曜日リスト [0,2,4] etc.
+        prefs: 希望データ（NG/△警告表示用、Noneなら警告なし）
     """
+    from scheduling_utils import is_ng_date, is_avoid_date
+
     sorted_dow = sorted(days_of_week)
     dow_labels = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
-    def _doc_label(did):
+    # 日付×医員のNG/△を事前計算（高速化）
+    ng_set = set()
+    avoid_set = set()
+    if prefs:
+        for pref in prefs:
+            did = pref.get("doctor_id")
+            for ds in (pref.get("ng_dates") or []):
+                ng_set.add((did, ds))
+            for ds in (pref.get("avoid_dates") or []):
+                avoid_set.add((did, ds))
+
+    def _doc_label_for_date(did, ds):
+        """日付に応じてNG/△マーク付きの表示名を返す"""
         if did == 0:
             return "---"
-        return doc_map.get(did, str(did))
+        name = doc_map.get(did, str(did))
+        if (did, ds) in ng_set:
+            return f"⛔ {name}【NG】"
+        if (did, ds) in avoid_set:
+            return f"⚠ {name}【△】"
+        return name
 
     months = sorted(set(dt.strftime("%Y-%m") for dt in target_dates))
 
@@ -1133,14 +1155,22 @@ def _render_calendar_editor(
                                 cur_val = current[k] if k < len(current) else 0
                                 idx = doc_options.index(cur_val) if cur_val in doc_options else 0
                                 sb_label = f"{label} #{k+1}" if label else f"#{k+1}" if req_count > 1 else slot["slot_name"]
-                                st.selectbox(
+                                # 日付固有のformat_funcでNG/△マークを表示
+                                _fmt = (lambda _ds: lambda did: _doc_label_for_date(did, _ds))(ds)
+                                selected = st.selectbox(
                                     sb_label,
                                     options=doc_options,
                                     index=idx,
-                                    format_func=_doc_label,
+                                    format_func=_fmt,
                                     key=f"{key_prefix}_{ds}_{slot['id']}_{k}",
                                     label_visibility="collapsed" if not label and req_count == 1 else "visible",
                                 )
+                                # 選択後の警告表示
+                                if selected and selected != 0 and prefs:
+                                    if (selected, ds) in ng_set:
+                                        st.caption("⛔ NG日です")
+                                    elif (selected, ds) in avoid_set:
+                                        st.caption("⚠ △希望日です")
                         st.markdown("---")
 
 
