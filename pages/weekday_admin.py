@@ -844,28 +844,26 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         st.subheader("生成プレビュー")
         st.info("カレンダー上で割り当てを編集できます。確認後「確定して保存」を押してください。")
 
-        # プレビューのアサイン状況サマリ
-        _render_assignment_summary(preview_result, assigned_doctors, doc_map, active_slots,
-                                   target_dates, all_slot_overrides, selected_months)
-
-        # NG日・避けたい日の警告
-        _render_preview_warnings(preview_result, assigned_doctors, doc_map, prefs)
-
-        # カレンダー形式で編集可能なプレビュー
+        # カレンダー形式で編集可能なプレビュー（先に描画してselectboxを登録）
         _render_calendar_editor(
             preview_result, target_dates, active_slots, all_slot_overrides,
             doc_map, doc_options, section, f"prev_{section}", days_of_week,
         )
 
+        # selectboxの現在値からサマリ・警告を表示（手動編集をリアルタイム反映）
+        current_result = _collect_calendar_result(
+            target_dates, active_slots, all_slot_overrides,
+            f"prev_{section}",
+        )
+        _render_assignment_summary(current_result, assigned_doctors, doc_map, active_slots,
+                                   target_dates, all_slot_overrides, selected_months)
+        _render_preview_warnings(current_result, assigned_doctors, doc_map, prefs)
+
         # 確定 / 破棄ボタン
         btn_cols = st.columns(2)
         with btn_cols[0]:
             if st.button("確定して保存", type="primary", key=f"confirm_preview_{section}"):
-                # カレンダーのselectboxから最新の値を読み取り
-                final_result = _collect_calendar_result(
-                    target_dates, active_slots, all_slot_overrides,
-                    f"prev_{section}",
-                )
+                final_result = current_result
                 for ym in selected_months:
                     month_result = {ds: slots_map for ds, slots_map in final_result.items()
                                    if ds.startswith(ym)}
