@@ -86,7 +86,7 @@ def add_doctor(last_name, first_name, account="", initial_password="aaaa1111"):
         "created_at": now, "max_assignments": 4, "must_change_pw": 1,
     }
     row = [values.get(h, "") for h in actual_headers]
-    ws.append_row(row)
+    _retry(ws.append_row, row)
     _clear_data_cache()
     return None
 
@@ -124,7 +124,7 @@ def delete_doctor(doc_id):
         if str(r.get("doctor_id", "")) == str(doc_id):
             rows_to_delete.append(i + 2)  # +2: ヘッダー + 0-index
     for row in sorted(rows_to_delete, reverse=True):
-        ws_aff.delete_rows(row)
+        _retry(ws_aff.delete_rows, row)
 
     # 希望シートから削除（キャッシュ済みシートを使用 — worksheets() API不要）
     for ws_name, ws in list(_ws_cache_operational.items()):
@@ -132,14 +132,14 @@ def delete_doctor(doc_id):
             recs = _get_all_records(ws)
             for i, r in enumerate(recs):
                 if str(r.get("doctor_id", "")) == str(doc_id):
-                    ws.delete_rows(i + 2)
+                    _retry(ws.delete_rows, i + 2)
                     break
 
     # 医員マスタから削除（マスタ）
     ws_doc = _get_sheet("医員マスタ")
     row_idx = _find_row_index(ws_doc, 1, doc_id)
     if row_idx:
-        ws_doc.delete_rows(row_idx)
+        _retry(ws_doc.delete_rows, row_idx)
     _clear_data_cache()
 
 
@@ -192,7 +192,7 @@ def add_clinic(name, fee=0, frequency="weekly", preferred_doctors=None, fixed_do
         "start_time": start_time, "end_time": end_time,
     }
     row = [values.get(h, "") for h in actual_headers]
-    ws.append_row(row)
+    _retry(ws.append_row, row)
     _clear_data_cache()
 
 
@@ -223,7 +223,7 @@ def delete_clinic(clinic_id):
         if str(r.get("clinic_id", "")) == str(clinic_id):
             rows_to_delete.append(i + 2)
     for row in sorted(rows_to_delete, reverse=True):
-        ws_aff.delete_rows(row)
+        _retry(ws_aff.delete_rows, row)
 
     # 日別設定から削除
     ws_ovr = _get_sheet("日別設定")
@@ -233,13 +233,13 @@ def delete_clinic(clinic_id):
         if str(r.get("clinic_id", "")) == str(clinic_id):
             rows_to_delete.append(i + 2)
     for row in sorted(rows_to_delete, reverse=True):
-        ws_ovr.delete_rows(row)
+        _retry(ws_ovr.delete_rows, row)
 
     # 外勤先マスタから削除
     ws_cli = _get_sheet("外勤先マスタ")
     row_idx = _find_row_index(ws_cli, 1, clinic_id)
     if row_idx:
-        ws_cli.delete_rows(row_idx)
+        _retry(ws_cli.delete_rows, row_idx)
     _clear_data_cache()
 
 
@@ -268,10 +268,10 @@ def set_affinity(doctor_id, clinic_id, weight):
     records = _get_all_records(ws)
     for i, r in enumerate(records):
         if str(r.get("doctor_id", "")) == str(doctor_id) and str(r.get("clinic_id", "")) == str(clinic_id):
-            ws.update([[str(doctor_id), str(clinic_id), weight]], f"A{i+2}")
+            _retry(ws.update, [[str(doctor_id), str(clinic_id), weight]], f"A{i+2}")
             _clear_data_cache()
             return
-    ws.append_row([str(doctor_id), str(clinic_id), weight])
+    _retry(ws.append_row, [str(doctor_id), str(clinic_id), weight])
     _clear_data_cache()
 
 
@@ -367,12 +367,12 @@ def set_clinic_date_override(clinic_id, date_str, required_doctors):
     # 既存行を探す
     for i, r in enumerate(records):
         if str(r.get("clinic_id", "")) == str(clinic_id) and str(r.get("date", "")) == date_str:
-            ws.update([[str(clinic_id), date_str, required_doctors]], f"A{i+2}")
+            _retry(ws.update, [[str(clinic_id), date_str, required_doctors]], f"A{i+2}")
             _clear_data_cache()
             return
 
     # 新規
-    ws.append_row([str(clinic_id), date_str, required_doctors])
+    _retry(ws.append_row, [str(clinic_id), date_str, required_doctors])
     _clear_data_cache()
 
 

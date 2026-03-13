@@ -82,7 +82,7 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int],
 
     # スプレッドシートを自動作成
     gc = _get_gspread_client()
-    ss = gc.create(f"外勤調整_平日_{clinic_name}")
+    ss = _retry(gc.create, f"外勤調整_平日_{clinic_name}")
     spreadsheet_key = ss.id
 
     new_id = _next_id(ws)
@@ -100,7 +100,7 @@ def add_weekday_config(clinic_name: str, days_of_week: list[int],
         "spreadsheet_key": spreadsheet_key,
     }
     row = [values.get(h, "") for h in actual_headers]
-    ws.append_row(row)
+    _retry(ws.append_row, row)
     _clear_data_cache()
     return section
 
@@ -148,14 +148,14 @@ def delete_weekday_config(section: str):
         if str(r.get("section", "")) == section:
             rows_to_delete.append(i + 2)
     for row in sorted(rows_to_delete, reverse=True):
-        ws_td.delete_rows(row)
+        _retry(ws_td.delete_rows, row)
 
     # セクション設定行を削除
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
     for i, r in enumerate(records):
         if r.get("section") == section:
-            ws.delete_rows(i + 2)
+            _retry(ws.delete_rows, i + 2)
             break
 
     _clear_weekday_ss_cache(section)
@@ -205,7 +205,7 @@ def add_weekday_slot(section: str, slot_name: str, day_of_week: int,
         "created_at": now,
     }
     row = [values.get(h, "") for h in actual_headers]
-    ws.append_row(row)
+    _retry(ws.append_row, row)
     _clear_data_cache()
     return new_id
 
@@ -234,7 +234,7 @@ def delete_weekday_slot(slot_id: int):
     ws = _get_sheet("平日スロットマスタ")
     row_idx = _find_row_index(ws, 1, slot_id)
     if row_idx:
-        ws.delete_rows(row_idx)
+        _retry(ws.delete_rows, row_idx)
     _clear_data_cache()
 
 
@@ -284,7 +284,7 @@ def set_target_dates(section: str, dates: list[str], active_dates: list[str] = N
         if str(r.get("section", "")) == section:
             rows_to_delete.append(i + 2)
     for row in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(row)
+        _retry(ws.delete_rows, row)
 
     # 新規追加
     if dates:
@@ -313,7 +313,7 @@ def toggle_target_date(section: str, date_str: str, is_active: bool):
     for i, r in enumerate(records):
         if str(r.get("section", "")) == section and str(r.get("date", "")) == date_str:
             col = actual_headers.index("is_active") + 1
-            ws.update_cell(i + 2, col, 1 if is_active else 0)
+            _retry(ws.update_cell, i + 2, col, 1 if is_active else 0)
             _clear_data_cache()
             return
     # 存在しない場合は追加
@@ -327,7 +327,7 @@ def toggle_target_date(section: str, date_str: str, is_active: bool):
         "created_at": now,
     }
     row = [values.get(h, "") for h in actual_headers]
-    ws.append_row(row)
+    _retry(ws.append_row, row)
     _clear_data_cache()
 
 
@@ -371,7 +371,7 @@ def set_weekday_slot_overrides_batch(section: str, changes: dict):
     # override_slot_id, override_required カラムがなければ追加
     for col_name in ("override_slot_id", "override_required"):
         if col_name not in actual_headers:
-            ws.update_cell(1, len(actual_headers) + 1, col_name)
+            _retry(ws.update_cell, 1, len(actual_headers) + 1, col_name)
             actual_headers.append(col_name)
 
     slot_col = actual_headers.index("override_slot_id") + 1
@@ -483,9 +483,9 @@ def upsert_weekday_preference(doctor_id: int, section: str,
 
     row_idx = _find_row_index(ws, 1, doctor_id)
     if row_idx:
-        ws.update([row_data], f"A{row_idx}")
+        _retry(ws.update, [row_data], f"A{row_idx}")
     else:
-        ws.append_row(row_data)
+        _retry(ws.append_row, row_data)
     _clear_data_cache()
 
 
@@ -547,7 +547,7 @@ def batch_save_weekday_assignments(year_month: str, section: str, assignments: d
         if str(r.get("section", "")) == section:
             rows_to_delete.append(i + 2)
     for row in sorted(rows_to_delete, reverse=True):
-        ws.delete_rows(row)
+        _retry(ws.delete_rows, row)
 
     # 新規行を一括追加
     next_id = _next_id(ws)
@@ -581,7 +581,7 @@ def delete_weekday_assignment(year_month: str, section: str, assignment_id: int)
     ws = _get_weekday_sched_sheet(year_month, section)
     row_idx = _find_row_index(ws, 1, assignment_id)
     if row_idx:
-        ws.delete_rows(row_idx)
+        _retry(ws.delete_rows, row_idx)
     _clear_data_cache()
 
 
@@ -666,7 +666,7 @@ def execute_swap(year_month: str, section: str,
         "executed_at": now,
     }
     swap_row = [swap_values.get(h, "") for h in swap_headers]
-    ws_swap.append_row(swap_row)
+    _retry(ws_swap.append_row, swap_row)
     _clear_data_cache()
 
 

@@ -173,7 +173,7 @@ def _init_weekday_sheet(name: str, section: str, headers: list):
     """セクション別の平日運用シートを初期化（ヘッダー設定付き）"""
     ws = _get_weekday_sheet(name, section)
     if not _retry(ws.row_values, 1):
-        ws.update([headers], "A1")
+        _retry(ws.update, [headers], "A1")
     return ws
 
 
@@ -311,19 +311,19 @@ def init_db():
     for sheet_name, headers in SHEET_HEADERS.items():
         if sheet_name not in _ws_cache_master:
             ws = sh_master.add_worksheet(title=sheet_name, rows=100, cols=len(headers))
-            ws.update([headers], "A1")
+            _retry(ws.update, [headers], "A1")
             _ws_cache_master[sheet_name] = ws
         else:
             ws = _ws_cache_master[sheet_name]
             existing_headers = _retry(ws.row_values, 1)
             if not existing_headers:
-                ws.update([headers], "A1")
+                _retry(ws.update, [headers], "A1")
             else:
                 # 不足カラムを末尾に追加（既存データとの互換性）
                 missing = [h for h in headers if h not in existing_headers]
                 if missing:
                     new_headers = existing_headers + missing
-                    ws.update([new_headers], "A1")
+                    _retry(ws.update, [new_headers], "A1")
     # 平日セクション別スプレッドシートのキャッシュ構築
     ws_weekday_cfg = _ws_cache_master.get("平日外勤設定")
     if ws_weekday_cfg:
@@ -413,6 +413,6 @@ def _init_monthly_sheet(name, headers):
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=name, rows=100, cols=len(headers))
     if not _retry(ws.row_values, 1):
-        ws.update([headers], "A1")
+        _retry(ws.update, [headers], "A1")
     cache[name] = ws
     return ws

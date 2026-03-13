@@ -19,10 +19,10 @@ def _get_audit_sheet():
     try:
         ws = _retry(sh.worksheet, _AUDIT_SHEET_NAME)
     except Exception:
-        ws = sh.add_worksheet(
+        ws = _retry(sh.add_worksheet,
             title=_AUDIT_SHEET_NAME, rows=2000, cols=len(_AUDIT_HEADERS)
         )
-        ws.update([_AUDIT_HEADERS], "A1")
+        _retry(ws.update, [_AUDIT_HEADERS], "A1")
     _ws_cache_master[_AUDIT_SHEET_NAME] = ws
     return ws
 

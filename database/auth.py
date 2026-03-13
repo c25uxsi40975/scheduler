@@ -37,10 +37,10 @@ def _set_setting(key, value):
     records = _get_all_records(ws)
     for i, r in enumerate(records):
         if r.get("key") == key:
-            ws.update_cell(i + 2, 2, value)
+            _retry(ws.update_cell, i + 2, 2, value)
             _clear_data_cache()
             return
-    ws.append_row([key, value])
+    _retry(ws.append_row, [key, value])
     _clear_data_cache()
 
 
@@ -85,7 +85,7 @@ def set_doctor_individual_password(doctor_id, password: str):
         return
     actual_headers = _retry(ws.row_values, 1)
     col_idx = actual_headers.index("password_hash") + 1
-    ws.update_cell(row_idx, col_idx, _hash_password(password))
+    _retry(ws.update_cell, row_idx, col_idx, _hash_password(password))
     _clear_data_cache()
 
 
@@ -97,7 +97,7 @@ def clear_must_change_pw(doctor_id):
         return
     actual_headers = _retry(ws.row_values, 1)
     col_idx = actual_headers.index("must_change_pw") + 1
-    ws.update_cell(row_idx, col_idx, 0)
+    _retry(ws.update_cell, row_idx, col_idx, 0)
     _clear_data_cache()
 
 
@@ -156,7 +156,7 @@ def update_doctor_account_name(doctor_id, account_name: str):
         return
     actual_headers = _retry(ws.row_values, 1)
     col_idx = actual_headers.index("account_name") + 1
-    ws.update_cell(row_idx, col_idx, account_name)
+    _retry(ws.update_cell, row_idx, col_idx, account_name)
     _clear_data_cache()
     return None
 
@@ -171,7 +171,7 @@ def update_doctor_email(doctor_id, email: str):
         return
     actual_headers = _retry(ws.row_values, 1)
     col_idx = actual_headers.index("email") + 1
-    ws.update_cell(row_idx, col_idx, email)
+    _retry(ws.update_cell, row_idx, col_idx, email)
     _clear_data_cache()
 
 

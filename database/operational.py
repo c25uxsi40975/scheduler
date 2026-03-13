@@ -37,7 +37,7 @@ def _get_pref_sheet(year_month):
             missing = [h for h in _PREF_HEADERS if h not in existing]
             if missing:
                 actual = existing + missing
-                ws.update([actual], "A1")
+                _retry(ws.update, [actual], "A1")
             else:
                 actual = existing
         else:
@@ -104,9 +104,9 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
     # 既存行を探す
     row_idx = _find_row_index(ws, 1, doctor_id)
     if row_idx:
-        ws.update([row_data], f"A{row_idx}")
+        _retry(ws.update, [row_data], f"A{row_idx}")
     else:
-        ws.append_row(row_data)
+        _retry(ws.append_row, row_data)
     _clear_data_cache()
 
 
@@ -165,8 +165,8 @@ def batch_upsert_preferences(year_month, items: list[dict]):
 
     if batch_updates:
         _retry(ws.batch_update, batch_updates)
-    for row in append_rows:
-        _retry(ws.append_row, row)
+    if append_rows:
+        _retry(ws.append_rows, append_rows)
     _clear_data_cache()
 
 
@@ -187,7 +187,7 @@ def save_schedule(year_month, plan_name, assignments, total_variance=0, satisfac
     # 同名プランがあれば更新
     for i, r in enumerate(records):
         if r.get("plan_name") == plan_name:
-            ws.update([[
+            _retry(ws.update, [[
                 str(r["id"]), plan_name, json.dumps(assignments),
                 total_variance, satisfaction_score, 0, now
             ]], f"A{i+2}")
@@ -195,7 +195,7 @@ def save_schedule(year_month, plan_name, assignments, total_variance=0, satisfac
             return
 
     new_id = _next_id(ws)
-    ws.append_row([new_id, plan_name, json.dumps(assignments), total_variance, satisfaction_score, 0, now])
+    _retry(ws.append_row, [new_id, plan_name, json.dumps(assignments), total_variance, satisfaction_score, 0, now])
     _clear_data_cache()
 
 
@@ -239,7 +239,7 @@ def delete_schedule(schedule_id):
         records = _get_all_records(ws)
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
-                ws.delete_rows(i + 2)
+                _retry(ws.delete_rows, i + 2)
                 _clear_data_cache()
                 return
 
