@@ -646,7 +646,7 @@ def _render_proxy_preference_form(doc_id: int, section: str,
             st.markdown(f"**{sn}**")
         with sc2:
             if st.button("○", key=f"proxy_slot_ok_{section}_{doc_id}_{sn}", use_container_width=True):
-                edits = dict(st.session_state.get(bulk_key, {}))
+                edits = {k: dict(v) for k, v in st.session_state.get(bulk_key, {}).items()}
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "○"
@@ -654,7 +654,7 @@ def _render_proxy_preference_form(doc_id: int, section: str,
                 st.rerun()
         with sc3:
             if st.button("×", key=f"proxy_slot_ng_{section}_{doc_id}_{sn}", use_container_width=True):
-                edits = dict(st.session_state.get(bulk_key, {}))
+                edits = {k: dict(v) for k, v in st.session_state.get(bulk_key, {}).items()}
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "×"
@@ -663,7 +663,7 @@ def _render_proxy_preference_form(doc_id: int, section: str,
         with sc4:
             if st.button("-", key=f"proxy_slot_off_{section}_{doc_id}_{sn}",
                          use_container_width=True, help="無効化"):
-                edits = dict(st.session_state.get(bulk_key, {}))
+                edits = {k: dict(v) for k, v in st.session_state.get(bulk_key, {}).items()}
                 for i in range(len(rows)):
                     if date_slot_valid[i].get(sn):
                         edits.setdefault(i, {})[sn] = "-"
@@ -672,8 +672,8 @@ def _render_proxy_preference_form(doc_id: int, section: str,
 
     st.markdown("---")
 
-    # 一括操作の結果をDataFrameに反映
-    bulk_edits = st.session_state.pop(bulk_key, None)
+    # 一括操作の結果をDataFrameに反映（popせず保持して蓄積可能にする）
+    bulk_edits = st.session_state.get(bulk_key)
     if bulk_edits:
         for i, col_vals in bulk_edits.items():
             for col, val in col_vals.items():
@@ -727,6 +727,7 @@ def _render_proxy_preference_form(doc_id: int, section: str,
             avoid_dates=new_avoid,
             free_text=free_text,
         )
+        st.session_state.pop(bulk_key, None)
         st.success(f"{doc_map.get(doc_id, '')} の希望を保存しました")
         st.rerun()
 
