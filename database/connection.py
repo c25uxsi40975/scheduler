@@ -150,7 +150,7 @@ def _get_weekday_spreadsheet(section: str):
             "主管理者画面でスプレッドシートIDを設定してください。"
         )
     gc = _get_gspread_client()
-    ss = gc.open_by_key(ss_key)
+    ss = _retry(gc.open_by_key, ss_key)
     _weekday_spreadsheet_cache[section] = ss
     return ss
 
