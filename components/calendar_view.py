@@ -45,8 +45,9 @@ def _get_saturday_entries(doctor: dict, year_month: str) -> dict:
     """
     entries = {}
     try:
-        # 外勤先の時間情報を取得
+        # 外勤先の情報を取得
         all_clinics = get_clinics(active_only=False)
+        clinic_name_map = {c["id"]: c["name"] for c in all_clinics}
         clinic_time_map = {}
         for c in all_clinics:
             s_t = c.get("start_time", "")
@@ -58,18 +59,22 @@ def _get_saturday_entries(doctor: dict, year_month: str) -> dict:
         for sched in schedules:
             if not sched.get("is_confirmed"):
                 continue
-            assignments = sched.get("assignments", {})
-            for date_str, clinics in assignments.items():
-                for clinic_name, doc_ids in clinics.items():
-                    if doctor["id"] in doc_ids:
-                        if date_str not in entries:
-                            entries[date_str] = []
-                        entries[date_str].append({
-                            "clinic": clinic_name,
-                            "time": clinic_time_map.get(clinic_name, ""),
-                            "section": "saturday",
-                            "color": "#e3f2fd",
-                        })
+            assignments = sched.get("assignments", [])
+            if not isinstance(assignments, list):
+                continue
+            for a in assignments:
+                if a.get("doctor_id") != doctor["id"]:
+                    continue
+                ds = a.get("date", "")
+                clinic_name = clinic_name_map.get(a.get("clinic_id"), "")
+                if not ds or not clinic_name:
+                    continue
+                entries.setdefault(ds, []).append({
+                    "clinic": clinic_name,
+                    "time": clinic_time_map.get(clinic_name, ""),
+                    "section": "saturday",
+                    "color": "#e3f2fd",
+                })
     except Exception:
         pass
     return entries
@@ -135,18 +140,19 @@ def _render_calendar_grid(year: int, month: int,
         all_entries.setdefault(ds, []).extend(elist)
 
     # HTML生成
-    html = '<table style="width:100%; border-collapse:collapse; font-size:0.85rem;">'
+    cell_w = "calc(100% / 7)"
+    html = '<table style="width:100%; border-collapse:collapse; font-size:0.85rem; table-layout:fixed;">'
     html += '<tr>'
     for day_name in ["月", "火", "水", "木", "金", "土", "日"]:
         bg = "#e3f2fd" if day_name == "土" else "#fce4ec" if day_name == "日" else "#f5f5f5"
-        html += f'<th style="border:1px solid #ddd; padding:4px; text-align:center; background:{bg};">{day_name}</th>'
+        html += f'<th style="width:{cell_w}; border:1px solid #ddd; padding:4px; text-align:center; background:{bg};">{day_name}</th>'
     html += '</tr>'
 
     for week in month_days:
         html += '<tr>'
         for day in week:
             if day == 0:
-                html += '<td style="border:1px solid #eee; padding:4px;">&nbsp;</td>'
+                html += f'<td style="width:{cell_w}; border:1px solid #eee; padding:4px; height:70px;">&nbsp;</td>'
             else:
                 ds = date(year, month, day).isoformat()
                 entries = all_entries.get(ds, [])
@@ -161,10 +167,10 @@ def _render_calendar_grid(year: int, month: int,
                     cell_content += (
                         f'<div style="background:{bg}; border-radius:3px; '
                         f'padding:1px 3px; margin:1px 0; font-size:0.75rem; '
-                        f'white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">'
+                        f'overflow:hidden; text-overflow:ellipsis;">'
                         f'{label}</div>'
                     )
-                td_style = "border:1px solid #ddd; padding:4px; vertical-align:top; min-height:60px;"
+                td_style = f"width:{cell_w}; border:1px solid #ddd; padding:4px; vertical-align:top; height:70px; overflow:hidden;"
                 if entries:
                     td_style += " background:#fffde7;"
                 html += f'<td style="{td_style}">{cell_content}</td>'

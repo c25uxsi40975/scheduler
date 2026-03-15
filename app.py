@@ -542,37 +542,35 @@ def _show_doctor_settings(doctor):
             st.rerun()
 
 
-def _show_doctor_section_selection(doctor):
-    """医員のセクション選択画面"""
-    st.subheader("セクション選択")
-
-    if st.button("全体スケジュール", use_container_width=True, type="primary"):
-        st.session_state.doctor_section = "overall"
-        st.rerun()
-
-    if st.button("土曜", use_container_width=True, type="primary"):
-        st.session_state.doctor_section = "saturday"
-        st.rerun()
-
-    # 平日セクション（所属時のみ表示）
+def _show_doctor_tabs(doctor):
+    """医員のタブ表示（全体・土曜・平日セクション）"""
+    tab_labels = ["全体", "土曜"]
+    weekday_sections = []
     try:
         configs = get_weekday_configs()
         for cfg in configs:
             if cfg.get("is_active") and doctor["id"] in cfg.get("assigned_doctors", []):
-                if st.button(cfg["clinic_name"], use_container_width=True, type="primary",
-                             key=f"doc_section_{cfg['section']}"):
-                    st.session_state.doctor_section = cfg["section"]
-                    st.rerun()
+                tab_labels.append(cfg["clinic_name"])
+                weekday_sections.append(cfg["section"])
     except Exception:
         pass
 
+    tabs = st.tabs(tab_labels)
 
-def _show_doctor_saturday(doctor):
-    """医員の土曜セクション（既存ロジック）"""
-    if st.button("← セクション選択に戻る", key="back_to_section_sat"):
-        st.session_state.doctor_section = None
-        st.rerun()
+    with tabs[0]:
+        from components import calendar_view
+        calendar_view.render(doctor)
 
+    with tabs[1]:
+        _show_doctor_saturday_content(doctor)
+
+    for i, section in enumerate(weekday_sections):
+        with tabs[2 + i]:
+            weekday_doctor.render(doctor, section)
+
+
+def _show_doctor_saturday_content(doctor):
+    """医員の土曜セクション内容"""
     tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
 
     with tab1:
@@ -600,16 +598,6 @@ def _show_doctor_saturday(doctor):
             doctor_schedule.render(doctor, view_month)
         else:
             st.info("確定済みのスケジュールはまだありません。")
-
-
-def _show_doctor_overall_calendar(doctor):
-    """医員の全体スケジュールカレンダー"""
-    if st.button("← セクション選択に戻る", key="back_to_section_cal"):
-        st.session_state.doctor_section = None
-        st.rerun()
-
-    from components import calendar_view
-    calendar_view.render(doctor)
 
 
 # ---- メインルーティング ----
@@ -704,13 +692,4 @@ elif st.session_state.role == "doctor":
 
             st.markdown("---")
 
-            # セクション選択
-            section = st.session_state.get("doctor_section")
-            if section is None:
-                _show_doctor_section_selection(doctor)
-            elif section == "overall":
-                _show_doctor_overall_calendar(doctor)
-            elif section == "saturday":
-                _show_doctor_saturday(doctor)
-            else:
-                weekday_doctor.render(doctor, section)
+            _show_doctor_tabs(doctor)

@@ -32,12 +32,6 @@ def render(doctor: dict, section: str):
 
     clinic_name = cfg["clinic_name"]
 
-    if st.button("← セクション選択に戻る", key=f"back_to_section_{section}"):
-        st.session_state.doctor_section = None
-        st.rerun()
-
-    st.subheader(clinic_name)
-
     tab1, tab2, tab3 = st.tabs(["希望入力", "スケジュール確認", "シフト交換"])
 
     with tab1:
