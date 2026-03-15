@@ -571,9 +571,20 @@ def _show_doctor_tabs(doctor):
 
 def _show_doctor_saturday_content(doctor):
     """医員の土曜セクション内容"""
-    tab1, tab2 = st.tabs(["希望入力", "スケジュール確認"])
+    tab1, tab2 = st.tabs(["スケジュール確認", "希望入力"])
 
     with tab1:
+        confirmed_months = get_confirmed_months()
+        if confirmed_months:
+            view_month = st.selectbox(
+                "月を選択", confirmed_months,
+                label_visibility="collapsed",
+            )
+            doctor_schedule.render(doctor, view_month)
+        else:
+            st.info("確定済みのスケジュールはまだありません。")
+
+    with tab2:
         open_month = get_open_month()
         if open_month:
             confirmed = get_confirmed_months()
@@ -587,17 +598,6 @@ def _show_doctor_saturday_content(doctor):
                 doctor_input.render(doctor, open_month, year, month)
         else:
             st.info("管理者が対象月を設定するまでお待ちください。")
-
-    with tab2:
-        confirmed_months = get_confirmed_months()
-        if confirmed_months:
-            view_month = st.selectbox(
-                "月を選択", confirmed_months,
-                label_visibility="collapsed",
-            )
-            doctor_schedule.render(doctor, view_month)
-        else:
-            st.info("確定済みのスケジュールはまだありません。")
 
 
 # ---- メインルーティング ----

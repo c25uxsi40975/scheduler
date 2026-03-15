@@ -35,12 +35,12 @@ def render(doctor: dict, section: str):
 
     clinic_name = cfg["clinic_name"]
 
-    tab1, tab2, tab3 = st.tabs(["希望入力", "スケジュール確認", "シフト交換"])
+    tab1, tab2, tab3 = st.tabs(["スケジュール確認", "希望入力", "シフト交換"])
 
     with tab1:
-        _render_preference_input(doctor, section, cfg)
-    with tab2:
         _render_schedule_view(doctor, section, cfg)
+    with tab2:
+        _render_preference_input(doctor, section, cfg)
     with tab3:
         _render_shift_swap(doctor, section, cfg)
 
