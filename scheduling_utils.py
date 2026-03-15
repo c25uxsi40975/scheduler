@@ -133,6 +133,7 @@ def solve_weekday_schedule(
     preferences: list[dict],
     slot_overrides: dict = None,
     fixed_assignments: dict = None,
+    existing_assignments: dict = None,
 ) -> dict | None:
     """平日スケジュールの自動割り当て
 
@@ -149,6 +150,9 @@ def solve_weekday_schedule(
         fixed_assignments: 固定済みアサイン {date_str: {slot_id: [doctor_id, ...]}}
                            補填モードで使用。指定された割り当てをハード制約として固定し、
                            残りの空きスロットのみ最適化する。
+        existing_assignments: 既存アサイン {date_str: {slot_id: [doctor_id, ...]}}
+                              補填+新メンバー時に使用。既存アサインの維持をソフト制約
+                              （ペナルティ）で表現し、均一化との間でバランスを取る。
 
     Returns:
         {date_str: {slot_id: [doctor_id, ...]}} or None (infeasible)
@@ -161,6 +165,7 @@ def solve_weekday_schedule(
 
     slot_overrides = slot_overrides or {}
     fixed_assignments = fixed_assignments or {}
+    existing_assignments = existing_assignments or {}
     doc_ids = [d["id"] for d in doctors]
 
     # 各日付に適用されるスロットを特定（曜日ベース）
@@ -397,10 +402,31 @@ def solve_weekday_schedule(
                     if key in x:
                         avoid_penalty.append(x[key])
 
-    # 目標: 期間全体の均一化（重み10） + 月別均一化（重み5）
-    #        + 週内重複回避（重み3） + 避けたい日ペナルティ（重み1）
+    # 既存アサイン維持ペナルティ（ソフト制約: 補填+新メンバー時）
+    existing_change_penalty = []
+    if existing_assignments:
+        doc_id_set = set(doc_ids)
+        for dt, dt_slots in date_slots.items():
+            ds = dt.isoformat()
+            for slot in dt_slots:
+                sid = slot["id"]
+                existing_docs = existing_assignments.get(ds, {}).get(sid, [])
+                for doc_id in existing_docs:
+                    if doc_id not in doc_id_set:
+                        continue  # 除外済み医員はスキップ
+                    key = (doc_id, ds, sid)
+                    if key in x:
+                        change_var = pulp.LpVariable(
+                            f"change_{doc_id}_{ds}_{sid}", lowBound=0)
+                        prob += change_var >= 1 - x[key], \
+                            f"change_detect_{doc_id}_{ds}_{sid}"
+                        existing_change_penalty.append(change_var)
+
+    # 目標: 期間全体の均一化（重み10） + 既存維持（重み7）
+    #        + 月別均一化（重み5） + 週内重複回避（重み3） + 避けたい日ペナルティ（重み1）
     prob += (
         10 * pulp.lpSum(dev_plus[d] + dev_minus[d] for d in doc_ids)
+        + 7 * pulp.lpSum(existing_change_penalty)
         + 5 * pulp.lpSum(monthly_dev_plus[k] + monthly_dev_minus[k]
                          for k in monthly_dev_plus)
         + 3 * pulp.lpSum(week_penalty)

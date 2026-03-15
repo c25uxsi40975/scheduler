@@ -1364,24 +1364,30 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
             sched_doctor_ids.update(doc_ids)
 
     # ================================================================
-    # ② 除外医員の選択
+    # ② メンバー変更
     # ================================================================
-    step2_label = "② 除外医員の選択"
+    step2_label = "② メンバー変更"
     if step > 2:
         removed = state.get("removed_ids", [])
-        removed_names = [doc_map.get(did, str(did)) for did in removed]
-        step2_label += f"　✅ {', '.join(removed_names) if removed_names else 'なし'}"
+        added = state.get("added_ids", [])
+        parts = []
+        if removed:
+            parts.append(f"除外: {', '.join(doc_map.get(d, str(d)) for d in removed)}")
+        if added:
+            parts.append(f"追加: {', '.join(doc_map.get(d, str(d)) for d in added)}")
+        step2_label += f"　✅ {' / '.join(parts) if parts else '変更なし'}"
     with st.expander(step2_label, expanded=(step == 2)):
         if step == 2:
-            # メンバーから外れた医員を自動検出
+            # ---- 除外する医員 ----
+            st.markdown("**除外する医員**")
             auto_removed = [did for did in sched_doctor_ids if did not in assigned_doctor_ids]
             all_in_sched = [d for d in all_doctors if d["id"] in sched_doctor_ids]
             remove_options = {d["id"]: doc_map.get(d["id"], d["name"]) for d in all_in_sched}
 
             if is_fill:
-                st.write("除外する医員を選択してください。この医員のアサインが穴となり、補填対象になります。")
+                st.caption("この医員のアサインが穴となり、補填対象になります。")
             else:
-                st.write("除外する医員を選択してください（任意）。除外後のメンバーで再構成します。")
+                st.caption("除外後のメンバーで再構成します（任意）。")
 
             removed_ids = st.multiselect(
                 "除外する医員",
@@ -1391,8 +1397,25 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 key=f"readj_removed_{section}",
             )
 
-            if is_fill and not removed_ids:
-                st.warning("補填モードでは除外する医員を1名以上選択してください。")
+            # ---- 新メンバー検出 ----
+            new_member_ids = [did for did in assigned_doctor_ids if did not in sched_doctor_ids]
+            new_members = [d for d in assigned_doctors if d["id"] in new_member_ids]
+            include_new = []
+
+            if new_members:
+                st.markdown("**新しく追加されたメンバー**")
+                st.caption("メンバー管理で追加済み・既存スケジュール未割当の医員です。"
+                           "再調整でアサイン対象になります。")
+                include_new = st.multiselect(
+                    "再調整に含める新メンバー",
+                    options=[d["id"] for d in new_members],
+                    default=[d["id"] for d in new_members],
+                    format_func=lambda x: doc_map.get(x, str(x)),
+                    key=f"readj_new_members_{section}",
+                )
+
+            if is_fill and not removed_ids and not include_new:
+                st.warning("補填モードでは除外する医員または追加する新メンバーを指定してください。")
                 return
 
             # サマリ表示
@@ -1410,20 +1433,30 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                     remaining = [d for d in assigned_doctors if d["id"] not in set(removed_ids)]
                     st.info(f"再構成メンバー: **{len(remaining)}名**　"
                             f"対象日: **{len(existing_map)}日**")
+            if include_new:
+                new_names = [doc_map.get(did, str(did)) for did in include_new]
+                if is_fill:
+                    st.info(f"新メンバー **{', '.join(new_names)}** を含めて最適化します。"
+                            "既存アサインをなるべく維持しつつ均等配分します。")
+                else:
+                    st.info(f"新メンバー **{', '.join(new_names)}** を含めて再構成します。")
 
-            if st.button("除外を確定", type="primary", key=f"readj_step2_{section}"):
+            if st.button("メンバー変更を確定", type="primary", key=f"readj_step2_{section}"):
                 st.session_state[state_key]["step"] = 3
                 st.session_state[state_key]["removed_ids"] = removed_ids
+                st.session_state[state_key]["added_ids"] = include_new
                 st.session_state[state_key]["pref_opened"] = False
                 st.session_state[state_key]["pref_skipped"] = False
                 st.rerun()
         else:
             removed = state.get("removed_ids", [])
+            added = state.get("added_ids", [])
+            parts = []
             if removed:
-                names = [doc_map.get(did, str(did)) for did in removed]
-                st.write(f"除外医員: **{', '.join(names)}**")
-            else:
-                st.write("除外医員: なし")
+                parts.append(f"除外: **{', '.join(doc_map.get(d, str(d)) for d in removed)}**")
+            if added:
+                parts.append(f"追加: **{', '.join(doc_map.get(d, str(d)) for d in added)}**")
+            st.write(" / ".join(parts) if parts else "変更なし")
 
     if step < 3:
         st.expander("③ 希望入力の募集・通知", expanded=False)
@@ -1434,10 +1467,14 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     # ③ 希望入力の募集・通知
     # ================================================================
     removed_ids = state.get("removed_ids", [])
-    # 補填: 穴がある日のみ / 再構成: 指定期間の全日
+    added_ids = state.get("added_ids", [])
+    # 補填+新メンバーあり: 全日対象 / 補填のみ: 穴がある日 / 再構成: 全日
     if is_fill:
         fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
-        target_date_list = sorted(hole_dates)
+        if added_ids:
+            target_date_list = sorted(existing_map.keys())  # 新メンバー均等化のため全日
+        else:
+            target_date_list = sorted(hole_dates)
     else:
         target_date_list = sorted(existing_map.keys())
 
@@ -1545,7 +1582,12 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     if is_fill:
         fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
-        target_dates = sorted(date.fromisoformat(ds) for ds in hole_dates)
+        if added_ids:
+            # 新メンバーあり: 全日を対象にし、既存アサインはソフト制約で維持
+            target_dates = sorted(date.fromisoformat(ds) for ds in existing_map.keys())
+        else:
+            # 新メンバーなし: 穴のある日のみ
+            target_dates = sorted(date.fromisoformat(ds) for ds in hole_dates)
     else:
         target_dates = sorted(date.fromisoformat(ds) for ds in existing_map.keys())
 
@@ -1553,18 +1595,29 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         mode_label = "補填" if is_fill else "再構成"
         st.write(f"モード: **{mode_label}**　対象日: **{len(target_dates)}日**　"
                  f"メンバー: **{len(active_doctors)}名**")
+        if is_fill and added_ids:
+            st.caption("新メンバーを含むため、既存アサインを維持しつつ全日で均等化します。")
 
         preview_key = f"readj_preview_{section}"
 
         if st.button("スケジュールを生成", type="primary", key=f"readj_gen_{section}"):
             try:
-                if is_fill:
+                if is_fill and added_ids:
+                    # 新メンバーあり: existing_assignments でソフト制約
+                    result = solve_weekday_schedule(
+                        target_dates, active_slots, active_doctors, prefs,
+                        slot_overrides=all_slot_overrides,
+                        existing_assignments=existing_map,
+                    )
+                elif is_fill:
+                    # 新メンバーなし: fixed_assignments でハード制約
                     result = solve_weekday_schedule(
                         target_dates, active_slots, active_doctors, prefs,
                         slot_overrides=all_slot_overrides,
                         fixed_assignments=fixed,
                     )
                 else:
+                    # 再構成: 制約なし
                     result = solve_weekday_schedule(
                         target_dates, active_slots, active_doctors, prefs,
                         slot_overrides=all_slot_overrides,
@@ -1572,8 +1625,8 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 if result is None:
                     st.error("条件を満たすスケジュールが見つかりませんでした。")
                 else:
-                    # 補填: 穴がない日は既存を維持してマージ
-                    if is_fill:
+                    if is_fill and not added_ids:
+                        # 新メンバーなし補填: 穴がない日は既存を維持してマージ
                         merged = {}
                         for ds in sorted(existing_map.keys()):
                             if ds in hole_dates:
@@ -1582,6 +1635,7 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                                 merged[ds] = existing_map[ds]
                         st.session_state[preview_key] = merged
                     else:
+                        # 新メンバーあり補填 or 再構成: ソルバー結果をそのまま使用
                         st.session_state[preview_key] = result
                     st.session_state["_toast_msg"] = f"{mode_label}スケジュールを生成しました"
                     st.rerun()
