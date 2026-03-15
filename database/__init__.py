@@ -37,6 +37,8 @@ from database.auth import (
     # 平日公開設定
     get_weekday_open_section, set_weekday_open_section,
     get_weekday_deadline, set_weekday_deadline,
+    # 再調整対象日
+    get_weekday_readjust_dates, set_weekday_readjust_dates,
     # 土曜追加/除外日付
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,
@@ -52,6 +54,7 @@ from database.weekday import (
     get_weekday_preferences, get_weekday_preference,
     upsert_weekday_preference,
     get_weekday_schedule, batch_save_weekday_assignments,
+    merge_save_weekday_assignments,
     delete_weekday_assignment,
     execute_swap, get_swap_history,
 )

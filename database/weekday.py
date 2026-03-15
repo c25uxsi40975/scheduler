@@ -370,6 +370,8 @@ def toggle_target_date(section: str, date_str: str, is_active: bool):
 
 # ---- スロット日別設定（オーバーライド） ----
 
+@_register_cached
+@st.cache_data(ttl=120)
 def get_weekday_slot_overrides(section: str, year_month: str = None) -> dict:
     """スロットの日別オーバーライドを取得
 
@@ -591,6 +593,83 @@ def batch_save_weekday_assignments(year_month: str, section: str, assignments: d
     actual_headers = _retry(ws.row_values, 1)
     rows = []
     idx = 0
+    for date_str in sorted(assignments.keys()):
+        for slot_id, doc_ids in assignments[date_str].items():
+            slot_id_int = int(slot_id) if isinstance(slot_id, str) else slot_id
+            for doc_id in doc_ids:
+                values = {
+                    "id": next_id + idx,
+                    "section": section,
+                    "date": date_str,
+                    "slot_id": slot_id_int,
+                    "slot_name": slot_name_map.get(slot_id_int, ""),
+                    "doctor_id": doc_id,
+                    "doctor_name": name_map.get(doc_id, ""),
+                    "created_at": now,
+                    "updated_at": now,
+                }
+                rows.append([values.get(h, "") for h in actual_headers])
+                idx += 1
+    if rows:
+        _retry(ws.append_rows, rows)
+    _clear_data_cache()
+
+
+def merge_save_weekday_assignments(year_month: str, section: str,
+                                    assignments: dict, date_range: tuple[str, str]):
+    """指定期間のみスケジュールを上書きし、範囲外の既存データは維持
+
+    Args:
+        year_month: "YYYY-MM"
+        section: セクションキー
+        assignments: {date_str: {slot_id: [doctor_id, ...]}} (範囲内の新データ)
+        date_range: (start_date_str, end_date_str) 上書き対象の日付範囲(inclusive)
+    """
+    ws = _get_weekday_sched_sheet(year_month, section)
+    records = _get_all_records(ws)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    doctors = get_doctors(active_only=False)
+    name_map = {d["id"]: d["name"] for d in doctors}
+    slots = get_weekday_slots(section)
+    slot_name_map = {s["id"]: s["slot_name"] for s in slots}
+    start_date, end_date = date_range
+
+    # 当該セクションの既存行を削除（逆順）
+    rows_to_delete = []
+    for i, r in enumerate(records):
+        if str(r.get("section", "")) == section:
+            rows_to_delete.append(i + 2)
+    for row in sorted(rows_to_delete, reverse=True):
+        _retry(ws.delete_rows, row)
+
+    # 範囲外の既存データを保持 + 範囲内は新データで置換
+    next_id = _next_id(ws)
+    actual_headers = _retry(ws.row_values, 1)
+    rows = []
+    idx = 0
+
+    # 1) 範囲外の既存レコードを復元
+    for r in records:
+        if str(r.get("section", "")) != section:
+            continue
+        rd = str(r.get("date", ""))
+        if start_date <= rd <= end_date:
+            continue  # 範囲内はスキップ（新データで置換）
+        values = {
+            "id": next_id + idx,
+            "section": section,
+            "date": rd,
+            "slot_id": _safe_int(r.get("slot_id", 0)),
+            "slot_name": str(r.get("slot_name", "")),
+            "doctor_id": _safe_int(r.get("doctor_id", 0)),
+            "doctor_name": str(r.get("doctor_name", "")),
+            "created_at": str(r.get("created_at", now)),
+            "updated_at": now,
+        }
+        rows.append([values.get(h, "") for h in actual_headers])
+        idx += 1
+
+    # 2) 範囲内の新規データを追加
     for date_str in sorted(assignments.keys()):
         for slot_id, doc_ids in assignments[date_str].items():
             slot_id_int = int(slot_id) if isinstance(slot_id, str) else slot_id

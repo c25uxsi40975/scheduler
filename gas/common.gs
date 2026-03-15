@@ -98,6 +98,10 @@ function doPost(e) {
       sendWeekdayAllPreferencesComplete(data);
     } else if (data.action === "shift_swap_executed") {
       sendShiftSwapNotification(data);
+    } else if (data.action === "weekday_readjust_preference_request") {
+      sendWeekdayReadjustPreferenceRequest(data);
+    } else if (data.action === "weekday_schedule_readjusted") {
+      sendWeekdayScheduleReadjusted(data);
     }
 
     return ContentService.createTextOutput(

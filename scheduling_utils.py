@@ -132,6 +132,7 @@ def solve_weekday_schedule(
     doctors: list[dict],
     preferences: list[dict],
     slot_overrides: dict = None,
+    fixed_assignments: dict = None,
 ) -> dict | None:
     """平日スケジュールの自動割り当て
 
@@ -145,6 +146,9 @@ def solve_weekday_schedule(
         preferences: 希望リスト [{doctor_id, ng_dates, avoid_dates, ...}]
         slot_overrides: 日別オーバーライド {(slot_id, date_str): required_count}
                         0=休診, 他=人数
+        fixed_assignments: 固定済みアサイン {date_str: {slot_id: [doctor_id, ...]}}
+                           補填モードで使用。指定された割り当てをハード制約として固定し、
+                           残りの空きスロットのみ最適化する。
 
     Returns:
         {date_str: {slot_id: [doctor_id, ...]}} or None (infeasible)
@@ -156,6 +160,7 @@ def solve_weekday_schedule(
         return None
 
     slot_overrides = slot_overrides or {}
+    fixed_assignments = fixed_assignments or {}
     doc_ids = [d["id"] for d in doctors]
 
     # 各日付に適用されるスロットを特定（曜日ベース）
@@ -174,6 +179,14 @@ def solve_weekday_schedule(
     for p in preferences:
         pref_map[p["doctor_id"]] = p
 
+    # 固定済みアサインのルックアップ（補填モード用）
+    fixed_set = set()  # (doc_id, date_str, slot_id)
+    for ds, slots_map in fixed_assignments.items():
+        for sid, dids in slots_map.items():
+            sid_int = int(sid) if isinstance(sid, str) else sid
+            for did in dids:
+                fixed_set.add((did, ds, sid_int))
+
     # NG日を考慮した事前チェック: 各日×スロットで利用可能人数 >= 必要人数か
     shortage_details = []
     for dt, dt_slots in date_slots.items():
@@ -183,21 +196,31 @@ def solve_weekday_schedule(
             if ovr_req is not None and ovr_req == 0:
                 continue
             req = ovr_req if ovr_req is not None else int(slot.get("required_count", 1))
+            # 固定済み人数を差し引き
+            fixed_count = sum(1 for did, fds, fsid in fixed_set
+                              if fds == ds and fsid == slot["id"])
+            remaining_req = req - fixed_count
+            if remaining_req <= 0:
+                continue  # 固定だけで充足
+            # 固定済み医員を除いた利用可能人数をチェック
+            fixed_on_day = {did for did, fds, _ in fixed_set if fds == ds}
             available_docs = []
             ng_docs = []
             for doc_id in doc_ids:
+                if doc_id in fixed_on_day:
+                    continue  # 固定済み医員は空き枠の候補から除外
                 pref = pref_map.get(doc_id, {})
                 ng = set(pref.get("ng_dates") or [])
                 if ds in ng:
                     ng_docs.append(doc_id)
                 else:
                     available_docs.append(doc_id)
-            if len(available_docs) < req:
+            if len(available_docs) < remaining_req:
                 ng_names = [next((d["name"] for d in doctors if d["id"] == did), str(did))
                             for did in ng_docs]
                 shortage_details.append(
                     f"  {dt.strftime('%m/%d(%a)')} {slot.get('slot_name', '')}: "
-                    f"必要{req}人 / 利用可能{len(available_docs)}人 "
+                    f"必要{remaining_req}人 / 利用可能{len(available_docs)}人 "
                     f"（NG: {', '.join(ng_names)}）"
                 )
     if shortage_details:
@@ -261,6 +284,12 @@ def solve_weekday_schedule(
                     day_vars.append(x[key])
             if len(day_vars) > 1:
                 prob += pulp.lpSum(day_vars) <= 1, f"one_per_day_{doc_id}_{dt.isoformat()}"
+
+    # 4. 固定アサイン（補填モード）: 指定された割り当てを強制
+    for did, ds, sid in fixed_set:
+        key = (did, ds, sid)
+        if key in x:
+            prob += x[key] == 1, f"fixed_{did}_{ds}_{sid}"
 
     # ---- 目標関数 ----
 

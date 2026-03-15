@@ -15,6 +15,7 @@ from database import (
     get_weekday_schedule,
     get_weekday_slots,
     get_weekday_open_section, get_weekday_deadline,
+    get_weekday_readjust_dates,
     execute_swap, get_swap_history,
 )
 from components.display_utils import build_display_name_map
@@ -71,6 +72,16 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
         st.info("対象日が設定されていません。")
         return
 
+    # 再調整対象日が設定されている場合はその日のみ表示
+    readjust_dates = get_weekday_readjust_dates(section)
+    if readjust_dates:
+        readjust_set = set(readjust_dates)
+        active_dates = [ds for ds in active_dates if ds in readjust_set]
+        if not active_dates:
+            st.info("現在入力対象の日付がありません。")
+            return
+        st.info(f"スケジュール再調整に伴い、以下の **{len(active_dates)}日** について希望を入力してください。")
+
     pref = get_weekday_preference(doctor["id"], section)
     existing_ng = set(pref.get("ng_dates", []) if pref else [])
     existing_avoid = set(pref.get("avoid_dates", []) if pref else [])
@@ -121,6 +132,16 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
                     new_ng.append(ds)
                 elif val == "△":
                     new_avoid.append(ds)
+
+            # 再調整モードの場合、対象外の既存希望を維持
+            if readjust_dates:
+                active_set = set(active_dates)
+                for ds in existing_ng:
+                    if ds not in active_set and ds not in new_ng:
+                        new_ng.append(ds)
+                for ds in existing_avoid:
+                    if ds not in active_set and ds not in new_avoid:
+                        new_avoid.append(ds)
 
             upsert_weekday_preference(
                 doctor["id"], section,

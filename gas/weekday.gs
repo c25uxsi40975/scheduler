@@ -490,3 +490,162 @@ function sendWeekdayDayBeforeReminder() {
 
   Logger.log("平日前日リマインダー完了: " + sentCount + " 件送信");
 }
+
+
+// ---- スケジュール再調整通知 ----
+
+/**
+ * 平日スケジュール再調整に伴う希望入力依頼メールをメンバーに送信
+ * @param {Object} data - {section, clinic_name, deadline, target_date_count, mode}
+ */
+function sendWeekdayReadjustPreferenceRequest(data) {
+  var section = data.section;
+  var clinicName = data.clinic_name;
+  var deadline = data.deadline || "";
+  var dateCount = data.target_date_count || 0;
+  var mode = data.mode; // "fill" or "reconstruct"
+
+  var ssMaster = getMasterSpreadsheet();
+  var doctors = getDoctorMap(ssMaster);
+
+  var modeLabel = mode === "fill" ? "補填" : "再構成";
+  var sentCount = 0;
+
+  // セクションのメンバーにメール送信
+  var configs = getWeekdayConfigs(ssMaster);
+  var cfg = null;
+  for (var c = 0; c < configs.length; c++) {
+    if (configs[c].section === section) { cfg = configs[c]; break; }
+  }
+  var memberIds = cfg ? cfg.assigned_doctors : [];
+
+  for (var k = 0; k < memberIds.length; k++) {
+    var doc = doctors[String(memberIds[k])];
+    if (!doc || !doc.email) continue;
+
+    var subject = (TEST_MODE ? "【テスト】" : "") + "【希望入力依頼】" + clinicName + " スケジュール再調整（" + modeLabel + "）";
+    var body = (TEST_MODE ? TEST_NOTICE : "")
+      + doc.name + " 先生\n\n"
+      + clinicName + " の外勤スケジュールが再調整（" + modeLabel + "）されます。\n"
+      + "以下の日程について、NG日・避けたい日の希望を入力してください。\n\n"
+      + "━━━━━━━━━━━━━━━━━━━━\n"
+      + "  対象日数: " + dateCount + " 日\n"
+      + "  入力期限: " + deadline + "\n"
+      + "━━━━━━━━━━━━━━━━━━━━\n\n"
+      + "※ Webアプリから希望を入力してください。\n"
+      + "※ 期限までに入力がない場合、既存の希望がそのまま使用されます。\n\n"
+      + "※このメールは外勤調整システムから自動送信されています。";
+
+    try {
+      GmailApp.sendEmail(doc.email, subject, body, { name: SENDER_NAME });
+      sentCount++;
+    } catch (e) {
+      Logger.log("平日再調整希望入力依頼 送信失敗: " + doc.name + " - " + e.message);
+    }
+  }
+
+  // 管理者にもサマリ送信
+  sendToAdmins(
+    (TEST_MODE ? "【テスト】" : "") + "【希望入力依頼送信完了】" + clinicName,
+    clinicName + " のスケジュール再調整（" + modeLabel + "）に伴い、\n"
+    + "メンバー " + sentCount + " 名に希望入力依頼メールを送信しました。\n"
+    + "対象日数: " + dateCount + " 日\n"
+    + "入力期限: " + deadline
+  );
+
+  Logger.log("平日再調整希望入力依頼完了: " + sentCount + " 件送信 (mode=" + mode + ")");
+}
+
+
+/**
+ * 平日スケジュール再調整後にメンバーへ通知メール送信
+ * @param {Object} data - {section, clinic_name, year_months, mode, period}
+ */
+function sendWeekdayScheduleReadjusted(data) {
+  var section = data.section;
+  var clinicName = data.clinic_name;
+  var yearMonths = data.year_months || [];
+  var mode = data.mode; // "fill" or "reconstruct"
+  var period = data.period || "";
+
+  var ssMaster = getMasterSpreadsheet();
+  var ssSec = getWeekdaySectionSpreadsheet(ssMaster, section);
+  if (!ssSec) {
+    Logger.log("平日再調整通知: セクション '" + section + "' のスプレッドシートが未設定");
+    return;
+  }
+  var doctors = getDoctorMap(ssMaster);
+
+  // 全対象月の割り当てを取得
+  var allAssignments = [];
+  for (var m = 0; m < yearMonths.length; m++) {
+    var assignments = getWeekdayAssignments(ssSec, yearMonths[m], null);
+    allAssignments = allAssignments.concat(assignments);
+  }
+
+  // 医員ごとにグループ化
+  var doctorAssignments = {};
+  for (var i = 0; i < allAssignments.length; i++) {
+    var a = allAssignments[i];
+    var did = String(a.doctor_id);
+    if (!doctorAssignments[did]) doctorAssignments[did] = [];
+    doctorAssignments[did].push(a);
+  }
+
+  var modeLabel = mode === "fill" ? "補填" : "再構成";
+  var sentCount = 0;
+
+  // セクションのメンバーにメール送信
+  var configs = getWeekdayConfigs(ssMaster);
+  var cfg = null;
+  for (var c = 0; c < configs.length; c++) {
+    if (configs[c].section === section) { cfg = configs[c]; break; }
+  }
+  var memberIds = cfg ? cfg.assigned_doctors : [];
+
+  for (var k = 0; k < memberIds.length; k++) {
+    var doc = doctors[String(memberIds[k])];
+    if (!doc || !doc.email) continue;
+
+    var memberAssignments = doctorAssignments[String(memberIds[k])] || [];
+    var subject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤再調整】" + clinicName + "（" + modeLabel + "）";
+    var body = (TEST_MODE ? TEST_NOTICE : "")
+      + doc.name + " 先生\n\n"
+      + clinicName + " の外勤スケジュールが再調整（" + modeLabel + "）されました。\n"
+      + "対象期間: " + period + "\n\n";
+
+    if (memberAssignments.length > 0) {
+      body += "━━━ 更新後のスケジュール ━━━\n";
+      memberAssignments.sort(function(a, b) { return String(a.date) > String(b.date) ? 1 : -1; });
+      for (var j = 0; j < memberAssignments.length; j++) {
+        var dateObj = new Date(String(memberAssignments[j].date) + "T00:00:00+09:00");
+        var ds = Utilities.formatDate(dateObj, "Asia/Tokyo", "M/d(E)");
+        body += "  " + ds + "：" + (memberAssignments[j].slot_name || "") + "\n";
+      }
+      body += "━━━━━━━━━━━━━━━━━━━━\n";
+    } else {
+      body += "この期間の割り当てはありません。\n";
+    }
+
+    body += "\n詳細はWebアプリからご確認ください。\n\n"
+      + "※このメールは外勤調整システムから自動送信されています。";
+
+    try {
+      GmailApp.sendEmail(doc.email, subject, body, { name: SENDER_NAME });
+      sentCount++;
+    } catch (e) {
+      Logger.log("平日再調整通知 送信失敗: " + doc.name + " - " + e.message);
+    }
+  }
+
+  // 管理者にもサマリ送信
+  sendToAdmins(
+    (TEST_MODE ? "【テスト】" : "") + "【平日外勤再調整完了】" + clinicName,
+    clinicName + " の平日スケジュールが再調整されました。\n"
+    + "モード: " + modeLabel + "\n"
+    + "対象期間: " + period + "\n"
+    + "通知送信: " + sentCount + " 名"
+  );
+
+  Logger.log("平日再調整通知完了: " + sentCount + " 件送信 (mode=" + mode + ")");
+}

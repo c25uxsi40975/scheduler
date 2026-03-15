@@ -270,6 +270,27 @@ def set_weekday_deadline(section: str, deadline_date: str):
     _set_setting(f"weekday_deadline_{section}", deadline_date)
 
 
+def get_weekday_readjust_dates(section: str) -> list:
+    """再調整用の希望入力対象日を取得（設定なしなら空リスト → 全日対象）"""
+    import json
+    raw = _get_setting(f"weekday_readjust_dates_{section}")
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def set_weekday_readjust_dates(section: str, dates: list):
+    """再調整用の希望入力対象日を設定（空リストでクリア）"""
+    import json
+    if dates:
+        _set_setting(f"weekday_readjust_dates_{section}", json.dumps(dates))
+    else:
+        _set_setting(f"weekday_readjust_dates_{section}", "")
+
+
 # ---- Saturday Extra/Excluded Dates (土曜日の追加/除外日付) ----
 
 def get_saturday_extra_dates(year_month: str) -> list:
