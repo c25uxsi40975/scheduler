@@ -302,6 +302,215 @@ def generate_schedule_image(sched, doctors, clinics, year_month,
     return buf.getvalue()
 
 
+def generate_weekday_schedule_image(schedule_records, slots, year_month,
+                                     highlight_doctor_id=None):
+    """平日スケジュールをスプレッドシート風の PNG 画像として生成する。
+
+    Args:
+        schedule_records: get_weekday_schedule() の戻り値リスト
+        slots: get_weekday_slots() の戻り値リスト
+        year_month: "YYYY-MM"
+        highlight_doctor_id: ハイライトする医員ID
+
+    Returns:
+        bytes | None: PNG 画像データ
+    """
+    img = _build_weekday_schedule_image(schedule_records, slots, year_month,
+                                         highlight_doctor_id=highlight_doctor_id)
+    if img is None:
+        return None
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _build_weekday_schedule_image(schedule_records, slots, year_month,
+                                   highlight_doctor_id=None):
+    """平日スケジュールの PIL Image を生成する。
+
+    上部: スロット×日付テーブル（スロットが列、日付が行）
+    下部: 医員×日付テーブル（日付が列、医員が行）
+    """
+    if not schedule_records:
+        return None
+
+    # ---- データ構築 ----
+    slot_map = {s["id"]: s["slot_name"] for s in slots}
+    # スロットの表示順（slots のリスト順を保持）
+    slot_order = {s["id"]: i for i, s in enumerate(slots)}
+
+    # 日付ごと・スロットごとの割り当て
+    # cal_data: {date_str: {slot_name: doctor_name}}
+    cal_data = {}
+    # doc_sched: {doctor_id: {date_str: slot_name}}
+    doc_sched = {}
+    # 全医員情報の収集
+    doc_names = {}  # {doctor_id: doctor_name}
+
+    for r in schedule_records:
+        ds = r["date"]
+        sname = r.get("slot_name", slot_map.get(r.get("slot_id", 0), "?"))
+        dname = r.get("doctor_name", "?")
+        did = r["doctor_id"]
+
+        cal_data.setdefault(ds, {})[sname] = dname
+        doc_sched.setdefault(did, {})[ds] = sname
+        doc_names[did] = dname
+
+    if not cal_data:
+        return None
+
+    dates_sorted = sorted(cal_data.keys())
+    day_labels = []
+    for ds in dates_sorted:
+        d = date.fromisoformat(ds)
+        dow = "月火水木金土日"[d.weekday()]
+        day_labels.append(f"{d.day}({dow})")
+
+    _, month_str = year_month.split("-")
+    month_label = f"{int(month_str)}月"
+
+    # ハイライト対象の医員表示名
+    hl_doc_name = doc_names.get(highlight_doctor_id) if highlight_doctor_id else None
+
+    # スロット名の表示順
+    all_slot_names = sorted(
+        {sn for day_data in cal_data.values() for sn in day_data},
+        key=lambda sn: next(
+            (slot_order[sid] for sid, name in slot_map.items() if name == sn),
+            999
+        ),
+    )
+
+    # ---- 上部テーブル: スロット×日付 ----
+    top_header = [month_label] + all_slot_names
+    top_rows = []
+    top_hl_cells = set()
+    for i, ds in enumerate(dates_sorted):
+        row = [day_labels[i]]
+        for ci, sn in enumerate(all_slot_names):
+            val = cal_data[ds].get(sn, "")
+            row.append(val)
+            if hl_doc_name and val == hl_doc_name:
+                top_hl_cells.add((i, ci + 1))
+        top_rows.append(row)
+
+    # ---- 下部テーブル: 医員×日付 ----
+    doc_sorted_ids = sorted(doc_names.keys())
+    bot_header = [""] + day_labels
+    bot_rows = []
+    highlight_row = None
+    for idx, did in enumerate(doc_sorted_ids):
+        row = [doc_names[did]]
+        for ds in dates_sorted:
+            row.append(doc_sched.get(did, {}).get(ds, ""))
+        bot_rows.append(row)
+        if highlight_doctor_id and did == highlight_doctor_id:
+            highlight_row = idx
+
+    # ---- フォント読み込み ----
+    font_size = 16
+    font_obj = _load_font(font_size, bold=False)
+    bold_font = _load_font(font_size, bold=True)
+    if font_obj is None:
+        return None
+    if bold_font is None:
+        bold_font = font_obj
+
+    # ---- セルサイズ計算 ----
+    pad_x, pad_y = 10, 6
+    tmp = Image.new("RGB", (1, 1))
+    draw = ImageDraw.Draw(tmp)
+
+    _, sample_h = _text_size(draw, "あ", bold_font)
+    cell_h = sample_h + pad_y * 2 + 4
+    min_col_w = 40
+
+    def calc_col_widths(header, rows):
+        widths = []
+        for ci in range(len(header)):
+            max_w = 0
+            if header[ci]:
+                w, _ = _text_size(draw, header[ci], bold_font)
+                max_w = w
+            f = bold_font if ci == 0 else font_obj
+            for r in rows:
+                if ci < len(r) and r[ci]:
+                    w, _ = _text_size(draw, r[ci], f)
+                    max_w = max(max_w, w)
+            widths.append(max(max_w + pad_x * 2, min_col_w))
+        return widths
+
+    top_cw = calc_col_widths(top_header, top_rows)
+    bot_cw = calc_col_widths(bot_header, bot_rows)
+
+    # ---- 画像サイズ ----
+    margin = 4
+    top_tw = sum(top_cw)
+    bot_tw = sum(bot_cw)
+    img_w = max(top_tw, bot_tw) + margin * 2
+
+    top_th = (1 + len(top_rows)) * cell_h
+    gap = cell_h * 2
+    bot_th = (1 + len(bot_rows)) * cell_h
+    img_h = margin + top_th + gap + bot_th + margin
+
+    # ---- 描画 ----
+    img = Image.new("RGB", (img_w, img_h), "white")
+    draw = ImageDraw.Draw(img)
+
+    line_color = (180, 180, 180)
+    header_bg = (242, 242, 242)
+    highlight_bg = (255, 255, 200)
+
+    def draw_cell_text(x, y, w, text, f):
+        if not text:
+            return
+        tw, th = _text_size(draw, text, f)
+        tx = x + (w - tw) // 2
+        ty = y + (cell_h - th) // 2
+        draw.text((tx, ty), text, fill=(0, 0, 0), font=f)
+
+    def draw_table(x0, y0, col_ws, header, rows, hl_row=None, hl_cells=None):
+        tw = sum(col_ws)
+        n_rows = 1 + len(rows)
+        draw.rectangle([x0, y0, x0 + tw, y0 + cell_h], fill=header_bg)
+        if hl_row is not None:
+            hy = y0 + (hl_row + 1) * cell_h
+            draw.rectangle([x0, hy, x0 + tw, hy + cell_h], fill=highlight_bg)
+        if hl_cells:
+            for (ri, ci) in hl_cells:
+                cx = x0 + sum(col_ws[:ci])
+                cy = y0 + (ri + 1) * cell_h
+                draw.rectangle([cx, cy, cx + col_ws[ci], cy + cell_h], fill=highlight_bg)
+        for r in range(n_rows + 1):
+            y = y0 + r * cell_h
+            draw.line([(x0, y), (x0 + tw, y)], fill=line_color)
+        cx = x0
+        for cw in col_ws:
+            draw.line([(cx, y0), (cx, y0 + n_rows * cell_h)], fill=line_color)
+            cx += cw
+        draw.line([(cx, y0), (cx, y0 + n_rows * cell_h)], fill=line_color)
+        cx = x0
+        for ci, text in enumerate(header):
+            draw_cell_text(cx, y0, col_ws[ci], text, bold_font)
+            cx += col_ws[ci]
+        for ri, row in enumerate(rows):
+            y = y0 + (ri + 1) * cell_h
+            cx = x0
+            for ci, text in enumerate(row):
+                f = bold_font if ci == 0 else font_obj
+                draw_cell_text(cx, y, col_ws[ci], text, f)
+                cx += col_ws[ci]
+
+    draw_table(margin, margin, top_cw, top_header, top_rows, hl_cells=top_hl_cells)
+    bot_y = margin + top_th + gap
+    draw_table(margin, bot_y, bot_cw, bot_header, bot_rows, hl_row=highlight_row)
+
+    return img
+
+
 def generate_schedule_pdf(sched, doctors, clinics, year_month):
     """スケジュールを PDF として生成する。
 

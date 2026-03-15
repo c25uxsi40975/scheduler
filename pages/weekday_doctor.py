@@ -6,6 +6,7 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 from database import (
     get_doctors,
@@ -19,6 +20,8 @@ from database import (
     execute_swap, get_swap_history,
 )
 from components.display_utils import build_display_name_map
+from components.schedule_image import generate_weekday_schedule_image
+from components.schedule_viewer import _VIEWER_SCRIPT
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
 
@@ -198,11 +201,13 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
         st.info("この月のスケジュールはまだありません。")
         return
 
+    slots = get_weekday_slots(section)
+
     # 自分の割り当てをハイライト
     my_assignments = [r for r in schedule if r["doctor_id"] == doctor["id"]]
     if my_assignments:
         st.write(f"**あなたの割り当て: {len(my_assignments)}回**")
-        for r in my_assignments:
+        for r in sorted(my_assignments, key=lambda x: x["date"]):
             try:
                 dt = date.fromisoformat(r["date"])
                 date_label = dt.strftime("%m/%d(%a)")
@@ -212,27 +217,16 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     else:
         st.write("この月の割り当てはありません")
 
-    # 全体スケジュール
-    with st.expander("全体スケジュール"):
-        # 日付ごとにグループ
-        by_date = {}
-        for r in schedule:
-            if r["date"] not in by_date:
-                by_date[r["date"]] = []
-            by_date[r["date"]].append(r)
-
-        for ds in sorted(by_date.keys()):
-            try:
-                dt = date.fromisoformat(ds)
-                date_label = dt.strftime("%m/%d(%a)")
-            except ValueError:
-                date_label = ds
-            entries = by_date[ds]
-            parts = []
-            for r in entries:
-                mark = "**" if r["doctor_id"] == doctor["id"] else ""
-                parts.append(f"{r['slot_name']}: {mark}{r['doctor_name']}{mark}")
-            st.write(f"{date_label}　{' / '.join(parts)}")
+    # スケジュール画像（フルスクリーンビューア付き）
+    st.markdown("---")
+    st.subheader("全体スケジュール")
+    img_data = generate_weekday_schedule_image(
+        schedule, slots, view_month,
+        highlight_doctor_id=doctor["id"],
+    )
+    if img_data:
+        st.image(img_data, use_container_width=True)
+        components.html(_VIEWER_SCRIPT, height=0)
 
 
 def _render_shift_swap(doctor: dict, section: str, cfg: dict):
