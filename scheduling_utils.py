@@ -148,6 +148,9 @@ def solve_weekday_schedule(
 
     Returns:
         {date_str: {slot_id: [doctor_id, ...]}} or None (infeasible)
+
+    Raises:
+        ValueError: 人数不足で割り当て不可能な場合（詳細メッセージ付き）
     """
     if not target_dates or not slots or not doctors:
         return None
@@ -170,6 +173,37 @@ def solve_weekday_schedule(
     pref_map = {}
     for p in preferences:
         pref_map[p["doctor_id"]] = p
+
+    # NG日を考慮した事前チェック: 各日×スロットで利用可能人数 >= 必要人数か
+    shortage_details = []
+    for dt, dt_slots in date_slots.items():
+        ds = dt.isoformat()
+        for slot in dt_slots:
+            ovr_req = slot_overrides.get((slot["id"], ds))
+            if ovr_req is not None and ovr_req == 0:
+                continue
+            req = ovr_req if ovr_req is not None else int(slot.get("required_count", 1))
+            available_docs = []
+            ng_docs = []
+            for doc_id in doc_ids:
+                pref = pref_map.get(doc_id, {})
+                ng = set(pref.get("ng_dates") or [])
+                if ds in ng:
+                    ng_docs.append(doc_id)
+                else:
+                    available_docs.append(doc_id)
+            if len(available_docs) < req:
+                ng_names = [next((d["name"] for d in doctors if d["id"] == did), str(did))
+                            for did in ng_docs]
+                shortage_details.append(
+                    f"  {dt.strftime('%m/%d(%a)')} {slot.get('slot_name', '')}: "
+                    f"必要{req}人 / 利用可能{len(available_docs)}人 "
+                    f"（NG: {', '.join(ng_names)}）"
+                )
+    if shortage_details:
+        raise ValueError(
+            "NG日により人数不足のため生成できません:\n" + "\n".join(shortage_details)
+        )
 
     # PuLP問題定義
     prob = pulp.LpProblem("weekday_schedule", pulp.LpMinimize)

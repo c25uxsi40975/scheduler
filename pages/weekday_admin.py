@@ -825,14 +825,17 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     # 自動生成ボタン
     if st.button("スケジュール案を生成", type="primary", key=f"auto_gen_{section}"):
-        result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
-                                        slot_overrides=all_slot_overrides)
-        if result is None:
-            st.error("条件を満たすスケジュールが見つかりませんでした。制約を確認してください。")
-        else:
-            st.session_state[preview_key] = result
-            st.session_state["_toast_msg"] = "スケジュール案を生成しました。内容を確認して確定してください。"
-            st.rerun()
+        try:
+            result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
+                                            slot_overrides=all_slot_overrides)
+            if result is None:
+                st.error("条件を満たすスケジュールが見つかりませんでした。制約を確認してください。")
+            else:
+                st.session_state[preview_key] = result
+                st.session_state["_toast_msg"] = "スケジュール案を生成しました。内容を確認して確定してください。"
+                st.rerun()
+        except ValueError as e:
+            st.error(str(e))
 
     doc_ids = [d["id"] for d in assigned_doctors]
     doc_options = [0] + doc_ids
@@ -1151,25 +1154,29 @@ def _render_calendar_editor(
                             req_count = ovr_req if ovr_req is not None else int(slot.get("required_count", 1))
                             current = schedule_data.get(ds, {}).get(slot["id"], [])
                             label = slot["slot_name"] if len(day_slots) > 1 else ""
+                            # この日付でNG医員を除外した選択肢を作成
+                            day_options = [did for did in doc_options
+                                           if did == 0 or (did, ds) not in ng_set]
                             for k in range(req_count):
                                 cur_val = current[k] if k < len(current) else 0
-                                idx = doc_options.index(cur_val) if cur_val in doc_options else 0
+                                # NG医員が既に割り当てられている場合は未割り当てにフォールバック
+                                if cur_val != 0 and (cur_val, ds) in ng_set:
+                                    cur_val = 0
+                                idx = day_options.index(cur_val) if cur_val in day_options else 0
                                 sb_label = f"{label} #{k+1}" if label else f"#{k+1}" if req_count > 1 else slot["slot_name"]
-                                # 日付固有のformat_funcでNG/△マークを表示
+                                # 日付固有のformat_funcで△マークを表示
                                 _fmt = (lambda _ds: lambda did: _doc_label_for_date(did, _ds))(ds)
                                 selected = st.selectbox(
                                     sb_label,
-                                    options=doc_options,
+                                    options=day_options,
                                     index=idx,
                                     format_func=_fmt,
                                     key=f"{key_prefix}_{ds}_{slot['id']}_{k}",
                                     label_visibility="collapsed" if not label and req_count == 1 else "visible",
                                 )
-                                # 選択後の警告表示
+                                # 選択後の警告表示（△のみ、NGは選択肢から除外済み）
                                 if selected and selected != 0 and prefs:
-                                    if (selected, ds) in ng_set:
-                                        st.caption("⛔ NG日です")
-                                    elif (selected, ds) in avoid_set:
+                                    if (selected, ds) in avoid_set:
                                         st.caption("⚠ △希望日です")
                         st.markdown("---")
 
