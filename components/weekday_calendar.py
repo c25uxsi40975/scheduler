@@ -48,13 +48,13 @@ def render_weekday_calendar(schedule: list, slots: list, view_month: str,
                      for i, did in enumerate(unique_doc_ids)}
 
     # HTML生成
-    html = '<table style="width:100%; border-collapse:collapse; font-size:0.85rem; table-layout:fixed;">'
+    html = '<table style="width:100%; border-collapse:collapse; font-size:1rem; table-layout:fixed;">'
     # ヘッダー
     html += '<tr>'
     for day_name in ["月", "火", "水", "木", "金", "土", "日"]:
         bg = "#e3f2fd" if day_name == "土" else "#fce4ec" if day_name == "日" else "#f5f5f5"
-        html += (f'<th style="border:1px solid #ddd; padding:4px; text-align:center; '
-                 f'background:{bg};">{day_name}</th>')
+        html += (f'<th style="border:1px solid #ddd; padding:6px; text-align:center; '
+                 f'background:{bg}; font-size:1rem;">{day_name}</th>')
     html += '</tr>'
 
     for week in month_days:
@@ -65,17 +65,10 @@ def render_weekday_calendar(schedule: list, slots: list, view_month: str,
             else:
                 ds = date(year, month, day).isoformat()
                 entries = day_data.get(ds, {})
-                cell_content = f'<div style="font-weight:bold; margin-bottom:2px;">{day}</div>'
+                cell_content = f'<div style="font-weight:bold; margin-bottom:2px; font-size:1rem;">{day}</div>'
 
                 if entries:
                     for sid, doc_ids in sorted(entries.items()):
-                        slot = slot_map.get(sid, {})
-                        slot_name = slot.get("slot_name", "")
-                        if slot_name and len(entries) > 1:
-                            cell_content += (
-                                f'<div style="font-size:0.65rem; color:#888; '
-                                f'margin-top:1px;">{slot_name}</div>'
-                            )
                         for did in doc_ids:
                             name = doc_map.get(did, str(did))
                             if highlight_doctor_id and did == highlight_doctor_id:
@@ -86,7 +79,7 @@ def render_weekday_calendar(schedule: list, slots: list, view_month: str,
                                 fw = "normal"
                             cell_content += (
                                 f'<div style="background:{bg}; border-radius:3px; '
-                                f'padding:1px 3px; margin:1px 0; font-size:0.75rem; '
+                                f'padding:2px 4px; margin:1px 0; font-size:0.9rem; '
                                 f'font-weight:{fw}; overflow:hidden; text-overflow:ellipsis; '
                                 f'white-space:nowrap;">{name}</div>'
                             )
@@ -97,8 +90,8 @@ def render_weekday_calendar(schedule: list, slots: list, view_month: str,
                     for dids in entries.values()
                 ):
                     td_bg = "background:#fffde7;"
-                html += (f'<td style="border:1px solid #ddd; padding:4px; '
-                         f'vertical-align:top; height:80px; overflow:hidden; {td_bg}">'
+                html += (f'<td style="border:1px solid #ddd; padding:6px; '
+                         f'vertical-align:top; height:90px; overflow:hidden; {td_bg}">'
                          f'{cell_content}</td>')
         html += '</tr>'
     html += '</table>'

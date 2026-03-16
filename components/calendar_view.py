@@ -23,7 +23,7 @@ def render(doctor: dict):
 
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
-    view_month = st.selectbox("月を選択", months, key="cal_view_month")
+    view_month = st.selectbox("月を選択", months, index=1, key="cal_view_month")
 
     year, month = map(int, view_month.split("-"))
 
@@ -141,36 +141,34 @@ def _render_calendar_grid(year: int, month: int,
 
     # HTML生成
     cell_w = "calc(100% / 7)"
-    html = '<table style="width:100%; border-collapse:collapse; font-size:0.85rem; table-layout:fixed;">'
+    html = '<table style="width:100%; border-collapse:collapse; font-size:1rem; table-layout:fixed;">'
     html += '<tr>'
     for day_name in ["月", "火", "水", "木", "金", "土", "日"]:
         bg = "#e3f2fd" if day_name == "土" else "#fce4ec" if day_name == "日" else "#f5f5f5"
-        html += f'<th style="width:{cell_w}; border:1px solid #ddd; padding:4px; text-align:center; background:{bg};">{day_name}</th>'
+        html += f'<th style="width:{cell_w}; border:1px solid #ddd; padding:6px; text-align:center; background:{bg}; font-size:1rem;">{day_name}</th>'
     html += '</tr>'
 
     for week in month_days:
         html += '<tr>'
         for day in week:
             if day == 0:
-                html += f'<td style="width:{cell_w}; border:1px solid #eee; padding:4px; height:70px;">&nbsp;</td>'
+                html += f'<td style="width:{cell_w}; border:1px solid #eee; padding:6px; height:80px;">&nbsp;</td>'
             else:
                 ds = date(year, month, day).isoformat()
                 entries = all_entries.get(ds, [])
-                cell_content = f'<div style="font-weight:bold; margin-bottom:2px;">{day}</div>'
+                cell_content = f'<div style="font-weight:bold; margin-bottom:2px; font-size:1rem;">{day}</div>'
                 for e in entries:
                     bg = e.get("color", "#f5f5f5")
                     label = e["clinic"]
-                    if e.get("slot"):
-                        label += f' ({e["slot"]})'
                     if e.get("time"):
-                        label += f'<br><span style="font-size:0.65rem;color:#666;">{e["time"]}</span>'
+                        label += f'<br><span style="font-size:0.75rem;color:#666;">{e["time"]}</span>'
                     cell_content += (
                         f'<div style="background:{bg}; border-radius:3px; '
-                        f'padding:1px 3px; margin:1px 0; font-size:0.75rem; '
+                        f'padding:2px 4px; margin:1px 0; font-size:0.9rem; '
                         f'overflow:hidden; text-overflow:ellipsis;">'
                         f'{label}</div>'
                     )
-                td_style = f"width:{cell_w}; border:1px solid #ddd; padding:4px; vertical-align:top; height:70px; overflow:hidden;"
+                td_style = f"width:{cell_w}; border:1px solid #ddd; padding:6px; vertical-align:top; height:80px; overflow:hidden;"
                 if entries:
                     td_style += " background:#fffde7;"
                 html += f'<td style="{td_style}">{cell_content}</td>'

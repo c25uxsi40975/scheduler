@@ -197,7 +197,7 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     """スケジュール確認タブ"""
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
-    view_month = st.selectbox("月を選択", months, key=f"wkdoc_view_month_{section}")
+    view_month = st.selectbox("月を選択", months, index=1, key=f"wkdoc_view_month_{section}")
 
     schedule = get_weekday_schedule(view_month, section)
     if not schedule:
