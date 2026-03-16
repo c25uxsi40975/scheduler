@@ -576,6 +576,16 @@ def _show_doctor_settings(doctor):
                     "\n\nGoogleアカウント（Gmail / Google Workspace）の"
                     "メールアドレスが必要です。"
                 )
+                # Googleアカウント以外の場合は警告
+                email_str = doctor.get("email", "").strip().lower()
+                is_google_email = email_str.endswith("@gmail.com") or email_str.endswith("@googlemail.com")
+                if has_email and not is_google_email:
+                    # Google Workspace の場合もあるので警告レベルに留める
+                    st.warning(
+                        "登録されたメールアドレスがGmailではないため、"
+                        "Googleカレンダー連携が機能しない可能性があります。"
+                        "Google Workspaceのアドレスであれば問題ありません。"
+                    )
                 new_notify_cal = st.checkbox(
                     "Googleカレンダー連携を有効にする",
                     value=cur_notify_cal,
