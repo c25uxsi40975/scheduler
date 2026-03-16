@@ -362,9 +362,21 @@ def get_target_dates(section: str):
 
 
 def get_active_target_dates(section: str) -> list[str]:
-    """有効な対象日の日付文字列リストを返す"""
+    """有効な対象日の日付文字列リストを返す（年末年始を自動除外）"""
+    from scheduling_utils import is_nenmatsu_nenshi
+    from datetime import date as _date
     all_dates = get_target_dates(section)
-    return [d["date"] for d in all_dates if d["is_active"]]
+    result = []
+    for d in all_dates:
+        if not d["is_active"]:
+            continue
+        try:
+            if is_nenmatsu_nenshi(_date.fromisoformat(d["date"])):
+                continue
+        except ValueError:
+            pass
+        result.append(d["date"])
+    return result
 
 
 def set_target_dates(section: str, dates: list[str], active_dates: list[str] = None):

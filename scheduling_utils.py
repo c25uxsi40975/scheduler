@@ -7,6 +7,13 @@ import jpholiday
 import pulp
 
 
+# ---- 年末年始除外 ----
+
+def is_nenmatsu_nenshi(d: date) -> bool:
+    """12/29〜1/3 は年末年始として除外"""
+    return (d.month == 12 and d.day >= 29) or (d.month == 1 and d.day <= 3)
+
+
 # ---- 対象日生成 ----
 
 def get_target_dates(
@@ -29,15 +36,11 @@ def get_target_dates(
     excluded_set = {date.fromisoformat(d) for d in (excluded or [])}
     days_set = set(days_of_week)
 
-    def _is_nenmatsu_nenshi(d: date) -> bool:
-        """12/29〜1/3 は年末年始として除外"""
-        return (d.month == 12 and d.day >= 29) or (d.month == 1 and d.day <= 3)
-
     dates = []
     d = date(year, month, 1)
     while d.month == month:
         if d.weekday() in days_set:
-            if d not in excluded_set and not _is_nenmatsu_nenshi(d):
+            if d not in excluded_set and not is_nenmatsu_nenshi(d):
                 if not exclude_holidays or not jpholiday.is_holiday(d):
                     dates.append(d)
         d += timedelta(days=1)
@@ -45,7 +48,7 @@ def get_target_dates(
     # 追加日付（翌月の日付など）
     for extra_str in (extra or []):
         extra_date = date.fromisoformat(extra_str)
-        if extra_date not in excluded_set and extra_date not in dates and not _is_nenmatsu_nenshi(extra_date):
+        if extra_date not in excluded_set and extra_date not in dates and not is_nenmatsu_nenshi(extra_date):
             if not exclude_holidays or not jpholiday.is_holiday(extra_date):
                 dates.append(extra_date)
 
