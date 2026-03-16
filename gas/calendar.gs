@@ -9,9 +9,9 @@
  *   Apps Script エディタ → サービス（+）→ Google Calendar API → 追加
  *
  * 設定シートのキー:
- *   calendar_sync_enabled : "1" で有効
  *   calendar_id_saturday  : 土曜外勤用カレンダーID
  *   calendar_id_weekday_{section} : 平日セクション別カレンダーID
+ *   ※ カレンダーIDが登録されていれば自動的に同期が有効になる
  */
 
 // ---- カレンダー設定 ----
@@ -29,18 +29,10 @@ function getCalendarSettings(ssMaster) {
   for (var i = 1; i < data.length; i++) {
     var key = String(data[i][0]);
     if (key.indexOf("calendar_") === 0) {
-      result[key] = String(data[i][1]);
+      result[key] = String(data[i][1]).trim();
     }
   }
   return result;
-}
-
-/**
- * カレンダー連携が有効かチェック
- */
-function isCalendarSyncEnabled(ssMaster) {
-  var settings = getCalendarSettings(ssMaster);
-  return settings["calendar_sync_enabled"] === "1";
 }
 
 /**
@@ -111,6 +103,39 @@ function createAllDayEventWithGuest(calendarId, title, eventDate, description, g
   }
 }
 
+/**
+ * Calendar.Events.list() で指定期間のイベントを一括取得（ページネーション対応）
+ * attendees 情報込みで取得できるため、個別 get が不要になる。
+ *
+ * @param {string} calendarId カレンダーID
+ * @param {Date} startDate 開始日
+ * @param {Date} endDate 終了日
+ * @return {Array} イベントリソースの配列
+ */
+function listTaggedEvents(calendarId, startDate, endDate) {
+  var events = [];
+  var pageToken = null;
+  do {
+    var params = {
+      timeMin: startDate.toISOString(),
+      timeMax: endDate.toISOString(),
+      maxResults: 250,
+      singleEvents: true
+    };
+    if (pageToken) params.pageToken = pageToken;
+    var response = Calendar.Events.list(calendarId, params);
+    var items = response.items || [];
+    for (var i = 0; i < items.length; i++) {
+      var desc = items[i].description || "";
+      if (desc.indexOf("[外勤調整:") !== -1) {
+        events.push(items[i]);
+      }
+    }
+    pageToken = response.nextPageToken;
+  } while (pageToken);
+  return events;
+}
+
 // ---- タグベースのイベント管理 ----
 
 /**
@@ -176,7 +201,6 @@ function getMonthRange(yearMonth) {
  */
 function syncSaturdayCalendar(yearMonth, ssMaster) {
   var settings = getCalendarSettings(ssMaster);
-  if (settings["calendar_sync_enabled"] !== "1") return;
   var calId = settings["calendar_id_saturday"];
   var calendar = getCalendarSafe(calId);
   if (!calendar) return;
@@ -241,8 +265,6 @@ function syncSaturdayCalendar(yearMonth, ssMaster) {
  */
 function syncWeekdayCalendar(data, ssMaster) {
   var settings = getCalendarSettings(ssMaster);
-  if (settings["calendar_sync_enabled"] !== "1") return;
-
   var section = data.section;
   var clinicName = data.clinic_name || "";
   var yearMonths = data.year_months || [];
@@ -313,8 +335,6 @@ function syncWeekdayCalendarReadjusted(data, ssMaster) {
  */
 function syncShiftSwapCalendar(data, ssMaster) {
   var settings = getCalendarSettings(ssMaster);
-  if (settings["calendar_sync_enabled"] !== "1") return;
-
   var section = data.section;
   var clinicName = data.clinic_name || "";
   var calId = settings["calendar_id_weekday_" + section];
@@ -386,6 +406,9 @@ function syncShiftSwapCalendar(data, ssMaster) {
  * 特定の医員のカレンダー連携状態が変わったときに再同期
  * 医員が通知設定を保存した際に doPost 経由で呼ばれる。
  *
+ * Calendar.Events.list() で一括取得し、医員名でフィルタして
+ * ゲストの追加/削除を行う。個別 get は不要。
+ *
  * enabled=true: 既存イベントにゲストとして追加
  * enabled=false: 既存イベントからゲストを削除
  *
@@ -394,7 +417,7 @@ function syncShiftSwapCalendar(data, ssMaster) {
 function resyncCalendarForDoctor(data) {
   var ssMaster = getMasterSpreadsheet();
   var settings = getCalendarSettings(ssMaster);
-  if (settings["calendar_sync_enabled"] !== "1") return;
+  var doctors = getDoctorMap(ssMaster);
 
   var doctorId = String(data.doctor_id);
   var doctorEmail = String(data.doctor_email || "");
@@ -405,68 +428,43 @@ function resyncCalendarForDoctor(data) {
     return;
   }
 
-  // 土曜カレンダーの再同期
-  var satCalId = settings["calendar_id_saturday"];
-  if (satCalId) {
-    resyncDoctorEventsInCalendar(satCalId, doctorId, doctorEmail, enabled, "saturday");
-  }
-
-  // 平日カレンダーの再同期（全セクション）
-  for (var key in settings) {
-    if (key.indexOf("calendar_id_weekday_") === 0) {
-      var calId = settings[key];
-      if (calId) {
-        var section = key.replace("calendar_id_weekday_", "");
-        resyncDoctorEventsInCalendar(calId, doctorId, doctorEmail, enabled, "weekday:" + section);
-      }
-    }
-  }
-
-  Logger.log("カレンダー再同期完了: doctor_id=" + doctorId + ", enabled=" + enabled);
-}
-
-/**
- * 指定カレンダー内の特定医員のイベントにゲストを追加/削除
- *
- * @param {string} calendarId カレンダーID
- * @param {string} doctorId 医員ID
- * @param {string} doctorEmail 医員メールアドレス
- * @param {boolean} enabled ゲスト追加(true) or 削除(false)
- * @param {string} label ログ用ラベル
- */
-function resyncDoctorEventsInCalendar(calendarId, doctorId, doctorEmail, enabled, label) {
-  var cal = getCalendarSafe(calendarId);
-  if (!cal) return;
-
-  // 医員名をループ外で1回だけ取得
-  var ssMaster = getMasterSpreadsheet();
-  var doctors = getDoctorMap(ssMaster);
   var targetDoc = doctors[doctorId];
-  if (!targetDoc) return;
+  if (!targetDoc) {
+    Logger.log("カレンダー再同期: 医員不明 (doctor_id=" + doctorId + ")");
+    return;
+  }
 
-  // 今月から3ヶ月先までのイベントを対象
   var now = new Date();
   var start = new Date(now.getFullYear(), now.getMonth(), 1);
   var end = new Date(now.getFullYear(), now.getMonth() + 3, 0);
 
-  var events = cal.getEvents(start, end);
-  var updatedCount = 0;
-  for (var i = 0; i < events.length; i++) {
-    var desc = events[i].getDescription() || "";
-    if (desc.indexOf("[外勤調整:") === -1) continue;
+  // 全カレンダーIDを収集
+  var calendarIds = [];
+  if (settings["calendar_id_saturday"]) {
+    calendarIds.push({ id: settings["calendar_id_saturday"], label: "saturday" });
+  }
+  for (var key in settings) {
+    if (key.indexOf("calendar_id_weekday_") === 0 && settings[key]) {
+      calendarIds.push({ id: settings[key], label: key.replace("calendar_id_", "") });
+    }
+  }
 
-    // description の "医員: XXX" で対象医員のイベントか判定
-    var doctorNameMatch = desc.match(/医員: (.+)/);
-    if (!doctorNameMatch) continue;
-    var eventDoctorName = doctorNameMatch[1].trim();
-    if (eventDoctorName !== targetDoc.name) continue;
+  var totalUpdated = 0;
+  for (var c = 0; c < calendarIds.length; c++) {
+    var calId = calendarIds[c].id;
+    var label = calendarIds[c].label;
 
-    var eventId = events[i].getId().replace("@google.com", "");
-    try {
-      var eventResource = Calendar.Events.get(calendarId, eventId);
+    // Calendar.Events.list() で一括取得（attendees 込み）
+    var events = listTaggedEvents(calId, start, end);
+    var updatedCount = 0;
 
-      // ゲストの追加/削除
-      var attendees = eventResource.attendees || [];
+    for (var i = 0; i < events.length; i++) {
+      var desc = events[i].description || "";
+      var doctorNameMatch = desc.match(/医員: (.+)/);
+      if (!doctorNameMatch) continue;
+      if (doctorNameMatch[1].trim() !== targetDoc.name) continue;
+
+      var attendees = events[i].attendees || [];
       var hasGuest = false;
       var guestIndex = -1;
       for (var j = 0; j < attendees.length; j++) {
@@ -479,21 +477,122 @@ function resyncDoctorEventsInCalendar(calendarId, doctorId, doctorEmail, enabled
 
       if (enabled && !hasGuest) {
         attendees.push({ email: doctorEmail, responseStatus: "accepted" });
-        Calendar.Events.patch({ attendees: attendees }, calendarId, eventId, { sendUpdates: "none" });
+        Calendar.Events.patch({ attendees: attendees }, calId, events[i].id, { sendUpdates: "none" });
         updatedCount++;
       } else if (!enabled && hasGuest) {
         attendees.splice(guestIndex, 1);
-        Calendar.Events.patch({ attendees: attendees }, calendarId, eventId, { sendUpdates: "none" });
+        Calendar.Events.patch({ attendees: attendees }, calId, events[i].id, { sendUpdates: "none" });
         updatedCount++;
       }
-    } catch (e) {
-      Logger.log("再同期イベント更新失敗: " + eventId + " - " + e.message);
+    }
+
+    if (updatedCount > 0) {
+      Logger.log("カレンダー再同期 (" + label + "): " + updatedCount + " 件更新");
+    }
+    totalUpdated += updatedCount;
+  }
+
+  Logger.log("カレンダー再同期完了: doctor_id=" + doctorId + ", enabled=" + enabled + ", 合計" + totalUpdated + "件");
+}
+
+/**
+ * 全医員のカレンダーゲストを一括再同期
+ * 管理者がカレンダー設定を保存した際に doPost 経由で呼ばれる。
+ *
+ * Calendar.Events.list() でカレンダーごとに1回だけイベントを取得し、
+ * 全医員の notify_calendar フラグに基づいてゲストを追加/削除する。
+ *
+ * API呼び出し: list 1〜2回/カレンダー + patch 変更イベント数
+ */
+function resyncCalendarForAllDoctors() {
+  var ssMaster = getMasterSpreadsheet();
+  var settings = getCalendarSettings(ssMaster);
+  var doctors = getDoctorMap(ssMaster);
+
+  var now = new Date();
+  var start = new Date(now.getFullYear(), now.getMonth(), 1);
+  var end = new Date(now.getFullYear(), now.getMonth() + 3, 0);
+
+  // notify_calendar が有効な医員の {名前: メール} マップを作成
+  var enabledDoctors = {};  // name -> email
+  var allDoctorEmails = {}; // name -> email (全医員)
+  for (var id in doctors) {
+    var doc = doctors[id];
+    if (doc.email) {
+      allDoctorEmails[doc.name] = doc.email;
+      if (doc.notify_calendar) {
+        enabledDoctors[doc.name] = doc.email;
+      }
     }
   }
 
-  if (updatedCount > 0) {
-    Logger.log("カレンダー再同期 (" + label + "): " + updatedCount + " 件更新");
+  // 全カレンダーIDを収集
+  var calendarIds = [];
+  if (settings["calendar_id_saturday"]) {
+    calendarIds.push({ id: settings["calendar_id_saturday"], label: "saturday" });
   }
+  for (var key in settings) {
+    if (key.indexOf("calendar_id_weekday_") === 0 && settings[key]) {
+      calendarIds.push({ id: settings[key], label: key.replace("calendar_id_", "") });
+    }
+  }
+
+  var totalUpdated = 0;
+  for (var c = 0; c < calendarIds.length; c++) {
+    var calId = calendarIds[c].id;
+    var label = calendarIds[c].label;
+
+    // Calendar.Events.list() で一括取得
+    var events = listTaggedEvents(calId, start, end);
+    var updatedCount = 0;
+
+    for (var i = 0; i < events.length; i++) {
+      var desc = events[i].description || "";
+      var doctorNameMatch = desc.match(/医員: (.+)/);
+      if (!doctorNameMatch) continue;
+      var eventDoctorName = doctorNameMatch[1].trim();
+
+      var shouldHaveGuest = !!enabledDoctors[eventDoctorName];
+      var expectedEmail = enabledDoctors[eventDoctorName] || allDoctorEmails[eventDoctorName] || "";
+      if (!expectedEmail) continue;
+
+      var attendees = events[i].attendees || [];
+      var hasGuest = false;
+      var guestIndex = -1;
+      for (var j = 0; j < attendees.length; j++) {
+        if (attendees[j].email === expectedEmail) {
+          hasGuest = true;
+          guestIndex = j;
+          break;
+        }
+      }
+
+      var needsUpdate = false;
+      if (shouldHaveGuest && !hasGuest) {
+        attendees.push({ email: expectedEmail, responseStatus: "accepted" });
+        needsUpdate = true;
+      } else if (!shouldHaveGuest && hasGuest) {
+        attendees.splice(guestIndex, 1);
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        try {
+          Calendar.Events.patch({ attendees: attendees }, calId, events[i].id, { sendUpdates: "none" });
+          updatedCount++;
+        } catch (e) {
+          Logger.log("全医員再同期 イベント更新失敗: " + events[i].id + " - " + e.message);
+        }
+      }
+    }
+
+    if (updatedCount > 0) {
+      Logger.log("全医員カレンダー再同期 (" + label + "): " + updatedCount + " 件更新");
+    }
+    totalUpdated += updatedCount;
+  }
+
+  Logger.log("全医員カレンダー再同期完了: 合計" + totalUpdated + "件");
 }
 
 // ---- テスト用 ----

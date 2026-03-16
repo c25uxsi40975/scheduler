@@ -106,6 +106,8 @@ function doPost(e) {
     // カレンダー再同期
     } else if (data.action === "calendar_resync_doctor") {
       resyncCalendarForDoctor(data);
+    } else if (data.action === "calendar_resync_all") {
+      resyncCalendarForAllDoctors();
     }
 
     return ContentService.createTextOutput(
