@@ -192,7 +192,7 @@ function sendWeekdayScheduleConfirmed(data) {
 
   for (var k = 0; k < memberIds.length; k++) {
     var doc = doctors[String(memberIds[k])];
-    if (!doc || !doc.email) continue;
+    if (!doc || !doc.email || !doc.notify_email) continue;
 
     var assignments = doctorAssignments[String(memberIds[k])] || [];
     var subject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤確定】" + clinicName + " " + periodLabel;
@@ -437,7 +437,7 @@ function checkWeekdayDeadlines() {
       var sentCount = 0;
       for (var k = 0; k < memberIds.length; k++) {
         var doc = doctors[String(memberIds[k])];
-        if (!doc || !doc.email) continue;
+        if (!doc || !doc.email || !doc.notify_email) continue;
         var submitted = !!submittedIds[String(memberIds[k])];
 
         var subject = (TEST_MODE ? "【テスト】" : "") + "【入力期限】" + cfg.clinic_name + " 本日が希望入力期限です";
@@ -544,7 +544,7 @@ function sendWeekdayDayBeforeReminder() {
     for (var j = 0; j < assignments.length; j++) {
       var a = assignments[j];
       var doc = doctors[String(a.doctor_id)];
-      if (!doc || !doc.email) continue;
+      if (!doc || !doc.email || !doc.notify_email) continue;
 
       var subject = (TEST_MODE ? "【テスト】" : "") + "【外勤リマインダー】明日 " + displayDate + " " + cfg.clinic_name;
       var body = (TEST_MODE ? TEST_NOTICE : "")
@@ -616,7 +616,7 @@ function sendWeekdayReadjustPreferenceRequest(data) {
 
   for (var k = 0; k < memberIds.length; k++) {
     var doc = doctors[String(memberIds[k])];
-    if (!doc || !doc.email) continue;
+    if (!doc || !doc.email || !doc.notify_email) continue;
 
     var subject = (TEST_MODE ? "【テスト】" : "") + "【希望入力依頼】" + clinicName + " スケジュール再調整（" + modeLabel + "）";
     var body = (TEST_MODE ? TEST_NOTICE : "")
@@ -700,7 +700,7 @@ function sendWeekdayScheduleReadjusted(data) {
 
   for (var k = 0; k < memberIds.length; k++) {
     var doc = doctors[String(memberIds[k])];
-    if (!doc || !doc.email) continue;
+    if (!doc || !doc.email || !doc.notify_email) continue;
 
     var memberAssignments = doctorAssignments[String(memberIds[k])] || [];
     var subject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤再調整】" + clinicName + "（" + modeLabel + "）";

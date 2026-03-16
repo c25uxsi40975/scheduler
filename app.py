@@ -12,7 +12,7 @@ from database import (
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, verify_doctor_by_account,
-    update_doctor_email, update_doctor_account_name,
+    update_doctor_email, update_doctor_account_name, update_doctor_notification_settings,
     get_open_month, set_open_month, get_input_deadline, set_input_deadline,
     get_confirmed_months,
     save_reset_code, verify_reset_code,
@@ -476,6 +476,22 @@ def _show_admin_header():
     return target_month, year, month
 
 
+def _request_calendar_resync(doctor, enabled: bool):
+    """GAS Web App経由でカレンダー再同期をリクエスト"""
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "calendar_resync_doctor",
+            "doctor_id": str(doctor["id"]),
+            "doctor_email": doctor.get("email", ""),
+            "enabled": enabled,
+        }, timeout=15)
+    except requests.RequestException:
+        pass
+
+
 def _show_doctor_settings(doctor):
     """医員設定: アカウント名変更・パスワード変更・メールアドレス設定"""
     with st.expander("アカウント設定", expanded=True):
@@ -535,6 +551,36 @@ def _show_doctor_settings(doctor):
                     else:
                         update_doctor_email(doctor["id"], new_email.strip())
                         st.success("メールアドレスを保存しました")
+                    st.rerun()
+
+            st.divider()
+            st.subheader("通知設定")
+            has_email = bool(doctor.get("email", "").strip())
+            if not has_email:
+                st.info("メールアドレスを登録すると通知設定が利用できます。")
+            with st.form("notification_settings_form"):
+                cur_notify_email = bool(doctor.get("notify_email", 1))
+                cur_notify_cal = bool(doctor.get("notify_calendar", 0))
+                new_notify_email = st.checkbox(
+                    "メール通知を有効にする",
+                    value=cur_notify_email,
+                    disabled=not has_email,
+                    help="スケジュール確定やリマインダーのメールが届きます",
+                )
+                new_notify_cal = st.checkbox(
+                    "Googleカレンダー連携を有効にする",
+                    value=cur_notify_cal,
+                    disabled=not has_email,
+                    help="外勤スケジュールがGoogleカレンダーに自動追加されます。Googleアカウント（Gmail / Google Workspace）のメールアドレスが必要です。",
+                )
+                if st.form_submit_button("通知設定を保存", disabled=not has_email):
+                    update_doctor_notification_settings(
+                        doctor["id"], new_notify_email, new_notify_cal
+                    )
+                    # カレンダー連携の状態が変わった場合、GASに再同期リクエスト
+                    if new_notify_cal != cur_notify_cal:
+                        _request_calendar_resync(doctor, new_notify_cal)
+                    st.success("通知設定を保存しました")
                     st.rerun()
 
         if st.button("設定を閉じる"):

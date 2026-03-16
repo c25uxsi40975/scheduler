@@ -130,10 +130,11 @@ def render(doctor, target_month, year, month):
             free_text=free_text,
             post_night_dates=post_night_dates,
         )
-        _send_notifications(
-            doctor["name"], doctor.get("email", ""), target_month,
-            ng_dates, avoid_dates, free_text, saturdays, post_night_dates,
-        )
+        if doctor.get("notify_email", 1):
+            _send_notifications(
+                doctor["name"], doctor.get("email", ""), target_month,
+                ng_dates, avoid_dates, free_text, saturdays, post_night_dates,
+            )
         st.session_state["_toast_msg"] = "保存しました！"
         st.rerun()
 

@@ -102,6 +102,10 @@ function doPost(e) {
       sendWeekdayReadjustPreferenceRequest(data);
     } else if (data.action === "weekday_schedule_readjusted") {
       sendWeekdayScheduleReadjusted(data);
+
+    // カレンダー再同期
+    } else if (data.action === "calendar_resync_doctor") {
+      resyncCalendarForDoctor(data);
     }
 
     return ContentService.createTextOutput(
@@ -201,6 +205,8 @@ function getDoctorMap(ss) {
   var colEmail = headers.indexOf("email");
   var colActive = headers.indexOf("is_active");
   var colAccount = headers.indexOf("account");
+  var colNotifyEmail = headers.indexOf("notify_email");
+  var colNotifyCal = headers.indexOf("notify_calendar");
 
   var map = {};
   for (var i = 1; i < data.length; i++) {
@@ -209,7 +215,9 @@ function getDoctorMap(ss) {
     map[String(row[colId])] = {
       name: String(row[colName]),
       email: String(row[colEmail] || "").trim(),
-      account: colAccount >= 0 ? String(row[colAccount] || "") : ""
+      account: colAccount >= 0 ? String(row[colAccount] || "") : "",
+      notify_email: colNotifyEmail >= 0 ? String(row[colNotifyEmail]) !== "0" : true,
+      notify_calendar: colNotifyCal >= 0 ? String(row[colNotifyCal]) === "1" : false
     };
   }
   return map;

@@ -195,6 +195,20 @@ def update_doctor_email(doctor_id, email: str):
     _clear_data_cache()
 
 
+def update_doctor_notification_settings(doctor_id, notify_email: bool, notify_calendar: bool):
+    """医員の通知設定を更新"""
+    ws = _get_sheet("医員マスタ")
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if not row_idx:
+        return
+    actual_headers = _retry(ws.row_values, 1)
+    col_email = actual_headers.index("notify_email") + 1
+    col_cal = actual_headers.index("notify_calendar") + 1
+    _retry(ws.update_cell, row_idx, col_email, 1 if notify_email else 0)
+    _retry(ws.update_cell, row_idx, col_cal, 1 if notify_calendar else 0)
+    _clear_data_cache()
+
+
 # ---- Password Reset (パスワードリセット) ----
 
 _RESET_CODE_TTL = 900  # 15分

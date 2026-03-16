@@ -57,6 +57,8 @@ def get_doctors(active_only=True):
         r["last_name"] = str(r.get("last_name", ""))
         r["first_name"] = str(r.get("first_name", ""))
         r["must_change_pw"] = _safe_int(r.get("must_change_pw", 0))
+        r["notify_email"] = _safe_int(r.get("notify_email", 1), default=1)
+        r["notify_calendar"] = _safe_int(r.get("notify_calendar", 0))
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -84,6 +86,7 @@ def add_doctor(last_name, first_name, account="", initial_password="aaaa1111"):
         "account_name": _sanitize_cell_value(account), "email": "",
         "password_hash": pw_hash, "is_active": 1, "can_login": 1,
         "created_at": now, "max_assignments": 4, "must_change_pw": 1,
+        "notify_email": 1, "notify_calendar": 0,
     }
     row = [values.get(h, "") for h in actual_headers]
     _retry(ws.append_row, row)

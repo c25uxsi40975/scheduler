@@ -43,7 +43,7 @@ function sendConfirmationEmails(yearMonth, planName) {
   var sentCount = 0;
   for (var doctorId in doctors) {
     var doctor = doctors[doctorId];
-    if (!doctor.email) continue;
+    if (!doctor.email || !doctor.notify_email) continue;
 
     var assignments = doctorAssignments[doctorId] || [];
     var subject = (TEST_MODE ? "【テスト】" : "") + "【外勤スケジュール確定】" + yearMonth;
