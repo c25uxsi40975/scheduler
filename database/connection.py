@@ -276,6 +276,7 @@ SHEET_HEADERS = {
         "id", "section", "clinic_name", "days_of_week",
         "assigned_doctors", "subadmin_doctors", "is_active", "created_at",
         "spreadsheet_key",
+        "specimen_enabled", "specimen_doctors", "specimen_days",
     ],
     "平日スロットマスタ": [
         "id", "section", "slot_name", "day_of_week",

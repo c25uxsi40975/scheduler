@@ -54,6 +54,9 @@ def get_weekday_configs():
         r["subadmin_doctors"] = _safe_json_loads(r.get("subadmin_doctors", "[]"))
         r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
         r["spreadsheet_key"] = str(r.get("spreadsheet_key", "")).strip()
+        r["specimen_enabled"] = _safe_int(r.get("specimen_enabled", 0))
+        r["specimen_doctors"] = _safe_json_loads(r.get("specimen_doctors", "[]"))
+        r["specimen_days"] = _safe_json_loads(r.get("specimen_days", "[]"))
         result.append(r)
     return result
 
@@ -65,6 +68,67 @@ def get_weekday_config_by_section(section: str):
         if c["section"] == section:
             return c
     return None
+
+
+def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
+    """検体確認担当者を判定する
+
+    Returns:
+        None: 検体確認が無効、対象曜日でない、候補なしの場合
+        dict: {"doctor_id", "doctor_name", "conflict", "conflict_doctors"}
+              conflict=True は同学年が複数いて要相談
+    """
+    from datetime import date as date_cls
+
+    cfg = get_weekday_config_by_section(section)
+    if not cfg or not cfg.get("specimen_enabled"):
+        return None
+
+    dt = date_cls.fromisoformat(date_str)
+    if dt.weekday() not in cfg.get("specimen_days", []):
+        return None
+
+    specimen_doctor_ids = set(cfg.get("specimen_doctors", []))
+    if not specimen_doctor_ids:
+        return None
+
+    if schedule is None:
+        year_month = date_str[:7]
+        schedule = get_weekday_schedule(year_month, section)
+
+    scheduled_ids = {r["doctor_id"] for r in schedule if r["date"] == date_str}
+    candidates = specimen_doctor_ids & scheduled_ids
+    if not candidates:
+        return None
+
+    doctors = get_doctors(active_only=False)
+    doc_map = {d["id"]: d for d in doctors}
+
+    candidate_docs = []
+    for did in candidates:
+        doc = doc_map.get(did)
+        if doc:
+            acct = str(doc.get("account", ""))
+            enrollment_year = acct[:4] if len(acct) >= 4 else "9999"
+            candidate_docs.append({
+                "doctor_id": did,
+                "doctor_name": doc["name"],
+                "enrollment_year": enrollment_year,
+            })
+
+    if not candidate_docs:
+        return None
+
+    candidate_docs.sort(key=lambda x: x["enrollment_year"])
+    most_senior_year = candidate_docs[0]["enrollment_year"]
+    same_year = [d for d in candidate_docs if d["enrollment_year"] == most_senior_year]
+
+    return {
+        "doctor_id": same_year[0]["doctor_id"],
+        "doctor_name": same_year[0]["doctor_name"],
+        "conflict": len(same_year) > 1,
+        "conflict_doctors": same_year if len(same_year) > 1 else [],
+    }
 
 
 def create_weekday_spreadsheet(title: str) -> str:
@@ -133,7 +197,8 @@ def update_weekday_config(section: str, **kwargs):
     actual_headers = _retry(ws.row_values, 1)
     updates = []
     for key, val in kwargs.items():
-        if key in ("days_of_week", "assigned_doctors", "subadmin_doctors"):
+        if key in ("days_of_week", "assigned_doctors", "subadmin_doctors",
+                   "specimen_doctors", "specimen_days"):
             val = json.dumps(val)
         if key == "clinic_name":
             val = _sanitize_cell_value(val)

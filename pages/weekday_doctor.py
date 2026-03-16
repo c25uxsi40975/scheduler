@@ -18,6 +18,7 @@ from database import (
     get_weekday_open_section, get_weekday_deadline,
     get_weekday_readjust_dates,
     execute_swap, get_swap_history,
+    get_specimen_assignee,
 )
 from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
@@ -207,13 +208,34 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     my_assignments = [r for r in schedule if r["doctor_id"] == doctor["id"]]
     if my_assignments:
         st.write(f"**あなたの割り当て: {len(my_assignments)}回**")
+        specimen_alerts = []
         for r in sorted(my_assignments, key=lambda x: x["date"]):
             try:
                 dt = date.fromisoformat(r["date"])
                 date_label = dt.strftime("%m/%d(%a)")
             except ValueError:
                 date_label = r["date"]
-            st.write(f"　{date_label}　{r['slot_name']}")
+            specimen_mark = ""
+            if cfg.get("specimen_enabled"):
+                spec = get_specimen_assignee(section, r["date"], schedule)
+                if spec and spec["doctor_id"] == doctor["id"]:
+                    if spec["conflict"]:
+                        other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
+                                       if d["doctor_id"] != doctor["id"]]
+                        specimen_mark = f" 🧪検体確認（{', '.join(other_names)}先生と要相談）"
+                        specimen_alerts.append((date_label, spec))
+                    else:
+                        specimen_mark = " 🧪検体確認"
+                        specimen_alerts.append((date_label, spec))
+            st.write(f"　{date_label}　{r['slot_name']}{specimen_mark}")
+        if specimen_alerts:
+            for date_label, spec in specimen_alerts:
+                if spec["conflict"]:
+                    other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
+                                   if d["doctor_id"] != doctor["id"]]
+                    st.warning(f"🧪 {date_label} 検体確認（同学年のため{', '.join(other_names)}先生と要相談）")
+                else:
+                    st.info(f"🧪 {date_label} 検体確認担当日です")
     else:
         st.write("この月の割り当てはありません")
 
