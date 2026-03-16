@@ -25,6 +25,7 @@ from database import (
 )
 from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
+from components.schedule_image import generate_weekday_schedule_image
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
@@ -112,9 +113,9 @@ def render(section: str):
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "メンバー管理", "対象日管理", "スロット管理", "日別設定",
-        "希望状況一覧", "スケジュール作成", "スケジュール再調整",
+        "希望状況一覧", "スケジュール確認", "スケジュール作成", "スケジュール再調整",
     ])
 
     with tab1:
@@ -128,8 +129,10 @@ def render(section: str):
     with tab5:
         _render_preferences(section, assigned_doctor_ids)
     with tab6:
-        _render_schedule(section, cfg, assigned_doctor_ids, days_of_week)
+        _render_schedule_view(section, cfg, assigned_doctor_ids, days_of_week)
     with tab7:
+        _render_schedule(section, cfg, assigned_doctor_ids, days_of_week)
+    with tab8:
         _render_readjust(section, cfg, assigned_doctor_ids, days_of_week)
 
 
@@ -737,6 +740,57 @@ def _render_proxy_preference_form(doc_id: int, section: str,
         st.rerun()
 
 
+def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
+    """確定済みスケジュール確認タブ（閲覧専用）"""
+    st.subheader("スケジュール確認")
+
+    today = date.today()
+    months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
+
+    view_month = st.selectbox("対象月", months, index=1, key=f"wkadm_view_month_{section}")
+
+    schedule = get_weekday_schedule(view_month, section)
+    if not schedule:
+        st.info("この月のスケジュールはまだ作成されていません。")
+        return
+
+    slots = get_weekday_slots(section)
+    active_slots = [s for s in slots if s.get("is_active", 1)]
+    all_doctors = get_doctors()
+    doc_map = build_display_name_map(all_doctors)
+    assigned_doctors = [d for d in all_doctors if d["id"] in assigned_doctor_ids]
+
+    # 既存スケジュールをマップ化
+    existing_map = {}
+    for r in schedule:
+        ds = r["date"]
+        sid = r["slot_id"]
+        existing_map.setdefault(ds, {}).setdefault(sid, []).append(r["doctor_id"])
+
+    # 対象日をスケジュールデータから取得
+    target_dates = sorted(set(date.fromisoformat(r["date"]) for r in schedule))
+
+    # オーバーライド
+    slot_overrides = get_weekday_slot_overrides(section, view_month)
+
+    # アサインサマリ
+    _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
+                               target_dates, slot_overrides, [view_month])
+
+    # カレンダー表示
+    _render_month_tabs(existing_map, target_dates, active_slots, slot_overrides,
+                       doc_map, section, days_of_week, [view_month])
+
+    # 画像表示
+    st.markdown("---")
+    st.subheader("全体スケジュール")
+    img_data = generate_weekday_schedule_image(schedule, slots, view_month)
+    if img_data:
+        st.image(img_data, use_container_width=True)
+    else:
+        st.caption("画像の生成に失敗しました")
+
+
 def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
     """スケジュール作成タブ"""
     st.subheader("スケジュール作成")
@@ -898,16 +952,6 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 del st.session_state[preview_key]
                 st.rerun()
 
-    # ---- 確定済みスケジュール確認 ----
-    if existing_map:
-        st.markdown("---")
-        st.subheader("確定済みスケジュール")
-        _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
-                                   target_dates, all_slot_overrides, selected_months)
-        _render_month_tabs(
-            existing_map, target_dates, active_slots, all_slot_overrides,
-            doc_map, section, days_of_week, selected_months,
-        )
 
 
 def _render_assignment_summary(existing_map: dict, assigned_doctors: list,
