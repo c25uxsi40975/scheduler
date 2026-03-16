@@ -171,6 +171,29 @@ spreadsheet_key_operational = "..."
 gas_webapp_url = "https://script.google.com/macros/s/.../exec"
 ```
 
+## Googleカレンダー連携（オプション）
+
+スケジュール確定時にGoogleカレンダーへ自動で終日イベントを作成する機能です。
+医員は共有カレンダーを購読（閲覧のみ）して、スマホ等からも外勤予定を確認できます。
+
+詳細な手順は **[docs/CALENDAR_SETUP.md](../docs/CALENDAR_SETUP.md)** を参照してください。
+
+### 概要
+
+1. GASを設定したGoogleアカウントでGoogleカレンダーに共有カレンダーを作成
+2. Apps Scriptエディタに `calendar.gs` ファイルを追加してWeb Appを再デプロイ
+3. Webアプリの管理画面でカレンダーIDを登録し、連携を有効化
+4. 医員にカレンダーを閲覧権限で共有
+
+### GAS側の変更
+
+1. Apps Scriptエディタで `calendar.gs` ファイルを新規作成
+2. `gas/calendar.gs` の内容を貼り付けて保存
+3. **「デプロイ」→「デプロイを管理」→ 鉛筆アイコン → バージョンを「新バージョン」にして「デプロイ」**
+4. 初回実行時にカレンダーへのアクセス権限を求められるので許可する
+
+> テスト: Apps Scriptエディタで `testSyncSaturdayCalendar` を実行し、カレンダーにイベントが作成されることを確認
+
 ## トラブルシューティング
 
 ### リマインダーメールが届かない場合

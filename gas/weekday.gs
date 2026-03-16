@@ -31,9 +31,71 @@ function getWeekdayConfigs(ssMaster) {
     try { obj.assigned_doctors = JSON.parse(obj.assigned_doctors || "[]"); } catch(e) { obj.assigned_doctors = []; }
     try { obj.subadmin_doctors = JSON.parse(obj.subadmin_doctors || "[]"); } catch(e) { obj.subadmin_doctors = []; }
     obj.is_active = String(obj.is_active) === "1";
+    obj.specimen_enabled = String(obj.specimen_enabled) === "1";
+    try { obj.specimen_doctors = JSON.parse(obj.specimen_doctors || "[]"); } catch(e) { obj.specimen_doctors = []; }
+    try { obj.specimen_days = JSON.parse(obj.specimen_days || "[]"); } catch(e) { obj.specimen_days = []; }
     result.push(obj);
   }
   return result;
+}
+
+/**
+ * 検体確認担当者を判定
+ * @param {Object} cfg - セクション設定 (specimen_enabled, specimen_doctors, specimen_days)
+ * @param {string} dateStr - yyyy-MM-dd
+ * @param {Array} assignments - その日の割り当て配列
+ * @param {Object} doctors - getDoctorMap() の結果
+ * @returns {Object|null} {doctorId, doctorName, conflict, conflictDoctors}
+ */
+function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
+  if (!cfg.specimen_enabled) return null;
+
+  var dt = new Date(dateStr + "T00:00:00+09:00");
+  var jsDow = dt.getDay(); // JS: 0=Sun, 1=Mon, ..., 6=Sat
+  var pyDow = (jsDow === 0) ? 6 : jsDow - 1; // Python: 0=Mon, ..., 4=Fri
+
+  var specimenDays = cfg.specimen_days || [];
+  var isSpecimenDay = false;
+  for (var i = 0; i < specimenDays.length; i++) {
+    if (specimenDays[i] === pyDow) { isSpecimenDay = true; break; }
+  }
+  if (!isSpecimenDay) return null;
+
+  var specimenDoctors = {};
+  for (var s = 0; s < (cfg.specimen_doctors || []).length; s++) {
+    specimenDoctors[String(cfg.specimen_doctors[s])] = true;
+  }
+
+  var scheduledIds = {};
+  for (var j = 0; j < assignments.length; j++) {
+    scheduledIds[String(assignments[j].doctor_id)] = true;
+  }
+
+  var candidates = [];
+  var allIds = Object.keys(specimenDoctors);
+  for (var k = 0; k < allIds.length; k++) {
+    var did = allIds[k];
+    if (scheduledIds[did] && doctors[did]) {
+      var acct = doctors[did].account || "9999";
+      candidates.push({ id: did, name: doctors[did].name, year: acct.substring(0, 4) });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort(function(a, b) { return a.year < b.year ? -1 : (a.year > b.year ? 1 : 0); });
+
+  var seniorYear = candidates[0].year;
+  var sameYear = [];
+  for (var m = 0; m < candidates.length; m++) {
+    if (candidates[m].year === seniorYear) sameYear.push(candidates[m]);
+  }
+
+  return {
+    doctorId: sameYear[0].id,
+    doctorName: sameYear[0].name,
+    conflict: sameYear.length > 1,
+    conflictDoctors: sameYear
+  };
 }
 
 /**
@@ -178,6 +240,13 @@ function sendWeekdayScheduleConfirmed(data) {
   }
 
   Logger.log("平日確定通知完了: " + sentCount + " 件送信");
+
+  // カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncWeekdayCalendar(data, ssMaster);
+  } catch (e) {
+    Logger.log("平日カレンダー同期エラー: " + e.message);
+  }
 }
 
 /**
@@ -290,6 +359,13 @@ function sendShiftSwapNotification(data) {
     } catch (e) {
       Logger.log("交換通知 送信失敗(副管理者): " + subadminEmails[j] + " - " + e.message);
     }
+  }
+
+  // カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncShiftSwapCalendar(data, ssMaster);
+  } catch (e) {
+    Logger.log("シフト交換カレンダー同期エラー: " + e.message);
   }
 }
 
@@ -462,6 +538,9 @@ function sendWeekdayDayBeforeReminder() {
     var assignments = getWeekdayAssignments(ssSec, yearMonth, tomorrowStr);
     if (assignments.length === 0) continue;
 
+    // 検体確認担当の判定（セクション単位で1回）
+    var specResult = getSpecimenAssignee(cfg, tomorrowStr, assignments, doctors);
+
     for (var j = 0; j < assignments.length; j++) {
       var a = assignments[j];
       var doc = doctors[String(a.doctor_id)];
@@ -475,8 +554,24 @@ function sendWeekdayDayBeforeReminder() {
         + "  日付：" + displayDate + "\n"
         + "  外勤先：" + cfg.clinic_name + "\n"
         + "  スロット：" + (a.slot_name || "") + "\n"
-        + "━━━━━━━━━━━━━━━━━━━━\n\n"
-        + "よろしくお願いいたします。\n\n"
+        + "━━━━━━━━━━━━━━━━━━━━\n\n";
+
+      // 検体確認の追記
+      if (specResult && String(specResult.doctorId) === String(a.doctor_id)) {
+        if (specResult.conflict) {
+          var otherNames = [];
+          for (var sc = 0; sc < specResult.conflictDoctors.length; sc++) {
+            if (specResult.conflictDoctors[sc].id !== String(a.doctor_id)) {
+              otherNames.push(specResult.conflictDoctors[sc].name);
+            }
+          }
+          body += "※ 検体確認（同学年のため" + otherNames.join("、") + "先生と相談してください）\n\n";
+        } else {
+          body += "※ 検体確認担当日です\n\n";
+        }
+      }
+
+      body += "よろしくお願いいたします。\n\n"
         + "※このメールは外勤調整システムから自動送信されています。";
 
       try {
@@ -648,4 +743,11 @@ function sendWeekdayScheduleReadjusted(data) {
   );
 
   Logger.log("平日再調整通知完了: " + sentCount + " 件送信 (mode=" + mode + ")");
+
+  // カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncWeekdayCalendarReadjusted(data, ssMaster);
+  } catch (e) {
+    Logger.log("平日再調整カレンダー同期エラー: " + e.message);
+  }
 }

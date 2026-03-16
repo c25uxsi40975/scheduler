@@ -79,6 +79,13 @@ function sendConfirmationEmails(yearMonth, planName) {
   }
 
   Logger.log("確定通知完了: " + sentCount + " 件送信");
+
+  // カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncSaturdayCalendar(yearMonth, ssMaster);
+  } catch (e) {
+    Logger.log("土曜カレンダー同期エラー: " + e.message);
+  }
 }
 
 // ---- 土曜希望入力通知 ----

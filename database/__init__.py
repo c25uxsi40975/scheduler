@@ -42,9 +42,13 @@ from database.auth import (
     # 土曜追加/除外日付
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,
+    # カレンダー連携
+    get_calendar_sync_enabled, set_calendar_sync_enabled,
+    get_calendar_id, set_calendar_id,
 )
 from database.weekday import (
     get_weekday_configs, get_weekday_config_by_section,
+    get_specimen_assignee,
     create_weekday_spreadsheet,
     add_weekday_config, update_weekday_config, delete_weekday_config,
     get_weekday_slots, add_weekday_slot, update_weekday_slot, delete_weekday_slot,

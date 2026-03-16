@@ -12,6 +12,9 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,
+    get_calendar_sync_enabled, set_calendar_sync_enabled,
+    get_calendar_id, set_calendar_id,
+    get_weekday_configs,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 from components.display_utils import build_display_name_map
@@ -916,5 +919,58 @@ def render(target_month, year, month):
             set_saturday_extra_dates(target_month, new_extra)
             set_saturday_excluded_dates(target_month, new_excluded)
             st.session_state["_save_msg"] = "土曜対象日の設定を保存しました"
+            st.rerun()
+
+    # ---- セクション5: Googleカレンダー連携設定 ----
+    st.markdown("---")
+    st.subheader("Googleカレンダー連携設定")
+    st.caption("スケジュール確定時にGoogleカレンダーへ自動で予定を同期します")
+
+    with st.expander("カレンダー設定"):
+        cal_enabled = get_calendar_sync_enabled()
+        new_cal_enabled = st.checkbox(
+            "カレンダー連携を有効にする",
+            value=cal_enabled,
+            key="cal_sync_enabled",
+        )
+
+        st.markdown("##### 土曜外勤カレンダー")
+        sat_cal_id = get_calendar_id("saturday")
+        new_sat_cal_id = st.text_input(
+            "土曜外勤カレンダーID",
+            value=sat_cal_id,
+            key="cal_id_saturday",
+            placeholder="xxxxx@group.calendar.google.com",
+        )
+
+        # 平日セクション別カレンダーID
+        weekday_cfgs = get_weekday_configs()
+        if weekday_cfgs:
+            st.markdown("##### 平日外勤カレンダー（セクション別）")
+            new_weekday_cal_ids = {}
+            for cfg in weekday_cfgs:
+                sec = cfg["section"]
+                current_id = get_calendar_id("weekday_" + sec)
+                new_id = st.text_input(
+                    f"{sec} カレンダーID",
+                    value=current_id,
+                    key=f"cal_id_weekday_{sec}",
+                    placeholder="xxxxx@group.calendar.google.com",
+                )
+                new_weekday_cal_ids[sec] = new_id
+
+        st.info(
+            "カレンダーIDの確認方法: Googleカレンダー → 対象カレンダーの「設定と共有」"
+            " → 「カレンダーの統合」セクションに表示されるIDをコピーしてください。\n\n"
+            "詳細な手順は `docs/CALENDAR_SETUP.md` を参照してください。"
+        )
+
+        if st.button("カレンダー設定を保存", type="primary", key="save_cal_settings"):
+            set_calendar_sync_enabled(new_cal_enabled)
+            set_calendar_id("saturday", new_sat_cal_id)
+            if weekday_cfgs:
+                for sec, cal_id in new_weekday_cal_ids.items():
+                    set_calendar_id("weekday_" + sec, cal_id)
+            st.session_state["_save_msg"] = "カレンダー設定を保存しました"
             st.rerun()
 

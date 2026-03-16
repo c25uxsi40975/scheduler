@@ -200,6 +200,7 @@ function getDoctorMap(ss) {
   var colName = headers.indexOf("name");
   var colEmail = headers.indexOf("email");
   var colActive = headers.indexOf("is_active");
+  var colAccount = headers.indexOf("account");
 
   var map = {};
   for (var i = 1; i < data.length; i++) {
@@ -207,7 +208,8 @@ function getDoctorMap(ss) {
     if (String(row[colActive]) === "0") continue;
     map[String(row[colId])] = {
       name: String(row[colName]),
-      email: String(row[colEmail] || "").trim()
+      email: String(row[colEmail] || "").trim(),
+      account: colAccount >= 0 ? String(row[colAccount] || "") : ""
     };
   }
   return map;
@@ -232,6 +234,38 @@ function getClinicMap(ss) {
     map[String(data[i][colId])] = String(data[i][colName]);
   }
   return map;
+}
+
+// ---- 平日セクション別スプレッドシート取得 ----
+
+/**
+ * 平日外勤設定シートから対象セクションのスプレッドシートを取得
+ * @param {Spreadsheet} ssMaster マスタスプレッドシート
+ * @param {string} section セクション名
+ * @return {Spreadsheet|null}
+ */
+function getWeekdaySectionSpreadsheet(ssMaster, section) {
+  var sheet = getSheet(ssMaster, "平日外勤設定");
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return null;
+  var headers = data[0];
+  var colSection = headers.indexOf("section");
+  var colKey = headers.indexOf("spreadsheet_key");
+  if (colSection === -1 || colKey === -1) return null;
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][colSection]) === section) {
+      var key = String(data[i][colKey] || "");
+      if (!key) return null;
+      try {
+        return SpreadsheetApp.openById(key);
+      } catch (e) {
+        Logger.log("セクションSS取得失敗: " + section + " - " + e.message);
+        return null;
+      }
+    }
+  }
+  return null;
 }
 
 // ---- スプレッドシート作成 ----

@@ -44,6 +44,26 @@ def _set_setting(key, value):
     _clear_data_cache()
 
 
+# ---- Calendar Settings ----
+
+def get_calendar_sync_enabled() -> bool:
+    return _get_setting("calendar_sync_enabled") == "1"
+
+
+def set_calendar_sync_enabled(enabled: bool):
+    _set_setting("calendar_sync_enabled", "1" if enabled else "0")
+
+
+def get_calendar_id(key: str):
+    """カレンダーIDを取得 (例: key='saturday' → 設定キー 'calendar_id_saturday')"""
+    return _get_setting("calendar_id_" + key) or ""
+
+
+def set_calendar_id(key: str, value: str):
+    """カレンダーIDを保存"""
+    _set_setting("calendar_id_" + key, value.strip())
+
+
 # ---- Admin Auth ----
 
 def is_admin_password_set() -> bool:
