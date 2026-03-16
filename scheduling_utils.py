@@ -397,6 +397,48 @@ def solve_weekday_schedule(
                     f"week_over_{doc_id}_{week_key[0]}_{week_key[1]}"
                 week_penalty.append(wp)
 
+    # 間隔均等化ペナルティ: 各医員の割り当て間隔をなるべく均等にする
+    # 理想間隔 = 対象日数 / (医員あたり期待割り当て数) を基準に、
+    # それより短い間隔でのペナルティを加える
+    sorted_dates = sorted(date_slots.keys())
+    spacing_penalty = []
+    if len(sorted_dates) >= 2 and n_docs > 0:
+        ideal_interval = max(len(sorted_dates) / max(avg_count, 1), 1)
+        for doc_id in doc_ids:
+            # 各医員について、対象日を走査し近接ペアにペナルティ
+            for i in range(len(sorted_dates)):
+                dt_i = sorted_dates[i]
+                # dt_i での割り当て有無の合計変数
+                vars_i = []
+                for slot in date_slots[dt_i]:
+                    key = (doc_id, dt_i.isoformat(), slot["id"])
+                    if key in x:
+                        vars_i.append(x[key])
+                if not vars_i:
+                    continue
+                # 理想間隔以内の後続日をチェック
+                for j in range(i + 1, len(sorted_dates)):
+                    dt_j = sorted_dates[j]
+                    gap = (dt_j - dt_i).days
+                    if gap >= ideal_interval:
+                        break  # これ以上離れた日は問題なし
+                    vars_j = []
+                    for slot in date_slots[dt_j]:
+                        key = (doc_id, dt_j.isoformat(), slot["id"])
+                        if key in x:
+                            vars_j.append(x[key])
+                    if not vars_j:
+                        continue
+                    # 両日に割り当てられた場合のペナルティ（近いほど重い）
+                    weight = (ideal_interval - gap) / ideal_interval
+                    sp = pulp.LpVariable(
+                        f"spen_{doc_id}_{dt_i.isoformat()}_{dt_j.isoformat()}",
+                        lowBound=0)
+                    # sum_i + sum_j - 1 <= sp  ⇒  両方1なら sp >= 1
+                    prob += (pulp.lpSum(vars_i) + pulp.lpSum(vars_j) - 1 <= sp,
+                             f"spacing_{doc_id}_{dt_i.isoformat()}_{dt_j.isoformat()}")
+                    spacing_penalty.append((sp, weight))
+
     # 避けたい日ペナルティ
     avoid_penalty = []
     for doc_id in doc_ids:
@@ -430,12 +472,14 @@ def solve_weekday_schedule(
                         existing_change_penalty.append(change_var)
 
     # 目標: 期間全体の均一化（重み10） + 既存維持（重み7）
-    #        + 月別均一化（重み5） + 週内重複回避（重み3） + 避けたい日ペナルティ（重み1）
+    #        + 月別均一化（重み5） + 間隔均等化（重み4）
+    #        + 週内重複回避（重み3） + 避けたい日ペナルティ（重み1）
     prob += (
         10 * pulp.lpSum(dev_plus[d] + dev_minus[d] for d in doc_ids)
         + 7 * pulp.lpSum(existing_change_penalty)
         + 5 * pulp.lpSum(monthly_dev_plus[k] + monthly_dev_minus[k]
                          for k in monthly_dev_plus)
+        + 4 * pulp.lpSum(sp * w for sp, w in spacing_penalty)
         + 3 * pulp.lpSum(week_penalty)
         + pulp.lpSum(avoid_penalty)
     )

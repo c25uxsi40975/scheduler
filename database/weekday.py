@@ -623,7 +623,10 @@ def _get_weekday_sched_sheet(year_month: str, section: str):
 @st.cache_data(ttl=120)
 def get_weekday_schedule(year_month: str, section: str):
     """平日スケジュールを取得"""
-    ws = _get_weekday_sched_sheet(year_month, section)
+    try:
+        ws = _get_weekday_sched_sheet(year_month, section)
+    except Exception:
+        return []  # シート未作成やAPI制限の場合は空リスト
     records = _get_all_records(ws)
     result = []
     for r in records:

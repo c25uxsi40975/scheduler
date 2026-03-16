@@ -204,6 +204,13 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
         st.info("この月のスケジュールはまだありません。")
         return
 
+    from scheduling_utils import is_nenmatsu_nenshi
+    schedule = [r for r in schedule
+                if not is_nenmatsu_nenshi(date.fromisoformat(r["date"]))]
+    if not schedule:
+        st.info("この月のスケジュールはまだありません。")
+        return
+
     slots = get_weekday_slots(section)
 
     # 自分の割り当てをハイライト

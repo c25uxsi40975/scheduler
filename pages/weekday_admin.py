@@ -757,6 +757,14 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
         st.info("この月のスケジュールはまだ作成されていません。")
         return
 
+    from scheduling_utils import is_nenmatsu_nenshi as _is_ny2
+    # 年末年始(12/29-1/3)の日付を除外
+    schedule = [r for r in schedule
+                if not _is_ny2(date.fromisoformat(r["date"]))]
+    if not schedule:
+        st.info("この月のスケジュールはまだ作成されていません。")
+        return
+
     slots = get_weekday_slots(section)
     active_slots = [s for s in slots if s.get("is_active", 1)]
     all_doctors = get_doctors()
@@ -779,6 +787,9 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
     # アサインサマリ
     _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
                                target_dates, slot_overrides, [view_month])
+
+    # 検体確認アラート
+    _render_specimen_warnings(existing_map, section, cfg, doc_map)
 
     # 表示モード判定
     view_mode = get_weekday_schedule_view_mode(section)
@@ -878,9 +889,15 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
             all_existing_sched.extend(get_weekday_schedule(ym, section))
         except Exception:
             pass  # シート未作成やAPI制限の場合はスキップ
+    from scheduling_utils import is_nenmatsu_nenshi as _is_ny
     existing_map = {}
     for r in all_existing_sched:
         ds = r["date"]
+        try:
+            if _is_ny(date.fromisoformat(ds)):
+                continue
+        except ValueError:
+            pass
         sid = r["slot_id"]
         existing_map.setdefault(ds, {}).setdefault(sid, []).append(r["doctor_id"])
 
@@ -1439,10 +1456,17 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     all_sched = []
     for ym in months:
         all_sched.extend(get_weekday_schedule(ym, section))
+    from scheduling_utils import is_nenmatsu_nenshi
     sched_in_range = [r for r in all_sched if start_str <= r["date"] <= end_str]
 
     existing_map = {}
     for r in sched_in_range:
+        # 年末年始(12/29-1/3)は除外
+        try:
+            if is_nenmatsu_nenshi(date.fromisoformat(r["date"])):
+                continue
+        except ValueError:
+            pass
         existing_map.setdefault(r["date"], {}).setdefault(r["slot_id"], []).append(r["doctor_id"])
 
     slots = get_weekday_slots(section)
