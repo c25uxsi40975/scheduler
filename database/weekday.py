@@ -660,17 +660,14 @@ def batch_save_weekday_assignments(year_month: str, section: str, assignments: d
     slots = get_weekday_slots(section)
     slot_name_map = {s["id"]: s["slot_name"] for s in slots}
 
-    # 当該セクションの既存行を削除（逆順）
-    rows_to_delete = []
-    for i, r in enumerate(records):
-        if str(r.get("section", "")) == section:
-            rows_to_delete.append(i + 2)
-    for row in sorted(rows_to_delete, reverse=True):
-        _retry(ws.delete_rows, row)
+    # 当該セクションの既存行を一括削除（ヘッダー行を残して全データ行を削除）
+    row_count = ws.row_count
+    if row_count > 1:
+        _retry(ws.delete_rows, 2, row_count)
 
     # 新規行を一括追加
-    next_id = _next_id(ws)
     actual_headers = _retry(ws.row_values, 1)
+    next_id = 1
     rows = []
     idx = 0
     for date_str in sorted(assignments.keys()):
@@ -714,17 +711,14 @@ def merge_save_weekday_assignments(year_month: str, section: str,
     slot_name_map = {s["id"]: s["slot_name"] for s in slots}
     start_date, end_date = date_range
 
-    # 当該セクションの既存行を削除（逆順）
-    rows_to_delete = []
-    for i, r in enumerate(records):
-        if str(r.get("section", "")) == section:
-            rows_to_delete.append(i + 2)
-    for row in sorted(rows_to_delete, reverse=True):
-        _retry(ws.delete_rows, row)
+    # 全データ行を一括削除（ヘッダー行を残す）
+    row_count = ws.row_count
+    if row_count > 1:
+        _retry(ws.delete_rows, 2, row_count)
 
     # 範囲外の既存データを保持 + 範囲内は新データで置換
-    next_id = _next_id(ws)
     actual_headers = _retry(ws.row_values, 1)
+    next_id = 1
     rows = []
     idx = 0
 
