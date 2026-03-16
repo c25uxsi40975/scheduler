@@ -31,7 +31,7 @@ from audit import log_event
 from pages import (
     admin_master, admin_preferences, admin_generate,
     admin_schedule, doctor_input, doctor_schedule,
-    admin_weekday_config,
+    admin_weekday_config, admin_calendar,
 )
 from pages import weekday_admin, weekday_doctor
 
@@ -681,10 +681,10 @@ elif st.session_state.role == "admin":
         # 主管理者: 既存の土曜管理 + 平日外勤設定
         target_month, year, month = _show_admin_header()
 
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "マスタ管理", "希望状況一覧",
             "スケジュール生成", "スケジュール確認",
-            "平日外勤設定",
+            "平日外勤設定", "カレンダー",
         ])
 
         with tab1:
@@ -697,6 +697,8 @@ elif st.session_state.role == "admin":
             admin_schedule.render(target_month)
         with tab5:
             admin_weekday_config.render()
+        with tab6:
+            admin_calendar.render()
     else:
         # 副管理者: 平日外勤管理UI
         weekday_admin.render(st.session_state.admin_type)
