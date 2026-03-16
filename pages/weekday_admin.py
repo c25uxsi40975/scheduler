@@ -874,7 +874,10 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     # 既存スケジュール読み込み（全選択月分）
     all_existing_sched = []
     for ym in selected_months:
-        all_existing_sched.extend(get_weekday_schedule(ym, section))
+        try:
+            all_existing_sched.extend(get_weekday_schedule(ym, section))
+        except Exception:
+            pass  # シート未作成やAPI制限の場合はスキップ
     existing_map = {}
     for r in all_existing_sched:
         ds = r["date"]
@@ -931,6 +934,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         _render_assignment_summary(current_result, assigned_doctors, doc_map, active_slots,
                                    target_dates, all_slot_overrides, selected_months)
         _render_preview_warnings(current_result, assigned_doctors, doc_map, prefs)
+        _render_specimen_warnings(current_result, section, cfg, doc_map)
 
         # 確定 / 破棄ボタン
         btn_cols = st.columns(2)
@@ -1128,6 +1132,37 @@ def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
     if avoid_hits:
         st.warning(f"△（できれば避けたい）日に割り当てがあります（{len(avoid_hits)}件）: "
                    + "、".join(avoid_hits))
+
+
+def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
+                               doc_map: dict):
+    """検体確認メンバーが対象曜日に割り当てられていない日の警告を表示"""
+    if not cfg.get("specimen_enabled"):
+        return
+
+    specimen_doctor_ids = set(cfg.get("specimen_doctors", []))
+    specimen_days = cfg.get("specimen_days", [])
+    if not specimen_doctor_ids or not specimen_days:
+        return
+
+    missing_dates = []
+    for ds, slots_map in sorted(preview_result.items()):
+        try:
+            dt = date.fromisoformat(ds)
+        except ValueError:
+            continue
+        if dt.weekday() not in specimen_days:
+            continue
+        # この日に割り当てられた全医員
+        assigned_ids = set()
+        for sid, doc_ids in slots_map.items():
+            assigned_ids.update(did for did in doc_ids if did)
+        if not (specimen_doctor_ids & assigned_ids):
+            missing_dates.append(dt.strftime("%m/%d(%a)"))
+
+    if missing_dates:
+        st.warning(f"🧪 検体確認メンバーが割り当てられていない日があります（{len(missing_dates)}件）: "
+                   + "、".join(missing_dates))
 
 
 def _render_calendar_editor(
@@ -1718,6 +1753,7 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
             _render_assignment_summary(current_result, active_doctors, doc_map, active_slots,
                                        all_target_dates, all_slot_overrides, months)
             _render_preview_warnings(current_result, active_doctors, doc_map, prefs)
+            _render_specimen_warnings(current_result, section, cfg, doc_map)
 
             btn_cols = st.columns(2)
             with btn_cols[0]:
