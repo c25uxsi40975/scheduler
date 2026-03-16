@@ -17,12 +17,14 @@ from database import (
     get_weekday_slots,
     get_weekday_open_section, get_weekday_deadline,
     get_weekday_readjust_dates,
+    get_weekday_schedule_view_mode,
     execute_swap, get_swap_history,
     get_specimen_assignee,
 )
 from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
 from components.schedule_viewer import _VIEWER_SCRIPT
+from components.weekday_calendar import render_weekday_calendar
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
 
@@ -239,16 +241,26 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     else:
         st.write("この月の割り当てはありません")
 
-    # スケジュール画像（フルスクリーンビューア付き）
+    # 表示モード判定
+    view_mode = get_weekday_schedule_view_mode(section)
+
     st.markdown("---")
     st.subheader("全体スケジュール")
-    img_data = generate_weekday_schedule_image(
-        schedule, slots, view_month,
-        highlight_doctor_id=doctor["id"],
-    )
-    if img_data:
-        st.image(img_data, use_container_width=True)
-        components.html(_VIEWER_SCRIPT, height=0)
+
+    if view_mode == "calendar":
+        # カレンダー表示（全メンバー表示）
+        all_doctors = get_doctors()
+        render_weekday_calendar(schedule, slots, view_month, all_doctors,
+                                highlight_doctor_id=doctor["id"])
+    else:
+        # テーブル表示（現行：画像）
+        img_data = generate_weekday_schedule_image(
+            schedule, slots, view_month,
+            highlight_doctor_id=doctor["id"],
+        )
+        if img_data:
+            st.image(img_data, use_container_width=True)
+            components.html(_VIEWER_SCRIPT, height=0)
 
 
 def _render_shift_swap(doctor: dict, section: str, cfg: dict):

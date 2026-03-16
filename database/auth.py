@@ -325,6 +325,18 @@ def set_weekday_readjust_dates(section: str, dates: list):
         _set_setting(f"weekday_readjust_dates_{section}", "")
 
 
+# ---- Weekday Schedule View Mode (表示モード設定) ----
+
+def get_weekday_schedule_view_mode(section: str) -> str:
+    """平日セクションのスケジュール表示モードを取得（'table' or 'calendar'）"""
+    return _get_setting(f"weekday_view_mode_{section}") or "table"
+
+
+def set_weekday_schedule_view_mode(section: str, mode: str):
+    """平日セクションのスケジュール表示モードを設定"""
+    _set_setting(f"weekday_view_mode_{section}", mode)
+
+
 # ---- Saturday Extra/Excluded Dates (土曜日の追加/除外日付) ----
 
 def get_saturday_extra_dates(year_month: str) -> list:

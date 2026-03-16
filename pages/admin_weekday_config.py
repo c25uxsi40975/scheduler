@@ -4,6 +4,7 @@ from database import (
     get_doctors,
     get_weekday_configs, create_weekday_spreadsheet,
     add_weekday_config, update_weekday_config, delete_weekday_config,
+    get_weekday_schedule_view_mode, set_weekday_schedule_view_mode,
 )
 from components.display_utils import build_display_name_map
 
@@ -75,13 +76,14 @@ def render():
             with st.container(border=True):
                 ss_key = cfg.get("spreadsheet_key", "")
                 specimen_badge = "　検体確認: ON" if cfg.get("specimen_enabled") else ""
-                st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　副管理者: {subadmin_names}{specimen_badge}")
+                view_mode_badge = "　表示: カレンダー" if get_weekday_schedule_view_mode(section) == "calendar" else ""
+                st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　副管理者: {subadmin_names}{specimen_badge}{view_mode_badge}")
                 if ss_key:
                     st.caption(f"スプレッドシート: `{ss_key}`")
                 else:
                     st.warning("スプレッドシートが未設定です。")
 
-                bc1, bc2, bc3, bc4 = st.columns(4)
+                bc1, bc2, bc3, bc4, bc5 = st.columns(5)
                 with bc1:
                     if cfg.get("is_active"):
                         if st.button("無効化", key=f"wk_deact_{section}", use_container_width=True):
@@ -98,6 +100,13 @@ def render():
                     if st.button("副管理者設定", key=f"wk_subadmin_{section}", use_container_width=True):
                         st.session_state[f"wk_setting_subadmin_{section}"] = True
                 with bc4:
+                    cur_mode = get_weekday_schedule_view_mode(section)
+                    new_mode = "calendar" if cur_mode == "table" else "table"
+                    mode_label = "カレンダー表示に変更" if cur_mode == "table" else "テーブル表示に変更"
+                    if st.button(mode_label, key=f"wk_viewmode_{section}", use_container_width=True):
+                        set_weekday_schedule_view_mode(section, new_mode)
+                        st.rerun()
+                with bc5:
                     if st.button("削除", key=f"wk_del_{section}", type="secondary", use_container_width=True):
                         st.session_state[f"wk_confirm_del_{section}"] = True
 

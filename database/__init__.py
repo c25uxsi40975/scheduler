@@ -46,6 +46,8 @@ from database.auth import (
     # カレンダー連携
     get_calendar_sync_enabled, set_calendar_sync_enabled,
     get_calendar_id, set_calendar_id,
+    # 平日表示モード
+    get_weekday_schedule_view_mode, set_weekday_schedule_view_mode,
 )
 from database.weekday import (
     get_weekday_configs, get_weekday_config_by_section,

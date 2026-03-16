@@ -26,6 +26,7 @@ from database import (
 from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
+from components.weekday_calendar import render_weekday_calendar
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
@@ -742,6 +743,8 @@ def _render_proxy_preference_form(doc_id: int, section: str,
 
 def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
     """確定済みスケジュール確認タブ（閲覧専用）"""
+    from database import get_weekday_schedule_view_mode
+
     st.subheader("スケジュール確認")
 
     today = date.today()
@@ -777,18 +780,25 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
     _render_assignment_summary(existing_map, assigned_doctors, doc_map, active_slots,
                                target_dates, slot_overrides, [view_month])
 
-    # カレンダー表示
-    _render_month_tabs(existing_map, target_dates, active_slots, slot_overrides,
-                       doc_map, section, days_of_week, [view_month])
+    # 表示モード判定
+    view_mode = get_weekday_schedule_view_mode(section)
 
-    # 画像表示
-    st.markdown("---")
-    st.subheader("全体スケジュール")
-    img_data = generate_weekday_schedule_image(schedule, slots, view_month)
-    if img_data:
-        st.image(img_data, use_container_width=True)
+    if view_mode == "calendar":
+        # カレンダー表示
+        render_weekday_calendar(schedule, slots, view_month, all_doctors)
     else:
-        st.caption("画像の生成に失敗しました")
+        # テーブル表示（現行）
+        _render_month_tabs(existing_map, target_dates, active_slots, slot_overrides,
+                           doc_map, section, days_of_week, [view_month])
+
+        # 画像表示
+        st.markdown("---")
+        st.subheader("全体スケジュール")
+        img_data = generate_weekday_schedule_image(schedule, slots, view_month)
+        if img_data:
+            st.image(img_data, use_container_width=True)
+        else:
+            st.caption("画像の生成に失敗しました")
 
 
 def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of_week: list):
