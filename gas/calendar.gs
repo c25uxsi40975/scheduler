@@ -175,9 +175,8 @@ function getMonthRange(yearMonth) {
  * @param {Spreadsheet} ssMaster マスタスプレッドシート（呼び出し元から引き回し）
  */
 function syncSaturdayCalendar(yearMonth, ssMaster) {
-  if (!isCalendarSyncEnabled(ssMaster)) return;
-
   var settings = getCalendarSettings(ssMaster);
+  if (settings["calendar_sync_enabled"] !== "1") return;
   var calId = settings["calendar_id_saturday"];
   var calendar = getCalendarSafe(calId);
   if (!calendar) return;
@@ -241,13 +240,12 @@ function syncSaturdayCalendar(yearMonth, ssMaster) {
  * @param {Spreadsheet} ssMaster マスタスプレッドシート
  */
 function syncWeekdayCalendar(data, ssMaster) {
-  if (!isCalendarSyncEnabled(ssMaster)) return;
+  var settings = getCalendarSettings(ssMaster);
+  if (settings["calendar_sync_enabled"] !== "1") return;
 
   var section = data.section;
   var clinicName = data.clinic_name || "";
   var yearMonths = data.year_months || [];
-
-  var settings = getCalendarSettings(ssMaster);
   var calId = settings["calendar_id_weekday_" + section];
   var calendar = getCalendarSafe(calId);
   if (!calendar) return;
@@ -314,12 +312,11 @@ function syncWeekdayCalendarReadjusted(data, ssMaster) {
  * @param {Spreadsheet} ssMaster マスタスプレッドシート
  */
 function syncShiftSwapCalendar(data, ssMaster) {
-  if (!isCalendarSyncEnabled(ssMaster)) return;
+  var settings = getCalendarSettings(ssMaster);
+  if (settings["calendar_sync_enabled"] !== "1") return;
 
   var section = data.section;
   var clinicName = data.clinic_name || "";
-
-  var settings = getCalendarSettings(ssMaster);
   var calId = settings["calendar_id_weekday_" + section];
   var calendar = getCalendarSafe(calId);
   if (!calendar) return;
@@ -396,7 +393,8 @@ function syncShiftSwapCalendar(data, ssMaster) {
  */
 function resyncCalendarForDoctor(data) {
   var ssMaster = getMasterSpreadsheet();
-  if (!isCalendarSyncEnabled(ssMaster)) return;
+  var settings = getCalendarSettings(ssMaster);
+  if (settings["calendar_sync_enabled"] !== "1") return;
 
   var doctorId = String(data.doctor_id);
   var doctorEmail = String(data.doctor_email || "");
@@ -406,8 +404,6 @@ function resyncCalendarForDoctor(data) {
     Logger.log("カレンダー再同期: メールアドレスなし (doctor_id=" + doctorId + ")");
     return;
   }
-
-  var settings = getCalendarSettings(ssMaster);
 
   // 土曜カレンダーの再同期
   var satCalId = settings["calendar_id_saturday"];
@@ -442,6 +438,12 @@ function resyncDoctorEventsInCalendar(calendarId, doctorId, doctorEmail, enabled
   var cal = getCalendarSafe(calendarId);
   if (!cal) return;
 
+  // 医員名をループ外で1回だけ取得
+  var ssMaster = getMasterSpreadsheet();
+  var doctors = getDoctorMap(ssMaster);
+  var targetDoc = doctors[doctorId];
+  if (!targetDoc) return;
+
   // 今月から3ヶ月先までのイベントを対象
   var now = new Date();
   var start = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -451,31 +453,17 @@ function resyncDoctorEventsInCalendar(calendarId, doctorId, doctorEmail, enabled
   var updatedCount = 0;
   for (var i = 0; i < events.length; i++) {
     var desc = events[i].getDescription() || "";
-    // このイベントが対象医員のものかチェック（descriptionに医員名が含まれる、またはtitleに医員名が含まれる）
-    // より確実な方法: タグの存在確認 + タイトルの先頭が医員名
     if (desc.indexOf("[外勤調整:") === -1) continue;
+
+    // description の "医員: XXX" で対象医員のイベントか判定
+    var doctorNameMatch = desc.match(/医員: (.+)/);
+    if (!doctorNameMatch) continue;
+    var eventDoctorName = doctorNameMatch[1].trim();
+    if (eventDoctorName !== targetDoc.name) continue;
 
     var eventId = events[i].getId().replace("@google.com", "");
     try {
       var eventResource = Calendar.Events.get(calendarId, eventId);
-      var title = eventResource.summary || "";
-      // タイトル形式: "医員名 - 外勤先名" → doctor_id では判定できないので医員名で判定
-      // description に "医員: XXX" が含まれるので利用
-      var doctorNameMatch = desc.match(/医員: (.+)/);
-      if (!doctorNameMatch) continue;
-
-      // doctor_id でマッチさせるために医員マスタを参照
-      // ただし毎回取得は非効率なので、description にdoctor_idタグを含めるのがベスト
-      // 現状はイベント description に doctor_id がないため、医員名で判定する
-      // → resync は頻度が低いので許容
-
-      var ssMaster = getMasterSpreadsheet();
-      var doctors = getDoctorMap(ssMaster);
-      var targetDoc = doctors[doctorId];
-      if (!targetDoc) continue;
-
-      var eventDoctorName = doctorNameMatch[1].trim();
-      if (eventDoctorName !== targetDoc.name) continue;
 
       // ゲストの追加/削除
       var attendees = eventResource.attendees || [];
