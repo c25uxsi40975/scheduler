@@ -1136,7 +1136,7 @@ def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
 
 def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
                                doc_map: dict):
-    """検体確認メンバーが対象曜日に割り当てられていない日の警告を表示"""
+    """検体確認メンバーが週内の対象曜日にどちらも割り当てられていない週の警告を表示"""
     if not cfg.get("specimen_enabled"):
         return
 
@@ -1145,24 +1145,33 @@ def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
     if not specimen_doctor_ids or not specimen_days:
         return
 
-    missing_dates = []
-    for ds, slots_map in sorted(preview_result.items()):
+    # 週単位でグループ化（ISO週番号）
+    weeks = {}  # {(year, week): [(dt, has_specimen_member), ...]}
+    for ds, slots_map in preview_result.items():
         try:
             dt = date.fromisoformat(ds)
         except ValueError:
             continue
         if dt.weekday() not in specimen_days:
             continue
-        # この日に割り当てられた全医員
         assigned_ids = set()
         for sid, doc_ids in slots_map.items():
             assigned_ids.update(did for did in doc_ids if did)
-        if not (specimen_doctor_ids & assigned_ids):
-            missing_dates.append(dt.strftime("%m/%d(%a)"))
+        has_member = bool(specimen_doctor_ids & assigned_ids)
+        week_key = dt.isocalendar()[:2]
+        weeks.setdefault(week_key, []).append((dt, has_member))
 
-    if missing_dates:
-        st.warning(f"🧪 検体確認メンバーが割り当てられていない日があります（{len(missing_dates)}件）: "
-                   + "、".join(missing_dates))
+    # 週内のどの対象曜日にもメンバーがいない週を検出
+    missing_weeks = []
+    for week_key in sorted(weeks):
+        days_in_week = weeks[week_key]
+        if not any(has for _, has in days_in_week):
+            dates_str = "・".join(dt.strftime("%m/%d(%a)") for dt, _ in sorted(days_in_week))
+            missing_weeks.append(dates_str)
+
+    if missing_weeks:
+        st.warning(f"🧪 検体確認メンバーが週内に割り当てられていない週があります（{len(missing_weeks)}週）: "
+                   + "、".join(missing_weeks))
 
 
 def _render_calendar_editor(
