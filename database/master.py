@@ -59,6 +59,7 @@ def get_doctors(active_only=True):
         r["must_change_pw"] = _safe_int(r.get("must_change_pw", 0))
         r["notify_email"] = _safe_int(r.get("notify_email", 1), default=1)
         r["notify_calendar"] = _safe_int(r.get("notify_calendar", 0))
+        r["personal_calendar_id"] = str(r.get("personal_calendar_id", "")).strip()
         if active_only and not r["is_active"]:
             continue
         result.append(r)

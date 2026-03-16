@@ -485,9 +485,10 @@ def _request_calendar_resync(doctor, enabled: bool):
         requests.post(gas_url, json={
             "action": "calendar_resync_doctor",
             "doctor_id": str(doctor["id"]),
+            "doctor_name": doctor.get("name", ""),
             "doctor_email": doctor.get("email", ""),
             "enabled": enabled,
-        }, timeout=15)
+        }, timeout=30)
     except requests.RequestException:
         pass
 
@@ -567,12 +568,23 @@ def _show_doctor_settings(doctor):
                     disabled=not has_email,
                     help="スケジュール確定やリマインダーのメールが届きます",
                 )
+                cal_help = (
+                    "有効にすると個人用カレンダーが作成され、"
+                    "Gmailに共有招待メール（1通）が届きます。"
+                    "招待を承認するとGoogleカレンダーに外勤予定が表示されます。"
+                    "無効にすると個人用カレンダーは削除されます。"
+                    "\n\nGoogleアカウント（Gmail / Google Workspace）の"
+                    "メールアドレスが必要です。"
+                )
                 new_notify_cal = st.checkbox(
                     "Googleカレンダー連携を有効にする",
                     value=cur_notify_cal,
                     disabled=not has_email,
-                    help="外勤スケジュールがGoogleカレンダーに自動追加されます。Googleアカウント（Gmail / Google Workspace）のメールアドレスが必要です。",
+                    help=cal_help,
                 )
+                # カレンダー連携ステータス表示
+                if has_email and doctor.get("personal_calendar_id"):
+                    st.caption("カレンダー連携中")
                 if st.form_submit_button("通知設定を保存", disabled=not has_email):
                     update_doctor_notification_settings(
                         doctor["id"], new_notify_email, new_notify_cal

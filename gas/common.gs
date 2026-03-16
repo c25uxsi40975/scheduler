@@ -209,6 +209,7 @@ function getDoctorMap(ss) {
   var colAccount = headers.indexOf("account");
   var colNotifyEmail = headers.indexOf("notify_email");
   var colNotifyCal = headers.indexOf("notify_calendar");
+  var colPersonalCal = headers.indexOf("personal_calendar_id");
 
   var map = {};
   for (var i = 1; i < data.length; i++) {
@@ -219,7 +220,8 @@ function getDoctorMap(ss) {
       email: String(row[colEmail] || "").trim(),
       account: colAccount >= 0 ? String(row[colAccount] || "") : "",
       notify_email: colNotifyEmail >= 0 ? String(row[colNotifyEmail]) !== "0" : true,
-      notify_calendar: colNotifyCal >= 0 ? String(row[colNotifyCal]) === "1" : false
+      notify_calendar: colNotifyCal >= 0 ? String(row[colNotifyCal]) === "1" : false,
+      personal_calendar_id: colPersonalCal >= 0 ? String(row[colPersonalCal] || "").trim() : ""
     };
   }
   return map;
