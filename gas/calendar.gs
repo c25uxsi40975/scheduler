@@ -603,8 +603,34 @@ function resyncCalendarForAllDoctors() {
  */
 function testSyncSaturdayCalendar() {
   var ssMaster = getMasterSpreadsheet();
-  var now = new Date();
-  var yearMonth = Utilities.formatDate(now, "Asia/Tokyo", "yyyy-MM");
+  // 確定済みの月を指定（テスト用）
+  var yearMonth = "2026-04";
   Logger.log("テスト実行: syncSaturdayCalendar(" + yearMonth + ")");
   syncSaturdayCalendar(yearMonth, ssMaster);
+}
+
+/**
+ * テスト用: 平日カレンダー同期を手動実行
+ */
+function testSyncWeekdayCalendar() {
+  var ssMaster = getMasterSpreadsheet();
+  var configs = getWeekdayConfigs(ssMaster);
+  for (var i = 0; i < configs.length; i++) {
+    var cfg = configs[i];
+    if (!cfg.is_active) continue;
+    // 4月から翌年3月まで
+    var yearMonths = [];
+    for (var m = 4; m <= 12; m++) {
+      yearMonths.push("2026-" + (m < 10 ? "0" : "") + m);
+    }
+    for (var m2 = 1; m2 <= 3; m2++) {
+      yearMonths.push("2027-" + (m2 < 10 ? "0" : "") + m2);
+    }
+    Logger.log("テスト実行: syncWeekdayCalendar(" + cfg.section + ", " + yearMonths.length + "ヶ月)");
+    syncWeekdayCalendar({
+      section: cfg.section,
+      clinic_name: cfg.clinic_name || "",
+      year_months: yearMonths
+    }, ssMaster);
+  }
 }
