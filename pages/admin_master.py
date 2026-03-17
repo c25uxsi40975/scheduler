@@ -12,6 +12,7 @@ from database import (
     get_all_preferences, upsert_preference, batch_upsert_preferences,
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,
+    get_double_shift_pairs, add_double_shift_pair, delete_double_shift_pair,
 )
 from optimizer import get_target_saturdays, get_clinic_dates
 from components.display_utils import build_display_name_map
@@ -919,4 +920,66 @@ def render(target_month, year, month):
             st.rerun()
 
     # カレンダー連携設定は「カレンダー」タブに移動
+
+    # ---- 掛け持ちペア設定 ----
+    st.markdown("---")
+    st.subheader("掛け持ちペア設定")
+    st.caption(
+        "午前の外勤先と午後の外勤先の組み合わせを登録します。"
+        "通常の割り当てで解がない場合のみ、同一日に2か所の外勤が許可されます。"
+    )
+
+    clinics_all = get_clinics(active_only=True)
+    clinic_name_map = {c["id"]: c["name"] for c in clinics_all}
+    clinic_time_info = {}
+    for c in clinics_all:
+        parts = []
+        if c.get("start_time") and c.get("end_time"):
+            parts.append(f"{c['start_time']}〜{c['end_time']}")
+        if c.get("time_slot"):
+            parts.append(c["time_slot"])
+        clinic_time_info[c["id"]] = " ".join(parts)
+
+    # 既存ペア一覧
+    existing_pairs = get_double_shift_pairs(active_only=False)
+    if existing_pairs:
+        for p in existing_pairs:
+            am_name = clinic_name_map.get(p["am_clinic_id"], f"ID:{p['am_clinic_id']}")
+            pm_name = clinic_name_map.get(p["pm_clinic_id"], f"ID:{p['pm_clinic_id']}")
+            am_time = clinic_time_info.get(p["am_clinic_id"], "")
+            pm_time = clinic_time_info.get(p["pm_clinic_id"], "")
+            pcol1, pcol2 = st.columns([4, 1])
+            with pcol1:
+                st.write(f"**{am_name}** ({am_time}) → **{pm_name}** ({pm_time})")
+            with pcol2:
+                if st.button("削除", key=f"del_dsp_{p['id']}"):
+                    delete_double_shift_pair(p["id"])
+                    st.rerun()
+    else:
+        st.info("掛け持ちペアは登録されていません")
+
+    # 新規追加
+    with st.expander("掛け持ちペアを追加"):
+        def _clinic_label(c):
+            parts = [c["name"]]
+            if c.get("start_time") and c.get("end_time"):
+                parts.append(f"({c['start_time']}〜{c['end_time']})")
+            elif c.get("time_slot"):
+                parts.append(f"({c['time_slot']})")
+            return " ".join(parts)
+
+        clinic_options = {_clinic_label(c): c["id"] for c in clinics_all}
+
+        sel_am = st.selectbox("1つ目の外勤先", options=list(clinic_options.keys()), key="dsp_am")
+        sel_pm = st.selectbox("2つ目の外勤先", options=list(clinic_options.keys()), key="dsp_pm")
+
+        if st.button("ペアを追加", key="add_dsp"):
+            am_id = clinic_options[sel_am]
+            pm_id = clinic_options[sel_pm]
+            if am_id == pm_id:
+                st.error("同じ外勤先は選択できません")
+            else:
+                add_double_shift_pair(am_id, pm_id)
+                st.success("掛け持ちペアを追加しました")
+                st.rerun()
 

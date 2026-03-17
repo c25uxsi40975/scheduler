@@ -12,6 +12,7 @@ from database import (
     get_clinic_date_overrides, get_all_confirmed_schedules,
     delete_old_schedules, append_training_data,
     append_suitability_training_data,
+    get_double_shift_pairs,
 )
 from ml_adjuster import (
     compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
@@ -190,10 +191,12 @@ def render(target_month, year, month):
             with st.spinner("ML適合性スコア計算 + 最適化中..."):
                 overrides = get_clinic_date_overrides(target_month)
                 confirmed = get_all_confirmed_schedules()
+                ds_pairs = get_double_shift_pairs(active_only=True)
                 result = run_integrated_pipeline(
                     target_month, year, month,
                     doctors, clinics, confirmed, prefs, affinities,
                     overrides, previous_earnings=previous_earnings,
+                    double_shift_pairs=ds_pairs,
                 )
                 plans = result["plans"]
 
@@ -201,7 +204,7 @@ def render(target_month, year, month):
                 st.error("制約を満たすスケジュールが見つかりません。制約条件を見直してください。")
                 diag = diagnose_infeasibility(
                     doctors, clinics, saturdays, prefs, affinities,
-                    date_overrides=overrides,
+                    date_overrides=overrides, ds_pairs=ds_pairs,
                 )
                 with st.expander("診断情報", expanded=True):
                     for line in diag:
@@ -369,6 +372,10 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
     max_assignments_map = {d["id"]: d.get("max_assignments", 0) for d in doctors}
     clinic_time_slot = {cid: c.get("time_slot", "") for cid, c in clinic_map.items()}
 
+    # 掛け持ちペア: {(am_clinic_id, pm_clinic_id), ...}
+    ds_pairs = get_double_shift_pairs(active_only=True)  # @st.cache_data(ttl=120) でキャッシュ済み
+    ds_pair_set = {(p["am_clinic_id"], p["pm_clinic_id"]) for p in ds_pairs}
+
     return {
         "ng_map": ng_map,
         "avoid_map": avoid_map,
@@ -378,6 +385,7 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
         "date_clinic_requests": date_clinic_req_map,
         "post_night_map": post_night_map,
         "clinic_time_slot": clinic_time_slot,
+        "double_shift_pairs_set": ds_pair_set,
     }
 
 
@@ -423,10 +431,13 @@ def _validate_and_convert(edited_df, dates, clinics_in_sched,
     new_assignments = []
     errors = []
 
+    # 掛け持ちペアのセット
+    ds_pair_set = constraints.get("double_shift_pairs_set", set())
+
     for ds in dates:
         d_obj = date.fromisoformat(ds)
         day_label = d_obj.strftime("%m/%d(%a)")
-        day_doctors = []
+        day_doctor_clinics = {}  # {doctor_id: [clinic_id, ...]}
 
         for cid in clinics_in_sched:
             cname = clinic_id_to_name.get(cid, "?")
@@ -448,10 +459,24 @@ def _validate_and_convert(edited_df, dates, clinics_in_sched,
                 if constraints["clinic_time_slot"].get(cid, "") != "PM":
                     errors.append(f"{day_label} {cname}: {dname} は当直明けのためPM以外不可")
 
-            # 同日重複チェック
-            if did in day_doctors:
-                errors.append(f"{day_label}: {dname} が同日に複数割り当てされています")
-            day_doctors.append(did)
+            # 同日重複チェック（掛け持ちペア考慮）
+            prev_cids = day_doctor_clinics.get(did, [])
+            if prev_cids:
+                # 既に1つ割り当て済み → 掛け持ちペアか確認
+                if len(prev_cids) >= 2:
+                    errors.append(f"{day_label}: {dname} が同日に3件以上割り当てされています")
+                else:
+                    prev_cid = prev_cids[0]
+                    is_valid_pair = (
+                        (prev_cid, cid) in ds_pair_set
+                        or (cid, prev_cid) in ds_pair_set
+                    )
+                    if not is_valid_pair:
+                        errors.append(
+                            f"{day_label}: {dname} が同日に複数割り当て"
+                            "（掛け持ちペア未登録の組み合わせです）"
+                        )
+            day_doctor_clinics.setdefault(did, []).append(cid)
 
             new_assignments.append({"date": ds, "clinic_id": cid, "doctor_id": did})
 

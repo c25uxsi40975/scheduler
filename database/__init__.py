@@ -13,6 +13,7 @@ from database.master import (
     set_clinic_date_overrides_batch,
     get_training_data, append_training_data,
     get_suitability_training_data, append_suitability_training_data,
+    get_double_shift_pairs, add_double_shift_pair, delete_double_shift_pair,
 )
 from database.operational import (
     get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences,

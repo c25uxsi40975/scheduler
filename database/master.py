@@ -469,3 +469,52 @@ def append_suitability_training_data(rows: list):
     ws = _get_sheet("適合学習テーブル")
     _retry(ws.append_rows, rows)
     _clear_data_cache()
+
+
+# ---- 掛け持ちペア ----
+
+@_register_cached
+@st.cache_data(ttl=120)
+def get_double_shift_pairs(active_only=True):
+    """掛け持ちペア一覧を返す。[{id, am_clinic_id, pm_clinic_id, is_active}, ...]"""
+    ws = _get_sheet("掛け持ちペア")
+    records = _get_all_records(ws)
+    result = []
+    for r in records:
+        r["id"] = _safe_int(r["id"])
+        r["am_clinic_id"] = _safe_int(r.get("am_clinic_id", 0))
+        r["pm_clinic_id"] = _safe_int(r.get("pm_clinic_id", 0))
+        r["is_active"] = _safe_int(r.get("is_active", 1), default=1)
+        if active_only and not r["is_active"]:
+            continue
+        result.append(r)
+    return result
+
+
+def add_double_shift_pair(am_clinic_id, pm_clinic_id):
+    """掛け持ちペアを追加。同一ペアの重複は無視。"""
+    ws = _get_sheet("掛け持ちペア")
+    records = _get_all_records(ws)
+    for r in records:
+        if (str(r.get("am_clinic_id", "")) == str(am_clinic_id)
+                and str(r.get("pm_clinic_id", "")) == str(pm_clinic_id)):
+            return
+    new_id = _next_id(ws)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    actual_headers = _retry(ws.row_values, 1)
+    values = {
+        "id": new_id, "am_clinic_id": am_clinic_id,
+        "pm_clinic_id": pm_clinic_id, "is_active": 1, "created_at": now,
+    }
+    row = [values.get(h, "") for h in actual_headers]
+    _retry(ws.append_row, row)
+    _clear_data_cache()
+
+
+def delete_double_shift_pair(pair_id):
+    """掛け持ちペアを削除"""
+    ws = _get_sheet("掛け持ちペア")
+    row_idx = _find_row_index(ws, 1, pair_id)
+    if row_idx:
+        _retry(ws.delete_rows, row_idx)
+    _clear_data_cache()

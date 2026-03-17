@@ -286,6 +286,9 @@ SHEET_HEADERS = {
     "スケジュール対象日": [
         "id", "section", "date", "is_active", "created_at",
     ],
+    "掛け持ちペア": [
+        "id", "am_clinic_id", "pm_clinic_id", "is_active", "created_at",
+    ],
 }
 
 

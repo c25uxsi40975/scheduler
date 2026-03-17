@@ -56,6 +56,7 @@ def solve_schedule(
     date_overrides: dict = None,
     suitability_scores: dict = None,
     relax_must: bool = False,
+    double_shift_pairs: list[dict] = None,
 ) -> dict | None:
     """
     最適化ソルバー
@@ -180,12 +181,71 @@ def solve_schedule(
             f"slot_req_{cid}_{ds}"
         )
 
-    # 2. 各医員は同一日に最大1外勤
+    # 掛け持ちペアのセット構築: {(am_clinic_id, pm_clinic_id), ...}
+    ds_pairs = set()
+    if double_shift_pairs:
+        for p in double_shift_pairs:
+            ds_pairs.add((p["am_clinic_id"], p["pm_clinic_id"]))
+
+    # 2. 各医員は同一日に最大1外勤（掛け持ちペア許可時は条件付きで2）
     all_dates = sorted(set(ds for _, ds in slots))
     for doc_id in doc_ids:
         for ds in all_dates:
             relevant = [(cid, ds2) for (cid, ds2) in slots if ds2 == ds]
-            if relevant:
+            if not relevant:
+                continue
+            if ds_pairs:
+                # 掛け持ち許可: 登録済みペアの組み合わせのみ最大2
+                relevant_cids = set(cid for cid, _ in relevant)
+                # この日にペアが成立しうるか
+                has_pair = any(
+                    am in relevant_cids and pm in relevant_cids
+                    for am, pm in ds_pairs
+                )
+                if has_pair:
+                    # AM側の外勤先は最大1つ
+                    am_cids = {am for am, pm in ds_pairs if am in relevant_cids and pm in relevant_cids}
+                    pm_cids = {pm for am, pm in ds_pairs if am in relevant_cids and pm in relevant_cids}
+                    am_relevant = [(c, d) for c, d in relevant if c in am_cids]
+                    pm_relevant = [(c, d) for c, d in relevant if c in pm_cids]
+                    other_relevant = [(c, d) for c, d in relevant if c not in am_cids and c not in pm_cids]
+
+                    if am_relevant:
+                        prob += (
+                            pulp.lpSum(x[(doc_id, c, d)] for c, d in am_relevant) <= 1,
+                            f"ds_am_{doc_id}_{ds}"
+                        )
+                    if pm_relevant:
+                        prob += (
+                            pulp.lpSum(x[(doc_id, c, d)] for c, d in pm_relevant) <= 1,
+                            f"ds_pm_{doc_id}_{ds}"
+                        )
+                    # ペア外の外勤先に割り当てる場合は掛け持ち不可
+                    if other_relevant:
+                        # other に1つでも割り当てたら合計1
+                        other_sum = pulp.lpSum(x[(doc_id, c, d)] for c, d in other_relevant)
+                        total_sum = pulp.lpSum(x[(doc_id, c, d)] for c, d in relevant)
+                        # other_sum >= 1 ならば total_sum <= 1
+                        # → total_sum <= 1 + (1 - other_sum) は非線形なので
+                        #   other_sum + total_sum <= 2 かつ other_sum <= 1 で代替
+                        prob += other_sum <= 1, f"ds_other_{doc_id}_{ds}"
+                        # other に割り当てた場合、AM/PM両方には行けない
+                        # total_sum <= 2 - other_sum → total_sum + other_sum <= 2
+                        prob += (
+                            total_sum + other_sum <= 2,
+                            f"ds_total_other_{doc_id}_{ds}"
+                        )
+                    # 全体で最大2
+                    prob += (
+                        pulp.lpSum(x[(doc_id, c, d)] for c, d in relevant) <= 2,
+                        f"one_per_day_{doc_id}_{ds}"
+                    )
+                else:
+                    prob += (
+                        pulp.lpSum(x[(doc_id, c, d)] for c, d in relevant) <= 1,
+                        f"one_per_day_{doc_id}_{ds}"
+                    )
+            else:
                 prob += (
                     pulp.lpSum(x[(doc_id, cid, ds2)] for (cid, ds2) in relevant) <= 1,
                     f"one_per_day_{doc_id}_{ds}"
@@ -347,6 +407,25 @@ def solve_schedule(
         100.0 * slack for slack in must_slack_vars.values()
     ) if must_slack_vars else 0
 
+    # 掛け持ちペナルティ（同一日2外勤は大きなペナルティで最終手段にする）
+    double_shift_penalty = 0
+    if ds_pairs:
+        ds_over = {}  # 同一日の割当が2になった場合を検出する補助変数
+        for doc_id in doc_ids:
+            for ds in all_dates:
+                relevant = [(c, d) for c, d in slots if d == ds]
+                if len(relevant) < 2:
+                    continue
+                day_sum = pulp.lpSum(x[(doc_id, c, d)] for c, d in relevant)
+                # over >= day_sum - 1 (day_sum=2のとき over>=1)
+                over = pulp.LpVariable(f"ds_over_{doc_id}_{ds}", lowBound=0)
+                prob += over >= day_sum - 1
+                ds_over[(doc_id, ds)] = over
+        if ds_over:
+            double_shift_penalty = pulp.lpSum(
+                50.0 * v for v in ds_over.values()
+            )
+
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
@@ -392,6 +471,7 @@ def solve_schedule(
         + w_dcr * date_clinic_bonus
         + w_suit * suitability_term
         + must_penalty
+        + double_shift_penalty
     )
 
     # ---- 求解 ----
@@ -443,7 +523,7 @@ def solve_schedule(
 def solve_with_relaxation(
     doctors, clinics, saturdays, preferences, affinities,
     mode="balanced", previous_earnings=None, date_overrides=None,
-    suitability_scores=None,
+    suitability_scores=None, double_shift_pairs=None,
 ) -> dict | None:
     """段階的制約緩和付きの最適化。Infeasible時に制約を段階的に緩和して再試行。
 
@@ -452,7 +532,7 @@ def solve_with_relaxation(
     """
     relaxations = []
 
-    # Step 0: 全制約で試行
+    # Step 0: 全制約で試行（掛け持ちなし）
     result = solve_schedule(
         doctors, clinics, saturdays, preferences, affinities,
         mode=mode, previous_earnings=previous_earnings,
@@ -463,25 +543,27 @@ def solve_with_relaxation(
         result["relaxations"] = []
         return result
 
-    # Step 1: 必須メンバーの月1回以上制約をソフト制約に緩和
-    relaxations.append("必須メンバーの月1回以上制約をソフト制約に変更")
-    result = solve_schedule(
-        doctors, clinics, saturdays, preferences, affinities,
-        mode=mode, previous_earnings=previous_earnings,
-        date_overrides=date_overrides,
-        suitability_scores=suitability_scores,
-        relax_must=True,
-    )
-    if result:
-        result["relaxations"] = list(relaxations)
-        return result
+    # Step 1: 掛け持ちペアが登録されていれば、同一日2外勤を許可して再試行
+    # （◎必須制約は緩和せず維持する）
+    if double_shift_pairs:
+        relaxations.append("掛け持ちペアによる同一日2外勤を許可")
+        result = solve_schedule(
+            doctors, clinics, saturdays, preferences, affinities,
+            mode=mode, previous_earnings=previous_earnings,
+            date_overrides=date_overrides,
+            suitability_scores=suitability_scores,
+            double_shift_pairs=double_shift_pairs,
+        )
+        if result:
+            result["relaxations"] = list(relaxations)
+            return result
 
-    return None  # すべての緩和を試しても解なし
+    return None  # 解なし（◎制約の緩和は行わない）
 
 
 def diagnose_infeasibility(
     doctors, clinics, saturdays, preferences, affinities,
-    date_overrides=None,
+    date_overrides=None, ds_pairs=None,
 ) -> list[str]:
     """制約を満たせない原因の診断情報を返す"""
     issues = []
@@ -955,6 +1037,23 @@ def diagnose_infeasibility(
     except Exception:
         pass  # LP構築エラー時はスキップ
 
+    # --- 掛け持ちペアの案内 ---
+    if ds_pairs:
+        pair_descs = []
+        for p in ds_pairs:
+            am_name = clinic_name.get(p["am_clinic_id"], "?")
+            pm_name = clinic_name.get(p["pm_clinic_id"], "?")
+            pair_descs.append(f"{am_name} → {pm_name}")
+        issues.append(
+            f"**掛け持ちペア登録あり**: {', '.join(pair_descs)}。"
+            "通常の制約で解がない場合、掛け持ち（同一日2外勤）を許可して再試行します"
+        )
+    else:
+        issues.append(
+            "**掛け持ちペア未登録**: 外勤先マスタで掛け持ちペアを登録すると、"
+            "人手不足時に同一日2外勤による解決が可能になります"
+        )
+
     # --- 最終フォールバック ---
     if len(issues) == 2:
         issues.append("個別の制約は問題ありませんが、組み合わせにより解がない可能性があります。"
@@ -966,7 +1065,7 @@ def diagnose_infeasibility(
 def generate_multiple_plans(
     doctors, clinics, saturdays, preferences, affinities,
     previous_earnings=None, date_overrides=None,
-    suitability_scores=None,
+    suitability_scores=None, double_shift_pairs=None,
 ) -> list[dict]:
     """複数のプラン（案）を生成
 
@@ -994,6 +1093,7 @@ def generate_multiple_plans(
             mode=mode, previous_earnings=previous_earnings,
             date_overrides=date_overrides,
             suitability_scores=suitability_scores,
+            double_shift_pairs=double_shift_pairs,
         )
         if result:
             result["plan_name"] = label

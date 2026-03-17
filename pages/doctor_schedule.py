@@ -27,10 +27,25 @@ def render(doctor, target_month):
 
         if my_assignments:
             st.subheader("あなたの外勤予定")
-            for a in sorted(my_assignments, key=lambda x: x["date"]):
-                d_obj = date.fromisoformat(a["date"])
-                cname = clinic_map.get(a["clinic_id"], "?")
-                st.write(f"**{d_obj.strftime('%m/%d(%a)')}** → {cname}")
+            # 同一日の割り当てをグループ化
+            from collections import defaultdict
+            day_groups = defaultdict(list)
+            for a in my_assignments:
+                day_groups[a["date"]].append(a)
+
+            for ds in sorted(day_groups.keys()):
+                group = day_groups[ds]
+                d_obj = date.fromisoformat(ds)
+                day_label = d_obj.strftime('%m/%d(%a)')
+                if len(group) >= 2:
+                    names = " / ".join(
+                        clinic_map.get(a["clinic_id"], "?") for a in group
+                    )
+                    st.write(f"**{day_label}** → {names}")
+                    st.caption(f"　この日は2か所の掛け持ちです")
+                else:
+                    cname = clinic_map.get(group[0]["clinic_id"], "?")
+                    st.write(f"**{day_label}** → {cname}")
         else:
             st.info("今月の外勤割り当てはありません")
 

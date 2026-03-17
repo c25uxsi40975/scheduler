@@ -14,12 +14,13 @@ def run_integrated_pipeline(
     doctors, clinics,
     confirmed_schedules, preferences, affinities,
     date_overrides, previous_earnings=None,
+    double_shift_pairs=None,
 ):
     """統合パイプラインの実行
 
     1. ML適合性スコア行列を計算
     2. PuLP最適化（複数モード）でスケジュールを生成
-    3. 段階的緩和付き
+    3. 段階的緩和付き（掛け持ちペア対応）
 
     Returns:
         dict: {
@@ -43,6 +44,7 @@ def run_integrated_pipeline(
         previous_earnings=previous_earnings,
         date_overrides=date_overrides,
         suitability_scores=suitability_scores,
+        double_shift_pairs=double_shift_pairs,
     )
 
     return {

@@ -54,9 +54,14 @@ def render_doctor_view_table(sched, doctors):
 
     doc_sched = {}
     for a in sched["assignments"]:
-        doc_sched.setdefault(a["doctor_id"], {})[a["date"]] = (
-            clinic_map.get(a["clinic_id"], "?")
-        )
+        did, ds = a["doctor_id"], a["date"]
+        cname = clinic_map.get(a["clinic_id"], "?")
+        existing = doc_sched.get(did, {}).get(ds)
+        if existing:
+            # 同一日に複数割り当て（掛け持ち）→ スラッシュ区切り
+            doc_sched[did][ds] = existing + " / " + cname
+        else:
+            doc_sched.setdefault(did, {})[ds] = cname
 
     dates_sorted = sorted(set(a["date"] for a in sched["assignments"]))
     date_labels = {
