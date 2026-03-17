@@ -143,152 +143,153 @@ def render(target_month, year, month):
                             st.session_state["_toast_msg"] = f"「{new_last}{new_first}」を追加しました"
                             st.rerun()
 
-        doctors_all = get_doctors(active_only=False)
-        if doctors_all:
-            def _doc_label(d):
-                s = "有効" if d["is_active"] else "無効"
-                login = "" if d.get("can_login", 1) else " [ログイン停止]"
-                pw = "🔑" if d.get("password_hash") else "⚠️"
-                acc = d.get("account", "")
-                acc_str = f" [ID:{acc}]" if acc else ""
-                return f"{d['name']}{acc_str}（{s}）{login}{pw}"
+        with st.expander("医員の編集", expanded=False):
+            doctors_all = get_doctors(active_only=False)
+            if doctors_all:
+                def _doc_label(d):
+                    s = "有効" if d["is_active"] else "無効"
+                    login = "" if d.get("can_login", 1) else " [ログイン停止]"
+                    pw = "🔑" if d.get("password_hash") else "⚠️"
+                    acc = d.get("account", "")
+                    acc_str = f" [ID:{acc}]" if acc else ""
+                    return f"{d['name']}{acc_str}（{s}）{login}{pw}"
 
-            selected_doc = st.selectbox(
-                "医員を選択", doctors_all,
-                format_func=_doc_label, key="select_doctor"
-            )
+                selected_doc = st.selectbox(
+                    "医員を選択", doctors_all,
+                    format_func=_doc_label, key="select_doctor"
+                )
 
-            if selected_doc:
-                d = selected_doc
-                has_pw = bool(d.get("password_hash"))
-                has_email = bool(d.get("email"))
-                marker = "row-active" if d['is_active'] else "row-inactive"
-                status_label = "有効" if d['is_active'] else "無効"
-                login_label = "ログイン可" if d.get('can_login', 1) else "ログイン停止"
-                id_display = d.get("account", "") or "未設定"
-                aname_display = d.get("account_name", "") or id_display
-                email_display = d.get("email", "") or "未設定"
-                max_a = d.get("max_assignments", 0)
-                limit_display = f"{max_a}回/月" if max_a > 0 else "未設定"
-                rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
-                rank_display = rank_labels.get(d.get("job_rank", 0), "未設定")
-                with st.container(border=True):
-                    st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                    st.markdown(f"**{d['name']}**　{status_label}　{login_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}　役職: {rank_display}")
-                    b1, b1b, b2, b3, b4, b5 = st.columns(6)
-                    with b1:
-                        if d['is_active']:
-                            if st.button("シフト除外", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
-                                update_doctor(d['id'], is_active=0)
-                                st.rerun()
-                        else:
-                            if st.button("シフト有効", key=f"act_{d['id']}", use_container_width=True):
-                                update_doctor(d['id'], is_active=1)
-                                st.rerun()
-                    with b1b:
-                        if d.get('can_login', 1):
-                            if st.button("ログイン停止", key=f"login_off_{d['id']}", type="secondary", use_container_width=True):
-                                update_doctor(d['id'], can_login=0)
-                                st.rerun()
-                        else:
-                            if st.button("ログイン許可", key=f"login_on_{d['id']}", use_container_width=True):
-                                update_doctor(d['id'], can_login=1)
-                                st.rerun()
-                    with b2:
-                        btn_label = "PW再設定" if has_pw else "PW設定"
-                        if st.button(btn_label, key=f"setpw_{d['id']}", use_container_width=True):
-                            st.session_state[f"setting_pw_{d['id']}"] = True
-                    with b3:
-                        email_btn = "📧変更" if has_email else "📧設定"
-                        if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
-                            st.session_state[f"setting_email_{d['id']}"] = True
-                    with b4:
-                        if st.button("役職", key=f"setrank_{d['id']}", use_container_width=True):
-                            st.session_state[f"setting_rank_{d['id']}"] = True
-                    with b5:
-                        if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
-                            st.session_state[f"confirm_del_doc_{d['id']}"] = True
+                if selected_doc:
+                    d = selected_doc
+                    has_pw = bool(d.get("password_hash"))
+                    has_email = bool(d.get("email"))
+                    marker = "row-active" if d['is_active'] else "row-inactive"
+                    status_label = "有効" if d['is_active'] else "無効"
+                    login_label = "ログイン可" if d.get('can_login', 1) else "ログイン停止"
+                    id_display = d.get("account", "") or "未設定"
+                    aname_display = d.get("account_name", "") or id_display
+                    email_display = d.get("email", "") or "未設定"
+                    max_a = d.get("max_assignments", 0)
+                    limit_display = f"{max_a}回/月" if max_a > 0 else "未設定"
+                    rank_labels = {0: "未設定", 1: "レジデント", 2: "大学院生", 3: "フェロー"}
+                    rank_display = rank_labels.get(d.get("job_rank", 0), "未設定")
+                    with st.container(border=True):
+                        st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
+                        st.markdown(f"**{d['name']}**　{status_label}　{login_label}　ID: {id_display}　アカウント名: {aname_display}　📧 {email_display}　上限: {limit_display}　役職: {rank_display}")
+                        b1, b1b, b2, b3, b4, b5 = st.columns(6)
+                        with b1:
+                            if d['is_active']:
+                                if st.button("シフト除外", key=f"deact_{d['id']}", type="secondary", use_container_width=True):
+                                    update_doctor(d['id'], is_active=0)
+                                    st.rerun()
+                            else:
+                                if st.button("シフト有効", key=f"act_{d['id']}", use_container_width=True):
+                                    update_doctor(d['id'], is_active=1)
+                                    st.rerun()
+                        with b1b:
+                            if d.get('can_login', 1):
+                                if st.button("ログイン停止", key=f"login_off_{d['id']}", type="secondary", use_container_width=True):
+                                    update_doctor(d['id'], can_login=0)
+                                    st.rerun()
+                            else:
+                                if st.button("ログイン許可", key=f"login_on_{d['id']}", use_container_width=True):
+                                    update_doctor(d['id'], can_login=1)
+                                    st.rerun()
+                        with b2:
+                            btn_label = "PW再設定" if has_pw else "PW設定"
+                            if st.button(btn_label, key=f"setpw_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_pw_{d['id']}"] = True
+                        with b3:
+                            email_btn = "📧変更" if has_email else "📧設定"
+                            if st.button(email_btn, key=f"setemail_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_email_{d['id']}"] = True
+                        with b4:
+                            if st.button("役職", key=f"setrank_{d['id']}", use_container_width=True):
+                                st.session_state[f"setting_rank_{d['id']}"] = True
+                        with b5:
+                            if st.button("削除", key=f"del_doc_{d['id']}", type="secondary", use_container_width=True):
+                                st.session_state[f"confirm_del_doc_{d['id']}"] = True
 
-                # パスワード設定フォーム
-                if st.session_state.get(f"setting_pw_{d['id']}"):
-                    with st.form(f"setpw_form_{d['id']}"):
-                        pw1 = st.text_input("パスワード", type="password", key=f"pw1_{d['id']}")
-                        pw2 = st.text_input("パスワード（確認）", type="password", key=f"pw2_{d['id']}")
-                        fc1, fc2 = st.columns(2)
-                        with fc1:
-                            if st.form_submit_button("設定"):
-                                if not pw1:
-                                    st.error("パスワードを入力してください")
-                                elif pw1 != pw2:
-                                    st.error("パスワードが一致しません")
-                                else:
-                                    set_doctor_individual_password(d['id'], pw1)
-                                    st.session_state["_toast_msg"] = f"「{d['name']}」のパスワードを設定しました"
+                    # パスワード設定フォーム
+                    if st.session_state.get(f"setting_pw_{d['id']}"):
+                        with st.form(f"setpw_form_{d['id']}"):
+                            pw1 = st.text_input("パスワード", type="password", key=f"pw1_{d['id']}")
+                            pw2 = st.text_input("パスワード（確認）", type="password", key=f"pw2_{d['id']}")
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("設定"):
+                                    if not pw1:
+                                        st.error("パスワードを入力してください")
+                                    elif pw1 != pw2:
+                                        st.error("パスワードが一致しません")
+                                    else:
+                                        set_doctor_individual_password(d['id'], pw1)
+                                        st.session_state["_toast_msg"] = f"「{d['name']}」のパスワードを設定しました"
+                                        st.session_state.pop(f"setting_pw_{d['id']}", None)
+                                        st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
                                     st.session_state.pop(f"setting_pw_{d['id']}", None)
                                     st.rerun()
-                        with fc2:
-                            if st.form_submit_button("キャンセル"):
-                                st.session_state.pop(f"setting_pw_{d['id']}", None)
+
+                    # メールアドレス設定フォーム
+                    if st.session_state.get(f"setting_email_{d['id']}"):
+                        with st.form(f"setemail_form_{d['id']}"):
+                            current_email = d.get("email", "") or ""
+                            new_email = st.text_input("メールアドレス", value=current_email, key=f"email_{d['id']}")
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_doctor_email(d['id'], new_email.strip())
+                                    st.session_state["_toast_msg"] = f"「{d['name']}」のメールアドレスを保存しました"
+                                    st.session_state.pop(f"setting_email_{d['id']}", None)
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"setting_email_{d['id']}", None)
+                                    st.rerun()
+
+                    # 削除確認
+                    if st.session_state.get(f"confirm_del_doc_{d['id']}"):
+                        st.warning(f"「{d['name']}」を削除しますか？関連データも削除されます。")
+                        dc1, dc2 = st.columns(2)
+                        with dc1:
+                            if st.button("削除する", key=f"do_del_doc_{d['id']}", type="primary"):
+                                delete_doctor(d['id'])
+                                st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
+                                st.session_state["_toast_msg"] = "削除しました"
+                                st.rerun()
+                        with dc2:
+                            if st.button("キャンセル", key=f"cancel_del_doc_{d['id']}"):
+                                st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
                                 st.rerun()
 
-                # メールアドレス設定フォーム
-                if st.session_state.get(f"setting_email_{d['id']}"):
-                    with st.form(f"setemail_form_{d['id']}"):
-                        current_email = d.get("email", "") or ""
-                        new_email = st.text_input("メールアドレス", value=current_email, key=f"email_{d['id']}")
-                        fc1, fc2 = st.columns(2)
-                        with fc1:
-                            if st.form_submit_button("保存"):
-                                update_doctor_email(d['id'], new_email.strip())
-                                st.session_state["_toast_msg"] = f"「{d['name']}」のメールアドレスを保存しました"
-                                st.session_state.pop(f"setting_email_{d['id']}", None)
-                                st.rerun()
-                        with fc2:
-                            if st.form_submit_button("キャンセル"):
-                                st.session_state.pop(f"setting_email_{d['id']}", None)
-                                st.rerun()
-
-                # 削除確認
-                if st.session_state.get(f"confirm_del_doc_{d['id']}"):
-                    st.warning(f"「{d['name']}」を削除しますか？関連データも削除されます。")
-                    dc1, dc2 = st.columns(2)
-                    with dc1:
-                        if st.button("削除する", key=f"do_del_doc_{d['id']}", type="primary"):
-                            delete_doctor(d['id'])
-                            st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
-                            st.session_state["_toast_msg"] = "削除しました"
-                            st.rerun()
-                    with dc2:
-                        if st.button("キャンセル", key=f"cancel_del_doc_{d['id']}"):
-                            st.session_state.pop(f"confirm_del_doc_{d['id']}", None)
-                            st.rerun()
-
-                # 役職ランク設定フォーム
-                if st.session_state.get(f"setting_rank_{d['id']}"):
-                    with st.form(f"setrank_form_{d['id']}"):
-                        rank_options = [
-                            (0, "未設定"), (1, "レジデント"),
-                            (2, "大学院生"), (3, "フェロー"),
-                        ]
-                        current_rank = d.get("job_rank", 0)
-                        new_rank = st.selectbox(
-                            "役職ランク",
-                            rank_options,
-                            index=current_rank,
-                            format_func=lambda x: x[1],
-                            key=f"rank_val_{d['id']}",
-                        )
-                        fc1, fc2 = st.columns(2)
-                        with fc1:
-                            if st.form_submit_button("保存"):
-                                update_doctor(d['id'], job_rank=new_rank[0])
-                                st.session_state["_toast_msg"] = f"役職を{new_rank[1]}に設定しました"
-                                st.session_state.pop(f"setting_rank_{d['id']}", None)
-                                st.rerun()
-                        with fc2:
-                            if st.form_submit_button("キャンセル"):
-                                st.session_state.pop(f"setting_rank_{d['id']}", None)
-                                st.rerun()
+                    # 役職ランク設定フォーム
+                    if st.session_state.get(f"setting_rank_{d['id']}"):
+                        with st.form(f"setrank_form_{d['id']}"):
+                            rank_options = [
+                                (0, "未設定"), (1, "レジデント"),
+                                (2, "大学院生"), (3, "フェロー"),
+                            ]
+                            current_rank = d.get("job_rank", 0)
+                            new_rank = st.selectbox(
+                                "役職ランク",
+                                rank_options,
+                                index=current_rank,
+                                format_func=lambda x: x[1],
+                                key=f"rank_val_{d['id']}",
+                            )
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_doctor(d['id'], job_rank=new_rank[0])
+                                    st.session_state["_toast_msg"] = f"役職を{new_rank[1]}に設定しました"
+                                    st.session_state.pop(f"setting_rank_{d['id']}", None)
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"setting_rank_{d['id']}", None)
+                                    st.rerun()
 
     # ---- 外勤先管理 ----
     with col2:
@@ -343,141 +344,142 @@ def render(target_month, year, month):
                         st.success(f"「{new_clinic}」を追加しました")
                         st.rerun()
 
-        clinics_all = get_clinics(active_only=False)
-        if clinics_all:
-            def _cli_label(c):
-                s = "有効" if c["is_active"] else "無効"
-                return f"{c['name']}（{s}）"
+        with st.expander("外勤先の編集", expanded=False):
+            clinics_all = get_clinics(active_only=False)
+            if clinics_all:
+                def _cli_label(c):
+                    s = "有効" if c["is_active"] else "無効"
+                    return f"{c['name']}（{s}）"
 
-            selected_cli = st.selectbox(
-                "外勤先を選択", clinics_all,
-                format_func=_cli_label, key="select_clinic"
-            )
+                selected_cli = st.selectbox(
+                    "外勤先を選択", clinics_all,
+                    format_func=_cli_label, key="select_clinic"
+                )
 
-            if selected_cli:
-                c = selected_cli
-                marker = "row-active" if c['is_active'] else "row-inactive"
-                status_label = "有効" if c['is_active'] else "無効"
-                effort = c.get("effort_cost", 0)
-                hours = c.get("work_hours", 0)
-                tslot = c.get("time_slot", "")
-                loc = c.get("location", "")
-                _edit_docs = get_doctors()
-                _edit_doc_id_name = build_display_name_map(_edit_docs)
-                _edit_doc_ids = [d["id"] for d in _edit_docs]
+                if selected_cli:
+                    c = selected_cli
+                    marker = "row-active" if c['is_active'] else "row-inactive"
+                    status_label = "有効" if c['is_active'] else "無効"
+                    effort = c.get("effort_cost", 0)
+                    hours = c.get("work_hours", 0)
+                    tslot = c.get("time_slot", "")
+                    loc = c.get("location", "")
+                    _edit_docs = get_doctors()
+                    _edit_doc_id_name = build_display_name_map(_edit_docs)
+                    _edit_doc_ids = [d["id"] for d in _edit_docs]
 
-                with st.container(border=True):
-                    st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
-                    info_parts = [
-                        f"**{c['name']}**　{status_label}",
-                        f"¥{c['fee']:,}",
-                        FREQ_LABELS.get(c['frequency'], c['frequency']),
-                    ]
-                    if effort:
-                        info_parts.append(f"労力:{effort:.0f}")
-                    if hours:
-                        info_parts.append(f"{hours:.1f}h")
-                    if tslot:
-                        info_parts.append(tslot)
-                    cli_start = c.get("start_time", "")
-                    cli_end = c.get("end_time", "")
-                    if cli_start and cli_end:
-                        info_parts.append(f"{cli_start}〜{cli_end}")
-                    if loc:
-                        info_parts.append(loc)
-                    fd_list = c.get("fixed_doctors") or []
-                    if fd_list:
-                        fd_names = ", ".join(_edit_doc_id_name.get(did, "?") for did in fd_list)
-                        info_parts.append(f"限定:[{fd_names}]")
-                    st.markdown(" | ".join(info_parts))
-                    bc1, bc2 = st.columns(2)
-                    with bc1:
-                        if c['is_active']:
-                            if st.button("無効化", key=f"deact_cli_{c['id']}", type="secondary", use_container_width=True):
-                                update_clinic(c['id'], is_active=0)
-                                st.rerun()
-                        else:
-                            if st.button("有効化", key=f"act_cli_{c['id']}", use_container_width=True):
-                                update_clinic(c['id'], is_active=1)
-                                st.rerun()
-                    with bc2:
-                        if st.button("編集", key=f"edit_cli_{c['id']}", use_container_width=True):
-                            st.session_state[f"editing_cli_{c['id']}"] = True
+                    with st.container(border=True):
+                        st.markdown(f'<span class="{marker}"></span>', unsafe_allow_html=True)
+                        info_parts = [
+                            f"**{c['name']}**　{status_label}",
+                            f"¥{c['fee']:,}",
+                            FREQ_LABELS.get(c['frequency'], c['frequency']),
+                        ]
+                        if effort:
+                            info_parts.append(f"労力:{effort:.0f}")
+                        if hours:
+                            info_parts.append(f"{hours:.1f}h")
+                        if tslot:
+                            info_parts.append(tslot)
+                        cli_start = c.get("start_time", "")
+                        cli_end = c.get("end_time", "")
+                        if cli_start and cli_end:
+                            info_parts.append(f"{cli_start}〜{cli_end}")
+                        if loc:
+                            info_parts.append(loc)
+                        fd_list = c.get("fixed_doctors") or []
+                        if fd_list:
+                            fd_names = ", ".join(_edit_doc_id_name.get(did, "?") for did in fd_list)
+                            info_parts.append(f"限定:[{fd_names}]")
+                        st.markdown(" | ".join(info_parts))
+                        bc1, bc2 = st.columns(2)
+                        with bc1:
+                            if c['is_active']:
+                                if st.button("無効化", key=f"deact_cli_{c['id']}", type="secondary", use_container_width=True):
+                                    update_clinic(c['id'], is_active=0)
+                                    st.rerun()
+                            else:
+                                if st.button("有効化", key=f"act_cli_{c['id']}", use_container_width=True):
+                                    update_clinic(c['id'], is_active=1)
+                                    st.rerun()
+                        with bc2:
+                            if st.button("編集", key=f"edit_cli_{c['id']}", use_container_width=True):
+                                st.session_state[f"editing_cli_{c['id']}"] = True
 
-                # 外勤先編集フォーム
-                if st.session_state.get(f"editing_cli_{c['id']}"):
-                    with st.form(f"edit_clinic_form_{c['id']}"):
-                        edit_fee = st.number_input(
-                            "日当（円）", min_value=0, step=10000,
-                            value=c["fee"], key=f"fee_{c['id']}"
-                        )
-                        current_freq_idx = next(
-                            (i for i, (k, _) in enumerate(FREQ_OPTIONS) if k == c["frequency"]),
-                            0
-                        )
-                        edit_freq = st.selectbox(
-                            "頻度", FREQ_OPTIONS,
-                            index=current_freq_idx,
-                            format_func=lambda x: x[1],
-                            key=f"freq_{c['id']}"
-                        )
-                        edit_effort = st.number_input(
-                            "労力コスト (1-10)", min_value=0, max_value=10, step=1,
-                            value=int(c.get("effort_cost", 0)),
-                            key=f"effort_{c['id']}"
-                        )
-                        edit_hours = st.number_input(
-                            "勤務時間 (h)", min_value=0.0, max_value=12.0, step=0.5,
-                            value=float(c.get("work_hours", 0)),
-                            key=f"hours_{c['id']}"
-                        )
-                        time_slot_options = ["", "AM", "PM", "ALL"]
-                        current_tslot = c.get("time_slot", "")
-                        tslot_idx = time_slot_options.index(current_tslot) if current_tslot in time_slot_options else 0
-                        edit_tslot = st.selectbox(
-                            "時間帯", time_slot_options,
-                            index=tslot_idx,
-                            key=f"tslot_{c['id']}",
-                            help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です",
-                        )
-                        edit_loc = st.text_input(
-                            "勤務地", value=c.get("location", ""),
-                            key=f"loc_{c['id']}"
-                        )
-                        st.caption("開始時間（カレンダー表示用）")
-                        edit_start_time = _time_select(
-                            "開始", c.get("start_time", ""),
-                            f"cli_start_{c['id']}")
-                        st.caption("終了時間（カレンダー表示用）")
-                        edit_end_time = _time_select(
-                            "終了", c.get("end_time", ""),
-                            f"cli_end_{c['id']}")
-                        current_fd = c.get("fixed_doctors") or []
-                        # default にはリスト内のIDのうち、現在有効な医員のみ
-                        edit_limited = st.multiselect(
-                            "限定メンバー", options=_edit_doc_ids,
-                            default=[did for did in current_fd if did in _edit_doc_id_name],
-                            format_func=lambda x: _edit_doc_id_name.get(x, "?"),
-                            key=f"limited_{c['id']}",
-                            help="設定すると、この外勤先にはリスト内の医員のみ割り当て可能になります（ホワイトリスト）",
-                        )
-                        fc1, fc2 = st.columns(2)
-                        with fc1:
-                            if st.form_submit_button("保存"):
-                                update_clinic(
-                                    c['id'], fee=edit_fee, frequency=edit_freq[0],
-                                    effort_cost=edit_effort, work_hours=edit_hours,
-                                    time_slot=edit_tslot, location=edit_loc,
-                                    start_time=edit_start_time, end_time=edit_end_time,
-                                    fixed_doctors=edit_limited,
-                                )
-                                st.session_state.pop(f"editing_cli_{c['id']}", None)
-                                st.session_state["_toast_msg"] = "保存しました"
-                                st.rerun()
-                        with fc2:
-                            if st.form_submit_button("キャンセル"):
-                                st.session_state.pop(f"editing_cli_{c['id']}", None)
-                                st.rerun()
+                    # 外勤先編集フォーム
+                    if st.session_state.get(f"editing_cli_{c['id']}"):
+                        with st.form(f"edit_clinic_form_{c['id']}"):
+                            edit_fee = st.number_input(
+                                "日当（円）", min_value=0, step=10000,
+                                value=c["fee"], key=f"fee_{c['id']}"
+                            )
+                            current_freq_idx = next(
+                                (i for i, (k, _) in enumerate(FREQ_OPTIONS) if k == c["frequency"]),
+                                0
+                            )
+                            edit_freq = st.selectbox(
+                                "頻度", FREQ_OPTIONS,
+                                index=current_freq_idx,
+                                format_func=lambda x: x[1],
+                                key=f"freq_{c['id']}"
+                            )
+                            edit_effort = st.number_input(
+                                "労力コスト (1-10)", min_value=0, max_value=10, step=1,
+                                value=int(c.get("effort_cost", 0)),
+                                key=f"effort_{c['id']}"
+                            )
+                            edit_hours = st.number_input(
+                                "勤務時間 (h)", min_value=0.0, max_value=12.0, step=0.5,
+                                value=float(c.get("work_hours", 0)),
+                                key=f"hours_{c['id']}"
+                            )
+                            time_slot_options = ["", "AM", "PM", "ALL"]
+                            current_tslot = c.get("time_slot", "")
+                            tslot_idx = time_slot_options.index(current_tslot) if current_tslot in time_slot_options else 0
+                            edit_tslot = st.selectbox(
+                                "時間帯", time_slot_options,
+                                index=tslot_idx,
+                                key=f"tslot_{c['id']}",
+                                help="AM=午前のみ / PM=午後のみ / ALL=終日。当直明け○の医員はPMの外勤先のみ割当可能です",
+                            )
+                            edit_loc = st.text_input(
+                                "勤務地", value=c.get("location", ""),
+                                key=f"loc_{c['id']}"
+                            )
+                            st.caption("開始時間（カレンダー表示用）")
+                            edit_start_time = _time_select(
+                                "開始", c.get("start_time", ""),
+                                f"cli_start_{c['id']}")
+                            st.caption("終了時間（カレンダー表示用）")
+                            edit_end_time = _time_select(
+                                "終了", c.get("end_time", ""),
+                                f"cli_end_{c['id']}")
+                            current_fd = c.get("fixed_doctors") or []
+                            # default にはリスト内のIDのうち、現在有効な医員のみ
+                            edit_limited = st.multiselect(
+                                "限定メンバー", options=_edit_doc_ids,
+                                default=[did for did in current_fd if did in _edit_doc_id_name],
+                                format_func=lambda x: _edit_doc_id_name.get(x, "?"),
+                                key=f"limited_{c['id']}",
+                                help="設定すると、この外勤先にはリスト内の医員のみ割り当て可能になります（ホワイトリスト）",
+                            )
+                            fc1, fc2 = st.columns(2)
+                            with fc1:
+                                if st.form_submit_button("保存"):
+                                    update_clinic(
+                                        c['id'], fee=edit_fee, frequency=edit_freq[0],
+                                        effort_cost=edit_effort, work_hours=edit_hours,
+                                        time_slot=edit_tslot, location=edit_loc,
+                                        start_time=edit_start_time, end_time=edit_end_time,
+                                        fixed_doctors=edit_limited,
+                                    )
+                                    st.session_state.pop(f"editing_cli_{c['id']}", None)
+                                    st.session_state["_toast_msg"] = "保存しました"
+                                    st.rerun()
+                            with fc2:
+                                if st.form_submit_button("キャンセル"):
+                                    st.session_state.pop(f"editing_cli_{c['id']}", None)
+                                    st.rerun()
 
     clinics = get_clinics()
     doctors = get_doctors()
