@@ -116,7 +116,7 @@ def render(section: str):
 
     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
         "メンバー管理", "対象日管理", "スロット管理", "日別設定",
-        "希望状況一覧", "スケジュール確認", "スケジュール作成", "スケジュール再調整",
+        "希望状況一覧", "スケジュール作成", "スケジュール確認", "スケジュール再調整",
     ])
 
     with tab1:
@@ -130,9 +130,9 @@ def render(section: str):
     with tab5:
         _render_preferences(section, assigned_doctor_ids)
     with tab6:
-        _render_schedule_view(section, cfg, assigned_doctor_ids, days_of_week)
-    with tab7:
         _render_schedule(section, cfg, assigned_doctor_ids, days_of_week)
+    with tab7:
+        _render_schedule_view(section, cfg, assigned_doctor_ids, days_of_week)
     with tab8:
         _render_readjust(section, cfg, assigned_doctor_ids, days_of_week)
 
@@ -912,8 +912,21 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
 
     preview_key = f"wkadm_preview_{section}"
 
+    # 既存スケジュールがある場合は上書き確認
+    overwrite_ok = True
+    if existing_map:
+        st.warning(
+            f"この期間には既にスケジュールが存在します（{len(existing_map)}日分）。"
+            "再生成すると既存のスケジュールは上書きされます。"
+        )
+        overwrite_ok = st.checkbox(
+            "既存スケジュールを上書きして再生成する",
+            key=f"wkadm_overwrite_{section}",
+        )
+
     # 自動生成ボタン
-    if st.button("スケジュール案を生成", type="primary", key=f"auto_gen_{section}"):
+    if st.button("スケジュール案を生成", type="primary", key=f"auto_gen_{section}",
+                 disabled=bool(existing_map and not overwrite_ok)):
         try:
             result = solve_weekday_schedule(target_dates, active_slots, assigned_doctors, prefs,
                                             slot_overrides=all_slot_overrides)
@@ -1394,23 +1407,22 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     # ================================================================
     step1_label = "① モード・期間選択"
     if step > 1:
-        mode_label = "補填" if state.get("mode") == "fill" else "再構成"
+        mode_label = "補填・再配分" if state.get("mode") == "fill" else "個別編集"
         step1_label += f"　✅ {mode_label} / {state.get('start_date')} 〜 {state.get('end_date')}"
     with st.expander(step1_label, expanded=(step == 1)):
         if step == 1:
             mode = st.radio(
                 "再調整モード",
-                ["補填モード", "再構成モード"],
+                ["補填・再配分モード", "個別編集モード"],
                 horizontal=True,
                 key=f"readj_mode_{section}",
             )
-            if mode == "補填モード":
-                st.caption("異動・休職などで抜けた医員のアサインのみを、"
-                           "他の医員で補填します。既存の割り当ては変更しません。")
+            if mode == "補填・再配分モード":
+                st.caption("メンバーの増減に対応し、既存日程の変化を最小限に抑えつつ、"
+                           "空き枠の補填や均等化のための枠の再配分を行います。")
             else:
-                st.caption("指定期間のスケジュールを白紙に戻し、"
-                           "現在のメンバーと希望に基づいて最適なスケジュールを再生成します。"
-                           "全員の割り当てが変わる可能性があります。")
+                st.caption("既存スケジュールをカレンダー上で直接編集します。"
+                           "個別の割り当てを手動で変更できます。")
 
             today = date.today()
             col_s, col_e = st.columns(2)
@@ -1425,19 +1437,26 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                 return
 
             if st.button("設定を確定", type="primary", key=f"readj_step1_{section}"):
-                st.session_state[state_key] = {
-                    "step": 2,
-                    "mode": "fill" if mode == "補填モード" else "reconstruct",
+                new_mode = "fill" if mode == "補填・再配分モード" else "individual"
+                new_step = 4 if new_mode == "individual" else 2
+                new_state = {
+                    "step": new_step,
+                    "mode": new_mode,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
                 }
+                if new_mode == "individual":
+                    new_state["removed_ids"] = []
+                    new_state["added_ids"] = []
+                    new_state["pref_skipped"] = True
+                st.session_state[state_key] = new_state
                 st.rerun()
         else:
-            st.write(f"モード: **{'補填' if state.get('mode') == 'fill' else '再構成'}**　"
+            st.write(f"モード: **{'補填・再配分' if state.get('mode') == 'fill' else '個別編集'}**　"
                      f"期間: **{state.get('start_date')} 〜 {state.get('end_date')}**")
 
     if step < 2:
-        st.expander("② 除外医員の選択", expanded=False)
+        st.expander("② メンバー変更", expanded=False)
         st.expander("③ 希望入力の募集・通知", expanded=False)
         st.expander("④ スケジュール生成・確定", expanded=False)
         return
@@ -1478,6 +1497,7 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         all_slot_overrides.update(ovr)
 
     is_fill = state["mode"] == "fill"
+    is_individual = state.get("mode") == "individual"
 
     # スケジュールに含まれる全医員IDを抽出
     sched_doctor_ids = set()
@@ -1486,63 +1506,58 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
             sched_doctor_ids.update(doc_ids)
 
     # ================================================================
-    # ② メンバー変更
+    # ② メンバー変更（個別編集モードではスキップ）
     # ================================================================
-    step2_label = "② メンバー変更"
-    if step > 2:
-        removed = state.get("removed_ids", [])
-        added = state.get("added_ids", [])
-        parts = []
-        if removed:
-            parts.append(f"除外: {', '.join(doc_map.get(d, str(d)) for d in removed)}")
-        if added:
-            parts.append(f"追加: {', '.join(doc_map.get(d, str(d)) for d in added)}")
-        step2_label += f"　✅ {' / '.join(parts) if parts else '変更なし'}"
-    with st.expander(step2_label, expanded=(step == 2)):
-        if step == 2:
-            # ---- 除外する医員 ----
-            st.markdown("**除外する医員**")
-            auto_removed = [did for did in sched_doctor_ids if did not in assigned_doctor_ids]
-            all_in_sched = [d for d in all_doctors if d["id"] in sched_doctor_ids]
-            remove_options = {d["id"]: doc_map.get(d["id"], d["name"]) for d in all_in_sched}
+    removed_ids = state.get("removed_ids", [])
+    added_ids = state.get("added_ids", [])
 
-            if is_fill:
+    if not is_individual:
+        step2_label = "② メンバー変更"
+        if step > 2:
+            parts = []
+            if removed_ids:
+                parts.append(f"除外: {', '.join(doc_map.get(d, str(d)) for d in removed_ids)}")
+            if added_ids:
+                parts.append(f"追加: {', '.join(doc_map.get(d, str(d)) for d in added_ids)}")
+            step2_label += f"　✅ {' / '.join(parts) if parts else '変更なし'}"
+        with st.expander(step2_label, expanded=(step == 2)):
+            if step == 2:
+                st.markdown("**除外する医員**")
+                auto_removed = [did for did in sched_doctor_ids if did not in assigned_doctor_ids]
+                all_in_sched = [d for d in all_doctors if d["id"] in sched_doctor_ids]
+                remove_options = {d["id"]: doc_map.get(d["id"], d["name"]) for d in all_in_sched}
+
                 st.caption("この医員のアサインが穴となり、補填対象になります。")
-            else:
-                st.caption("除外後のメンバーで再構成します（任意）。")
 
-            removed_ids = st.multiselect(
-                "除外する医員",
-                options=list(remove_options.keys()),
-                default=auto_removed,
-                format_func=lambda x: remove_options.get(x, str(x)),
-                key=f"readj_removed_{section}",
-            )
-
-            # ---- 新メンバー検出 ----
-            new_member_ids = [did for did in assigned_doctor_ids if did not in sched_doctor_ids]
-            new_members = [d for d in assigned_doctors if d["id"] in new_member_ids]
-            include_new = []
-
-            if new_members:
-                st.markdown("**新しく追加されたメンバー**")
-                st.caption("メンバー管理で追加済み・既存スケジュール未割当の医員です。"
-                           "再調整でアサイン対象になります。")
-                include_new = st.multiselect(
-                    "再調整に含める新メンバー",
-                    options=[d["id"] for d in new_members],
-                    default=[d["id"] for d in new_members],
-                    format_func=lambda x: doc_map.get(x, str(x)),
-                    key=f"readj_new_members_{section}",
+                removed_ids = st.multiselect(
+                    "除外する医員",
+                    options=list(remove_options.keys()),
+                    default=auto_removed,
+                    format_func=lambda x: remove_options.get(x, str(x)),
+                    key=f"readj_removed_{section}",
                 )
 
-            if is_fill and not removed_ids and not include_new:
-                st.warning("補填モードでは除外する医員または追加する新メンバーを指定してください。")
-                return
+                new_member_ids = [did for did in assigned_doctor_ids if did not in sched_doctor_ids]
+                new_members = [d for d in assigned_doctors if d["id"] in new_member_ids]
+                include_new = []
 
-            # サマリ表示
-            if removed_ids:
-                if is_fill:
+                if new_members:
+                    st.markdown("**新しく追加されたメンバー**")
+                    st.caption("メンバー管理で追加済み・既存スケジュール未割当の医員です。"
+                               "再調整でアサイン対象になります。")
+                    include_new = st.multiselect(
+                        "再調整に含める新メンバー",
+                        options=[d["id"] for d in new_members],
+                        default=[d["id"] for d in new_members],
+                        format_func=lambda x: doc_map.get(x, str(x)),
+                        key=f"readj_new_members_{section}",
+                    )
+
+                if not removed_ids and not include_new:
+                    st.warning("除外する医員または追加する新メンバーを指定してください。")
+                    return
+
+                if removed_ids:
                     fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
                     hole_count = 0
                     for ds in hole_dates:
@@ -1551,144 +1566,130 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                                 if did in removed_ids or did not in assigned_doctor_ids:
                                     hole_count += 1
                     st.info(f"穴のあるスロット: **{hole_count}件**（対象日: {len(hole_dates)}日）")
-                else:
-                    remaining = [d for d in assigned_doctors if d["id"] not in set(removed_ids)]
-                    st.info(f"再構成メンバー: **{len(remaining)}名**　"
-                            f"対象日: **{len(existing_map)}日**")
-            if include_new:
-                new_names = [doc_map.get(did, str(did)) for did in include_new]
-                if is_fill:
+                if include_new:
+                    new_names = [doc_map.get(did, str(did)) for did in include_new]
                     st.info(f"新メンバー **{', '.join(new_names)}** を含めて最適化します。"
                             "既存アサインをなるべく維持しつつ均等配分します。")
-                else:
-                    st.info(f"新メンバー **{', '.join(new_names)}** を含めて再構成します。")
 
-            if st.button("メンバー変更を確定", type="primary", key=f"readj_step2_{section}"):
-                st.session_state[state_key]["step"] = 3
-                st.session_state[state_key]["removed_ids"] = removed_ids
-                st.session_state[state_key]["added_ids"] = include_new
-                st.session_state[state_key]["pref_opened"] = False
-                st.session_state[state_key]["pref_skipped"] = False
-                st.rerun()
-        else:
-            removed = state.get("removed_ids", [])
-            added = state.get("added_ids", [])
-            parts = []
-            if removed:
-                parts.append(f"除外: **{', '.join(doc_map.get(d, str(d)) for d in removed)}**")
-            if added:
-                parts.append(f"追加: **{', '.join(doc_map.get(d, str(d)) for d in added)}**")
-            st.write(" / ".join(parts) if parts else "変更なし")
-
-    if step < 3:
-        st.expander("③ 希望入力の募集・通知", expanded=False)
-        st.expander("④ スケジュール生成・確定", expanded=False)
-        return
-
-    # ================================================================
-    # ③ 希望入力の募集・通知
-    # ================================================================
-    removed_ids = state.get("removed_ids", [])
-    added_ids = state.get("added_ids", [])
-    # 補填+新メンバーあり: 全日対象 / 補填のみ: 穴がある日 / 再構成: 全日
-    if is_fill:
-        fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
-        if added_ids:
-            target_date_list = sorted(existing_map.keys())  # 新メンバー均等化のため全日
-        else:
-            target_date_list = sorted(hole_dates)
-    else:
-        target_date_list = sorted(existing_map.keys())
-
-    step3_label = "③ 希望入力の募集・通知"
-    is_open = get_weekday_open_section(section)
-    if step > 3:
-        if state.get("pref_skipped"):
-            step3_label += "　✅ スキップ（既存の希望を使用）"
-        else:
-            step3_label += "　✅ 完了"
-    elif is_open:
-        step3_label += "　🔵 公開中"
-
-    with st.expander(step3_label, expanded=(step == 3)):
-        if step == 3:
-            if is_open:
-                st.success("希望入力は **公開中** です。医員がNG日・△日を更新できます。")
-                current_deadline = get_weekday_deadline(section)
-                if current_deadline:
-                    st.write(f"入力期限: **{current_deadline}**")
-
-                # 入力状況
-                pref_map = {p["doctor_id"]: p for p in prefs}
-                active_docs = [d for d in assigned_doctors if d["id"] not in set(removed_ids)]
-                submitted = sum(1 for d in active_docs if d["id"] in pref_map)
-                st.write(f"入力状況: **{submitted}/{len(active_docs)}名**")
-                for d in active_docs:
-                    p = pref_map.get(d["id"])
-                    name = doc_map.get(d["id"], d["name"])
-                    if p:
-                        ng_c = len(p.get("ng_dates") or [])
-                        av_c = len(p.get("avoid_dates") or [])
-                        st.caption(f"✅ {name}　NG: {ng_c}日 / △: {av_c}日")
-                    else:
-                        st.caption(f"⬜ {name}　未入力")
-
-                if st.button("締め切って次へ", type="primary", key=f"readj_step3_close_{section}"):
-                    set_weekday_open_section(section, False)
-                    set_weekday_readjust_dates(section, [])
-                    st.session_state[state_key]["step"] = 4
-                    st.session_state[state_key]["pref_opened"] = True
+                if st.button("メンバー変更を確定", type="primary", key=f"readj_step2_{section}"):
+                    st.session_state[state_key]["step"] = 3
+                    st.session_state[state_key]["removed_ids"] = removed_ids
+                    st.session_state[state_key]["added_ids"] = include_new
+                    st.session_state[state_key]["pref_opened"] = False
+                    st.session_state[state_key]["pref_skipped"] = False
                     st.rerun()
             else:
-                date_label = f"穴がある{len(target_date_list)}日" if is_fill \
-                    else f"対象期間の{len(target_date_list)}日"
-                st.write(f"**{date_label}** について希望入力を募集し、医員にメールで通知します。")
-                st.write("既存の希望をそのまま使う場合はスキップしてください。")
+                parts = []
+                if removed_ids:
+                    parts.append(f"除外: **{', '.join(doc_map.get(d, str(d)) for d in removed_ids)}**")
+                if added_ids:
+                    parts.append(f"追加: **{', '.join(doc_map.get(d, str(d)) for d in added_ids)}**")
+                st.write(" / ".join(parts) if parts else "変更なし")
 
-                new_deadline = st.date_input(
-                    "入力期限",
-                    value=date.today() + timedelta(days=7),
-                    key=f"readj_deadline_{section}",
-                )
+        if step < 3:
+            st.expander("③ 希望入力の募集・通知", expanded=False)
+            st.expander("④ スケジュール生成・確定", expanded=False)
+            return
 
-                bc1, bc2 = st.columns(2)
-                with bc1:
-                    if st.button("希望入力を公開して医員に通知",
-                                 type="primary", key=f"readj_step3_open_{section}"):
-                        set_weekday_readjust_dates(section, target_date_list)
-                        set_weekday_open_section(section, True)
-                        set_weekday_deadline(section, new_deadline.isoformat())
-                        st.session_state[state_key]["pref_opened"] = True
-                        # GAS通知: 希望入力依頼
-                        gas_url = st.secrets.get("gas_webapp_url", "")
-                        if gas_url:
-                            try:
-                                requests.post(gas_url, json={
-                                    "action": "weekday_readjust_preference_request",
-                                    "section": section,
-                                    "clinic_name": cfg["clinic_name"],
-                                    "deadline": new_deadline.isoformat(),
-                                    "target_date_count": len(target_date_list),
-                                    "mode": state["mode"],
-                                }, timeout=10)
-                            except requests.RequestException:
-                                pass
-                        st.session_state["_toast_msg"] = "希望入力を公開し、医員に通知しました"
-                        st.rerun()
-                with bc2:
-                    if st.button("スキップして次へ", key=f"readj_step3_skip_{section}"):
-                        st.session_state[state_key]["step"] = 4
-                        st.session_state[state_key]["pref_skipped"] = True
-                        st.rerun()
-        else:
-            if state.get("pref_skipped"):
-                st.write("スキップ（既存の希望を使用）")
+        # ================================================================
+        # ③ 希望入力の募集・通知
+        # ================================================================
+        if is_fill:
+            fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
+            if added_ids:
+                target_date_list = sorted(existing_map.keys())
             else:
-                st.write("希望入力の募集完了")
+                target_date_list = sorted(hole_dates)
+        else:
+            target_date_list = sorted(existing_map.keys())
 
-    if step < 4:
-        st.expander("④ スケジュール生成・確定", expanded=False)
-        return
+        step3_label = "③ 希望入力の募集・通知"
+        is_open = get_weekday_open_section(section)
+        if step > 3:
+            if state.get("pref_skipped"):
+                step3_label += "　✅ スキップ（既存の希望を使用）"
+            else:
+                step3_label += "　✅ 完了"
+        elif is_open:
+            step3_label += "　🔵 公開中"
+
+        with st.expander(step3_label, expanded=(step == 3)):
+            if step == 3:
+                if is_open:
+                    st.success("希望入力は **公開中** です。医員がNG日・△日を更新できます。")
+                    current_deadline = get_weekday_deadline(section)
+                    if current_deadline:
+                        st.write(f"入力期限: **{current_deadline}**")
+
+                    pref_map = {p["doctor_id"]: p for p in prefs}
+                    active_docs = [d for d in assigned_doctors if d["id"] not in set(removed_ids)]
+                    submitted = sum(1 for d in active_docs if d["id"] in pref_map)
+                    st.write(f"入力状況: **{submitted}/{len(active_docs)}名**")
+                    for d in active_docs:
+                        p = pref_map.get(d["id"])
+                        name = doc_map.get(d["id"], d["name"])
+                        if p:
+                            ng_c = len(p.get("ng_dates") or [])
+                            av_c = len(p.get("avoid_dates") or [])
+                            st.caption(f"✅ {name}　NG: {ng_c}日 / △: {av_c}日")
+                        else:
+                            st.caption(f"⬜ {name}　未入力")
+
+                    if st.button("締め切って次へ", type="primary", key=f"readj_step3_close_{section}"):
+                        set_weekday_open_section(section, False)
+                        set_weekday_readjust_dates(section, [])
+                        st.session_state[state_key]["step"] = 4
+                        st.session_state[state_key]["pref_opened"] = True
+                        st.rerun()
+                else:
+                    date_label = f"穴がある{len(target_date_list)}日" if is_fill \
+                        else f"対象期間の{len(target_date_list)}日"
+                    st.write(f"**{date_label}** について希望入力を募集し、医員にメールで通知します。")
+                    st.write("既存の希望をそのまま使う場合はスキップしてください。")
+
+                    new_deadline = st.date_input(
+                        "入力期限",
+                        value=date.today() + timedelta(days=7),
+                        key=f"readj_deadline_{section}",
+                    )
+
+                    bc1, bc2 = st.columns(2)
+                    with bc1:
+                        if st.button("希望入力を公開して医員に通知",
+                                     type="primary", key=f"readj_step3_open_{section}"):
+                            set_weekday_readjust_dates(section, target_date_list)
+                            set_weekday_open_section(section, True)
+                            set_weekday_deadline(section, new_deadline.isoformat())
+                            st.session_state[state_key]["pref_opened"] = True
+                            gas_url = st.secrets.get("gas_webapp_url", "")
+                            if gas_url:
+                                try:
+                                    requests.post(gas_url, json={
+                                        "action": "weekday_readjust_preference_request",
+                                        "section": section,
+                                        "clinic_name": cfg["clinic_name"],
+                                        "deadline": new_deadline.isoformat(),
+                                        "target_date_count": len(target_date_list),
+                                        "mode": state["mode"],
+                                    }, timeout=10)
+                                except requests.RequestException:
+                                    pass
+                            st.session_state["_toast_msg"] = "希望入力を公開し、医員に通知しました"
+                            st.rerun()
+                    with bc2:
+                        if st.button("スキップして次へ", key=f"readj_step3_skip_{section}"):
+                            st.session_state[state_key]["step"] = 4
+                            st.session_state[state_key]["pref_skipped"] = True
+                            st.rerun()
+            else:
+                if state.get("pref_skipped"):
+                    st.write("スキップ（既存の希望を使用）")
+                else:
+                    st.write("希望入力の募集完了")
+
+        if step < 4:
+            st.expander("④ スケジュール生成・確定", expanded=False)
+            return
 
     # ================================================================
     # ④ スケジュール生成・確定
@@ -1702,86 +1703,90 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     doc_ids = [d["id"] for d in active_doctors]
     doc_options = [0] + doc_ids
 
-    if is_fill:
+    if is_individual:
+        target_dates = sorted(date.fromisoformat(ds) for ds in existing_map.keys())
+    elif is_fill:
         fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
         if added_ids:
-            # 新メンバーあり: 全日を対象にし、既存アサインはソフト制約で維持
             target_dates = sorted(date.fromisoformat(ds) for ds in existing_map.keys())
         else:
-            # 新メンバーなし: 穴のある日のみ
             target_dates = sorted(date.fromisoformat(ds) for ds in hole_dates)
     else:
         target_dates = sorted(date.fromisoformat(ds) for ds in existing_map.keys())
 
-    with st.expander("④ スケジュール生成・確定", expanded=True):
-        mode_label = "補填" if is_fill else "再構成"
-        st.write(f"モード: **{mode_label}**　対象日: **{len(target_dates)}日**　"
-                 f"メンバー: **{len(active_doctors)}名**")
-        if is_fill and added_ids:
-            st.caption("新メンバーを含むため、既存アサインを維持しつつ全日で均等化します。")
+    step4_label = "個別編集" if is_individual else "④ スケジュール生成・確定"
+    with st.expander(step4_label, expanded=True):
+        if is_individual:
+            mode_label = "個別編集"
+            st.write(f"対象日: **{len(target_dates)}日**　メンバー: **{len(active_doctors)}名**")
+            st.caption("カレンダー上で割り当てを直接変更できます。")
+        else:
+            mode_label = "補填・再配分"
+            st.write(f"モード: **{mode_label}**　対象日: **{len(target_dates)}日**　"
+                     f"メンバー: **{len(active_doctors)}名**")
+            if added_ids:
+                st.caption("新メンバーを含むため、既存アサインを維持しつつ全日で均等化します。")
 
         preview_key = f"readj_preview_{section}"
 
-        if st.button("スケジュールを生成", type="primary", key=f"readj_gen_{section}"):
-            try:
-                if is_fill and added_ids:
-                    # 新メンバーあり: existing_assignments でソフト制約
-                    result = solve_weekday_schedule(
-                        target_dates, active_slots, active_doctors, prefs,
-                        slot_overrides=all_slot_overrides,
-                        existing_assignments=existing_map,
-                    )
-                elif is_fill:
-                    # 新メンバーなし: fixed_assignments でハード制約
-                    result = solve_weekday_schedule(
-                        target_dates, active_slots, active_doctors, prefs,
-                        slot_overrides=all_slot_overrides,
-                        fixed_assignments=fixed,
-                    )
-                else:
-                    # 再構成: 制約なし
-                    result = solve_weekday_schedule(
-                        target_dates, active_slots, active_doctors, prefs,
-                        slot_overrides=all_slot_overrides,
-                    )
-                if result is None:
-                    st.error("条件を満たすスケジュールが見つかりませんでした。")
-                else:
-                    if is_fill and not added_ids:
-                        # 新メンバーなし補填: 穴がない日は既存を維持してマージ
-                        merged = {}
-                        for ds in sorted(existing_map.keys()):
-                            if ds in hole_dates:
-                                merged[ds] = result.get(ds, {})
-                            else:
-                                merged[ds] = existing_map[ds]
-                        st.session_state[preview_key] = merged
+        if is_individual:
+            # 個別編集: 既存スケジュールをそのまま表示
+            if preview_key not in st.session_state:
+                st.session_state[preview_key] = existing_map
+        else:
+            # 補填・再配分: 生成ボタン
+            if st.button("スケジュールを生成", type="primary", key=f"readj_gen_{section}"):
+                try:
+                    if added_ids:
+                        result = solve_weekday_schedule(
+                            target_dates, active_slots, active_doctors, prefs,
+                            slot_overrides=all_slot_overrides,
+                            existing_assignments=existing_map,
+                        )
                     else:
-                        # 新メンバーあり補填 or 再構成: ソルバー結果をそのまま使用
-                        st.session_state[preview_key] = result
-                    st.session_state["_toast_msg"] = f"{mode_label}スケジュールを生成しました"
-                    st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+                        result = solve_weekday_schedule(
+                            target_dates, active_slots, active_doctors, prefs,
+                            slot_overrides=all_slot_overrides,
+                            fixed_assignments=fixed,
+                        )
+                    if result is None:
+                        st.error("条件を満たすスケジュールが見つかりませんでした。")
+                    else:
+                        if not added_ids:
+                            merged = {}
+                            for ds in sorted(existing_map.keys()):
+                                if ds in hole_dates:
+                                    merged[ds] = result.get(ds, {})
+                                else:
+                                    merged[ds] = existing_map[ds]
+                            st.session_state[preview_key] = merged
+                        else:
+                            st.session_state[preview_key] = result
+                        st.session_state["_toast_msg"] = f"{mode_label}スケジュールを生成しました"
+                        st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
 
-        # ---- プレビュー ----
+        # ---- プレビュー / 編集 ----
         preview_result = st.session_state.get(preview_key)
         if preview_result:
-            st.markdown("---")
-            st.subheader(f"{mode_label}プレビュー")
+            if not is_individual:
+                st.markdown("---")
+                st.subheader(f"{mode_label}プレビュー")
             st.info("カレンダー上で割り当てを編集できます。確認後「確定して保存」を押してください。")
 
             all_target_dates = sorted(date.fromisoformat(ds) for ds in preview_result.keys())
+            editor_prefix = f"readj_indiv_{section}" if is_individual else f"readj_{section}"
 
             _render_calendar_editor(
                 preview_result, all_target_dates, active_slots, all_slot_overrides,
-                doc_map, doc_options, section, f"readj_{section}", days_of_week,
+                doc_map, doc_options, section, editor_prefix, days_of_week,
                 prefs=prefs,
             )
 
             current_result = _collect_calendar_result(
                 all_target_dates, active_slots, all_slot_overrides,
-                f"readj_{section}",
+                editor_prefix,
             )
             _render_assignment_summary(current_result, active_doctors, doc_map, active_slots,
                                        all_target_dates, all_slot_overrides, months)
@@ -1823,184 +1828,5 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                     if preview_key in st.session_state:
                         del st.session_state[preview_key]
                     st.rerun()
-    """補填モードのUI"""
-    # スケジュールに含まれる全医員IDを抽出
-    sched_doctor_ids = set()
-    for slots_map in existing_map.values():
-        for doc_ids in slots_map.values():
-            sched_doctor_ids.update(doc_ids)
-
-    # メンバーから外れた医員を自動検出
-    auto_removed = [did for did in sched_doctor_ids if did not in assigned_doctor_ids]
-
-    # 除外対象の医員を選択
-    all_in_sched = [d for d in all_doctors if d["id"] in sched_doctor_ids]
-    remove_options = {d["id"]: doc_map.get(d["id"], d["name"]) for d in all_in_sched}
-
-    removed_ids = st.multiselect(
-        "除外する医員（この医員のアサインを穴として補填）",
-        options=list(remove_options.keys()),
-        default=auto_removed,
-        format_func=lambda x: remove_options.get(x, str(x)),
-        key=f"readj_removed_{section}",
-    )
-
-    if not removed_ids:
-        st.warning("除外する医員を選択してください。")
-        return
-
-    # 穴の検出
-    fixed, hole_dates = _detect_holes(existing_map, assigned_doctor_ids, removed_ids)
-
-    if not hole_dates:
-        st.success("穴のあるスロットはありません。")
-        return
-
-    # 穴のサマリ
-    hole_count = 0
-    for ds in hole_dates:
-        for sid, doc_ids in existing_map.get(ds, {}).items():
-            for did in doc_ids:
-                if did in removed_ids or did not in assigned_doctor_ids:
-                    hole_count += 1
-    removed_names = [doc_map.get(did, str(did)) for did in removed_ids]
-    st.warning(f"穴のあるスロット: **{hole_count}件** "
-               f"（対象日: {len(hole_dates)}日）\n\n"
-               f"除外医員: {', '.join(removed_names)}")
-
-    # ---- 希望入力の再募集（穴がある日のみ） ----
-    st.markdown("---")
-    st.subheader("① 希望入力の再募集")
-
-    hole_date_list = sorted(hole_dates)
-    is_open = get_weekday_open_section(section)
-    current_readjust_dates = get_weekday_readjust_dates(section)
-
-    if is_open:
-        st.success("希望入力は **公開中** です。医員が穴のある日のNG日・△日を更新できます。")
-        if current_readjust_dates:
-            st.caption(f"入力対象日: {len(current_readjust_dates)}日")
-        if st.button("希望入力を締め切る", key=f"readj_fill_close_pref_{section}"):
-            set_weekday_open_section(section, False)
-            set_weekday_readjust_dates(section, [])
-            st.session_state["_toast_msg"] = "希望入力を締め切りました"
-            st.rerun()
-    else:
-        st.write(f"穴がある **{len(hole_date_list)}日** について希望入力を再募集できます。"
-                 "既存の希望をそのまま使う場合はスキップしてください。")
-        reopen_cols = st.columns([2, 1, 1])
-        with reopen_cols[0]:
-            new_deadline = st.date_input(
-                "入力期限",
-                value=date.today() + timedelta(days=7),
-                key=f"readj_fill_deadline_{section}",
-            )
-        with reopen_cols[1]:
-            st.write("")
-            if st.button("希望入力を公開", type="primary", key=f"readj_fill_open_pref_{section}"):
-                set_weekday_readjust_dates(section, hole_date_list)
-                set_weekday_open_section(section, True)
-                set_weekday_deadline(section, new_deadline.isoformat())
-                st.session_state["_toast_msg"] = (
-                    f"穴がある{len(hole_date_list)}日について希望入力を公開しました。"
-                )
-                st.rerun()
-
-    # ---- 補填生成 ----
-    st.markdown("---")
-    st.subheader("② 補填スケジュール生成")
-
-    if is_open:
-        st.warning("希望入力が公開中です。締め切ってからスケジュールを生成してください。")
-        return
-
-    # 穴がある日のみを対象日にする
-    target_dates = sorted(date.fromisoformat(ds) for ds in hole_dates)
-
-    preview_key = f"readj_fill_preview_{section}"
-
-    if st.button("補填スケジュールを生成", type="primary", key=f"readj_fill_gen_{section}"):
-        try:
-            result = solve_weekday_schedule(
-                target_dates, active_slots, assigned_doctors, prefs,
-                slot_overrides=all_slot_overrides,
-                fixed_assignments=fixed,
-            )
-            if result is None:
-                st.error("条件を満たすスケジュールが見つかりませんでした。")
-            else:
-                # 固定アサインと新規をマージ（プレビュー用）
-                merged = {}
-                for ds in sorted(set(list(existing_map.keys()))):
-                    if ds < start_str or ds > end_str:
-                        continue
-                    if ds in hole_dates:
-                        # 穴がある日は生成結果を使用
-                        merged[ds] = result.get(ds, {})
-                    else:
-                        # 穴がない日は既存を維持
-                        merged[ds] = existing_map.get(ds, {})
-                st.session_state[preview_key] = merged
-                st.session_state["_toast_msg"] = "補填スケジュールを生成しました。"
-                st.rerun()
-        except ValueError as e:
-            st.error(str(e))
-
-    # ---- プレビュー ----
-    preview_result = st.session_state.get(preview_key)
-    if preview_result:
-        st.markdown("---")
-        st.subheader("補填プレビュー")
-        st.info("カレンダー上で割り当てを編集できます。確認後「確定して保存」を押してください。")
-
-        all_target_dates = sorted(date.fromisoformat(ds) for ds in preview_result.keys())
-        doc_ids = [d["id"] for d in assigned_doctors]
-        doc_options = [0] + doc_ids
-
-        _render_calendar_editor(
-            preview_result, all_target_dates, active_slots, all_slot_overrides,
-            doc_map, doc_options, section, f"readj_fill_{section}", days_of_week,
-            prefs=prefs,
-        )
-
-        current_result = _collect_calendar_result(
-            all_target_dates, active_slots, all_slot_overrides,
-            f"readj_fill_{section}",
-        )
-        _render_assignment_summary(current_result, assigned_doctors, doc_map, active_slots,
-                                   all_target_dates, all_slot_overrides, months)
-
-        btn_cols = st.columns(2)
-        with btn_cols[0]:
-            if st.button("確定して保存", type="primary", key=f"readj_fill_confirm_{section}"):
-                final_result = current_result
-                for ym in months:
-                    month_result = {ds: slots_map for ds, slots_map in final_result.items()
-                                   if ds.startswith(ym)}
-                    if month_result:
-                        merge_save_weekday_assignments(ym, section, month_result,
-                                                       (start_str, end_str))
-                # GAS通知
-                gas_url = st.secrets.get("gas_webapp_url", "")
-                if gas_url:
-                    try:
-                        requests.post(gas_url, json={
-                            "action": "weekday_schedule_readjusted",
-                            "section": section,
-                            "clinic_name": cfg["clinic_name"],
-                            "year_months": months,
-                            "mode": "fill",
-                            "period": f"{start_str}〜{end_str}",
-                        }, timeout=10)
-                    except requests.RequestException:
-                        pass
-                del st.session_state[preview_key]
-                set_weekday_readjust_dates(section, [])  # 対象日フィルタをクリア
-                st.session_state["_toast_msg"] = "補填スケジュールを確定しました"
-                st.rerun()
-        with btn_cols[1]:
-            if st.button("破棄", key=f"readj_fill_discard_{section}"):
-                del st.session_state[preview_key]
-                st.rerun()
 
 
