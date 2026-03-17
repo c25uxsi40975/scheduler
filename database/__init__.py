@@ -41,6 +41,9 @@ from database.auth import (
     get_weekday_deadline, set_weekday_deadline,
     # 再調整対象日
     get_weekday_readjust_dates, set_weekday_readjust_dates,
+    # 平日確定済み月
+    get_weekday_confirmed_months, add_weekday_confirmed_months,
+    remove_weekday_confirmed_month,
     # 土曜追加/除外日付
     get_saturday_extra_dates, set_saturday_extra_dates,
     get_saturday_excluded_dates, set_saturday_excluded_dates,

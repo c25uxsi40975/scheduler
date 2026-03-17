@@ -17,6 +17,7 @@ from database import (
     get_weekday_slots,
     get_weekday_open_section, get_weekday_deadline,
     get_weekday_readjust_dates,
+    get_weekday_confirmed_months,
     get_weekday_schedule_view_mode,
     execute_swap, get_swap_history,
     get_specimen_assignee,
@@ -81,6 +82,14 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
             st.info("現在入力対象の日付がありません。")
             return
         st.info(f"スケジュール再調整に伴い、以下の **{len(active_dates)}日** について希望を入力してください。")
+    else:
+        # 確定済み月の日付を除外（再調整モードでは管理者が明示的に開いた日付なのでスキップ）
+        confirmed_months = set(get_weekday_confirmed_months(section))
+        if confirmed_months:
+            active_dates = [ds for ds in active_dates if ds[:7] not in confirmed_months]
+            if not active_dates:
+                st.info("すべての対象月のスケジュールが確定済みのため、希望入力はできません。")
+                return
 
     pref = get_weekday_preference(doctor["id"], section)
     existing_ng = set(pref.get("ng_dates", []) if pref else [])

@@ -22,6 +22,8 @@ from database import (
     get_weekday_deadline, set_weekday_deadline,
     get_weekday_readjust_dates, set_weekday_readjust_dates,
     get_weekday_slot_overrides, set_weekday_slot_overrides_batch,
+    get_weekday_confirmed_months, add_weekday_confirmed_months,
+    remove_weekday_confirmed_month,
 )
 from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
@@ -750,12 +752,28 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
 
+    # 確定済み月の管理
+    confirmed_months = get_weekday_confirmed_months(section)
+    if confirmed_months:
+        st.caption(f"確定済み月: {', '.join(confirmed_months)}")
+
     view_month = st.selectbox("対象月", months, index=1, key=f"wkadm_view_month_{section}")
 
     schedule = get_weekday_schedule(view_month, section)
     if not schedule:
         st.info("この月のスケジュールはまだ作成されていません。")
         return
+
+    # 確定状態の表示・切り替え
+    is_month_confirmed = view_month in confirmed_months
+    if is_month_confirmed:
+        c_info, c_btn = st.columns([3, 1])
+        with c_info:
+            st.success(f"{view_month} は確定済みです（医員の希望入力がブロックされています）")
+        with c_btn:
+            if st.button("確定を解除", key=f"unconfirm_{section}_{view_month}"):
+                remove_weekday_confirmed_month(section, view_month)
+                st.rerun()
 
     from scheduling_utils import is_nenmatsu_nenshi as _is_ny2
     # 年末年始(12/29-1/3)の日付を除外
@@ -976,6 +994,8 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
                                    if ds.startswith(ym)}
                     if month_result:
                         batch_save_weekday_assignments(ym, section, month_result)
+                # 確定済み月として記録
+                add_weekday_confirmed_months(section, selected_months)
                 # 確定通知
                 gas_url = st.secrets.get("gas_webapp_url", "")
                 if gas_url:

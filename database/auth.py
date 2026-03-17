@@ -317,6 +317,38 @@ def set_weekday_readjust_dates(section: str, dates: list):
         _set_setting(f"weekday_readjust_dates_{section}", "")
 
 
+# ---- Weekday Confirmed Months (平日確定済み月) ----
+
+def get_weekday_confirmed_months(section: str) -> list:
+    """平日セクションの確定済み月リストを取得"""
+    import json
+    raw = _get_setting(f"weekday_confirmed_months_{section}")
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def add_weekday_confirmed_months(section: str, year_months: list):
+    """平日セクションの確定済み月を追加"""
+    import json
+    existing = set(get_weekday_confirmed_months(section))
+    existing.update(year_months)
+    _set_setting(f"weekday_confirmed_months_{section}",
+                 json.dumps(sorted(existing)))
+
+
+def remove_weekday_confirmed_month(section: str, year_month: str):
+    """平日セクションの確定済み月を解除"""
+    import json
+    existing = set(get_weekday_confirmed_months(section))
+    existing.discard(year_month)
+    _set_setting(f"weekday_confirmed_months_{section}",
+                 json.dumps(sorted(existing)))
+
+
 # ---- Weekday Schedule View Mode (表示モード設定) ----
 
 def get_weekday_schedule_view_mode(section: str) -> str:
