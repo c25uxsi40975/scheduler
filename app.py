@@ -253,6 +253,7 @@ def _admin_password_form(rate_limit_key: str, verify_fn):
 
 def _subadmin_login_form(admin_type: str, subadmin_ids: list):
     """副管理者ログインフォーム（医員アカウントで認証）"""
+    st.info("副管理者は医員アカウントとパスワードでログインできます。")
     rate_key = f"subadmin_{admin_type}"
     allowed, remaining = check_rate_limit(rate_key)
     if not allowed:
