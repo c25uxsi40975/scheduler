@@ -521,19 +521,38 @@ def _render_preferences(section: str, assigned_doctor_ids: list):
     st.subheader("代行入力")
     st.caption("医員に代わって希望を入力できます")
 
-    proxy_doc_options = [d for d in assigned_doctor_ids]
-    if not proxy_doc_options:
+    if not assigned_doctor_ids:
         st.info("メンバーが登録されていません")
+        return
+
+    submitted_ids = set(pref_map.keys())
+    unsubmitted_ids = [did for did in assigned_doctor_ids if did not in submitted_ids]
+    submitted_id_list = [did for did in assigned_doctor_ids if did in submitted_ids]
+
+    st.caption(f"入力済み: {len(submitted_id_list)}名 / 未入力: {len(unsubmitted_ids)}名")
+
+    proxy_filter = st.radio(
+        "表示対象",
+        ["未入力のみ", "全員"],
+        horizontal=True,
+        key=f"proxy_filter_{section}",
+    )
+    proxy_doc_options = unsubmitted_ids if proxy_filter == "未入力のみ" else assigned_doctor_ids
+
+    if not proxy_doc_options:
+        st.success("全員入力済みです")
         return
 
     proxy_doc_id = st.selectbox(
         "対象医員",
         proxy_doc_options,
-        format_func=lambda x: doc_map.get(x, f"ID:{x}"),
+        format_func=lambda x: f"{doc_map.get(x, f'ID:{x}')}{'【済】' if x in submitted_ids else ''}",
         key=f"proxy_doc_{section}",
     )
 
     if proxy_doc_id:
+        if proxy_doc_id in submitted_ids:
+            st.warning("この医員は既に希望を入力済みです。保存すると上書きされます。")
         _render_proxy_preference_form(proxy_doc_id, section, active_dates, pref_map, doc_map)
 
 

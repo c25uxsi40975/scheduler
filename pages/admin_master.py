@@ -649,81 +649,132 @@ def render(target_month, year, month):
             sorted_docs_3b = sorted(doctors, key=lambda d: (-d.get("job_rank", 0), d["name"]))
             _dmap_3b = build_display_name_map(doctors)
 
-            # DataFrame 構築
-            matrix_data = {}
-            for d in sorted_docs_3b:
-                row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
-                pref = pref_map_3b.get(d["id"])
-                ng_set = set(pref.get("ng_dates", [])) if pref else set()
-                avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
-                pn_set = set(pref.get("post_night_dates", [])) if pref else set()
-                row = {}
-                for s in saturdays:
-                    ds = s.isoformat()
-                    col_label = s.strftime("%m/%d(%a)")
-                    if ds in ng_set:
-                        row[col_label] = "×"
-                    elif ds in avoid_set:
-                        row[col_label] = "△"
-                    elif ds in pn_set:
-                        row[col_label] = "当○"
-                    else:
-                        row[col_label] = "○"
-                matrix_data[row_label] = row
+            # 入力済み / 未入力の分類
+            submitted_doc_ids = set(pref_map_3b.keys())
+            unsubmitted_docs = [d for d in sorted_docs_3b if d["id"] not in submitted_doc_ids]
+            submitted_docs = [d for d in sorted_docs_3b if d["id"] in submitted_doc_ids]
 
-            df_schedule = pd.DataFrame.from_dict(matrix_data, orient="index")
-            schedule_col_config = {
-                col: st.column_config.SelectboxColumn(
-                    col, options=SCHEDULE_STATUS, default="○", width="small",
-                )
-                for col in df_schedule.columns
-            }
-            edited_schedule_df = st.data_editor(
-                df_schedule,
-                column_config=schedule_col_config,
-                use_container_width=True,
-                key="schedule_matrix",
+            st.caption(f"入力済み: {len(submitted_docs)}名 / 未入力: {len(unsubmitted_docs)}名")
+
+            # 表示切替
+            show_mode = st.radio(
+                "表示対象",
+                ["未入力のみ", "全員"],
+                horizontal=True,
+                key="schedule_matrix_mode",
             )
+            display_docs = unsubmitted_docs if show_mode == "未入力のみ" else sorted_docs_3b
 
-            if st.button("日程を一括保存", type="primary", key="save_schedule_matrix"):
-                batch_items = []
-                for d in sorted_docs_3b:
-                    row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')})"
+            if not display_docs:
+                st.success("全員入力済みです")
+            else:
+                # DataFrame 構築
+                matrix_data = {}
+                for d in display_docs:
                     pref = pref_map_3b.get(d["id"])
-                    old_ng = set(pref.get("ng_dates", [])) if pref else set()
-                    old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
-                    old_pn = set(pref.get("post_night_dates", [])) if pref else set()
-
-                    new_ng = []
-                    new_avoid = []
-                    new_pn = []
+                    submitted = pref is not None
+                    suffix = " 【済】" if submitted else ""
+                    row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')}){suffix}"
+                    ng_set = set(pref.get("ng_dates", [])) if pref else set()
+                    avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
+                    pn_set = set(pref.get("post_night_dates", [])) if pref else set()
+                    row = {}
                     for s in saturdays:
                         ds = s.isoformat()
                         col_label = s.strftime("%m/%d(%a)")
-                        val = edited_schedule_df.at[row_label, col_label]
-                        if val == "×":
-                            new_ng.append(ds)
-                        elif val == "△":
-                            new_avoid.append(ds)
-                        elif val == "当○":
-                            new_pn.append(ds)
+                        if ds in ng_set:
+                            row[col_label] = "×"
+                        elif ds in avoid_set:
+                            row[col_label] = "△"
+                        elif ds in pn_set:
+                            row[col_label] = "当○"
+                        elif submitted:
+                            row[col_label] = "○"
+                        else:
+                            row[col_label] = "-"
+                    matrix_data[row_label] = row
 
-                    if not pref or set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
-                        batch_items.append({
-                            "doctor_id": d["id"],
-                            "ng_dates": new_ng,
-                            "avoid_dates": new_avoid,
-                            "post_night_dates": new_pn,
-                            "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
-                            "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
-                            "free_text": pref.get("free_text", "") if pref else "",
-                        })
-                if batch_items:
-                    batch_upsert_preferences(target_month, batch_items)
-                    st.session_state["_save_msg"] = f"日程希望を保存しました（{len(batch_items)}名変更）"
-                else:
-                    st.session_state["_save_msg"] = "変更はありませんでした"
-                st.rerun()
+                df_schedule = pd.DataFrame.from_dict(matrix_data, orient="index")
+                schedule_col_config = {
+                    col: st.column_config.SelectboxColumn(
+                        col, options=["-"] + SCHEDULE_STATUS, default="-", width="small",
+                    )
+                    for col in df_schedule.columns
+                }
+                edited_schedule_df = st.data_editor(
+                    df_schedule,
+                    column_config=schedule_col_config,
+                    use_container_width=True,
+                    key="schedule_matrix",
+                )
+
+                # ---- ヘルパー: 編集結果から batch_items を構築 ----
+                def _build_batch_items(target_docs):
+                    """target_docs に含まれる医員の変更を収集"""
+                    items = []
+                    for d in target_docs:
+                        pref = pref_map_3b.get(d["id"])
+                        submitted = pref is not None
+                        suffix = " 【済】" if submitted else ""
+                        row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')}){suffix}"
+                        if row_label not in edited_schedule_df.index:
+                            continue
+                        old_ng = set(pref.get("ng_dates", [])) if pref else set()
+                        old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
+                        old_pn = set(pref.get("post_night_dates", [])) if pref else set()
+
+                        new_ng = []
+                        new_avoid = []
+                        new_pn = []
+                        for s in saturdays:
+                            ds = s.isoformat()
+                            col_label = s.strftime("%m/%d(%a)")
+                            val = edited_schedule_df.at[row_label, col_label]
+                            if val == "×":
+                                new_ng.append(ds)
+                            elif val == "△":
+                                new_avoid.append(ds)
+                            elif val == "当○":
+                                new_pn.append(ds)
+                            # "-" と "○" は何もリストに追加しない（=可能）
+
+                        if not pref or set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
+                            items.append({
+                                "doctor_id": d["id"],
+                                "ng_dates": new_ng,
+                                "avoid_dates": new_avoid,
+                                "post_night_dates": new_pn,
+                                "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
+                                "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
+                                "free_text": pref.get("free_text", "") if pref else "",
+                            })
+                    return items
+
+                # ---- 保存ボタン ----
+                btn_cols = st.columns(2)
+                with btn_cols[0]:
+                    if st.button(
+                        f"未入力のみ代行保存（{len(unsubmitted_docs)}名）",
+                        type="primary",
+                        key="save_schedule_unsubmitted",
+                        disabled=len(unsubmitted_docs) == 0,
+                    ):
+                        batch_items = _build_batch_items(unsubmitted_docs)
+                        if batch_items:
+                            batch_upsert_preferences(target_month, batch_items)
+                            st.session_state["_save_msg"] = f"未入力者の日程希望を保存しました（{len(batch_items)}名）"
+                        else:
+                            st.session_state["_save_msg"] = "変更はありませんでした"
+                        st.rerun()
+                with btn_cols[1]:
+                    if st.button("全員を一括保存", key="save_schedule_matrix"):
+                        batch_items = _build_batch_items(display_docs)
+                        if batch_items:
+                            batch_upsert_preferences(target_month, batch_items)
+                            st.session_state["_save_msg"] = f"日程希望を保存しました（{len(batch_items)}名変更）"
+                        else:
+                            st.session_state["_save_msg"] = "変更はありませんでした"
+                        st.rerun()
 
     # --- 3B-2: 個別詳細入力（外勤先希望・備考） ---
     st.markdown("---")
