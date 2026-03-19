@@ -282,11 +282,18 @@ function syncPersonalCalendarForDoctor(doctorId, ssMaster) {
   }
 
   // ---- 平日スケジュール（全セクション） ----
+  var allConfigs = getWeekdayConfigs(ssMaster);
   for (var key in settings) {
     if (key.indexOf("calendar_id_weekday_") !== 0 || !settings[key]) continue;
     var section = key.replace("calendar_id_weekday_", "");
     var ssSec = getWeekdaySectionSpreadsheet(ssMaster, section);
     if (!ssSec) continue;
+
+    // このセクションの検体確認設定を取得
+    var secCfg = null;
+    for (var ci2 = 0; ci2 < allConfigs.length; ci2++) {
+      if (allConfigs[ci2].section === section) { secCfg = allConfigs[ci2]; break; }
+    }
 
     // 今月から12ヶ月先まで（平日は年度単位のため）
     for (var mOff2 = 0; mOff2 < 13; mOff2++) {
@@ -295,15 +302,55 @@ function syncPersonalCalendarForDoctor(doctorId, ssMaster) {
       var wdAssignments = getWeekdayAssignments(ssSec, ym2, null);
       if (wdAssignments.length === 0) continue;
 
+      // 日付ごとに検体確認担当を判定
+      var specByDate2 = {};
+      if (secCfg) {
+        var dateSet2 = {};
+        for (var di2 = 0; di2 < wdAssignments.length; di2++) {
+          dateSet2[String(wdAssignments[di2].date)] = true;
+        }
+        var uniqueDates2 = Object.keys(dateSet2);
+        for (var ui2 = 0; ui2 < uniqueDates2.length; ui2++) {
+          var ds2 = uniqueDates2[ui2];
+          var dayAsgn2 = [];
+          for (var dai2 = 0; dai2 < wdAssignments.length; dai2++) {
+            if (String(wdAssignments[dai2].date) === ds2) dayAsgn2.push(wdAssignments[dai2]);
+          }
+          var sr2 = getSpecimenAssignee(secCfg, ds2, dayAsgn2, doctors);
+          if (sr2) specByDate2[ds2] = sr2;
+        }
+      }
+
       var tag2 = "[外勤調整:weekday:" + section + ":" + ym2 + "]";
       for (var j = 0; j < wdAssignments.length; j++) {
         var wa = wdAssignments[j];
         if (String(wa.doctor_id) !== String(doctorId)) continue;
+
+        var spSuffix2 = "";
+        var spDesc2 = "";
+        var sp2 = specByDate2[String(wa.date)];
+        if (sp2 && String(sp2.doctorId) === String(doctorId)) {
+          if (sp2.conflict) {
+            var oNames2 = [];
+            for (var sci2 = 0; sci2 < sp2.conflictDoctors.length; sci2++) {
+              if (sp2.conflictDoctors[sci2].id !== String(doctorId)) {
+                oNames2.push(sp2.conflictDoctors[sci2].name);
+              }
+            }
+            spSuffix2 = " 🧪同意書・検体確認";
+            spDesc2 = "\n同意書・検体確認: 同学年のため" + oNames2.join("、") + "先生と要相談";
+          } else {
+            spSuffix2 = " 🧪同意書・検体確認";
+            spDesc2 = "\n同意書・検体確認: 担当日";
+          }
+        }
+
         var eventDate2 = new Date(String(wa.date) + "T00:00:00+09:00");
-        var title2 = (wa.slot_name || "") + "（平日）";
+        var title2 = (wa.slot_name || "") + "（平日）" + spSuffix2;
         var description2 = tag2 + "\nセクション: " + section
           + "\n医員: " + doc.name
-          + "\nスロット: " + (wa.slot_name || "");
+          + "\nスロット: " + (wa.slot_name || "")
+          + spDesc2;
         if (createAllDayEvent(calId, title2, eventDate2, description2)) createdCount++;
       }
     }
@@ -456,6 +503,13 @@ function syncWeekdayCalendar(data, ssMaster) {
   var allPersonalEvents = [];
   var allPersonalDoctorIds = [];
 
+  // 検体確認設定を取得
+  var configs = getWeekdayConfigs(ssMaster);
+  var cfg = null;
+  for (var ci = 0; ci < configs.length; ci++) {
+    if (configs[ci].section === section) { cfg = configs[ci]; break; }
+  }
+
   for (var m = 0; m < yearMonths.length; m++) {
     var ym = yearMonths[m];
     var tag = "[外勤調整:weekday:" + section + ":" + ym + "]";
@@ -463,14 +517,66 @@ function syncWeekdayCalendar(data, ssMaster) {
     deleteTaggedEvents(calendar, calId, tag, range.start, range.end);
 
     var assignments = getWeekdayAssignments(ssSec, ym, null);
+
+    // 日付ごとに検体確認担当を判定
+    var specimenByDate = {};
+    if (cfg) {
+      Logger.log("検体確認設定: enabled=" + cfg.specimen_enabled
+        + ", doctors=" + JSON.stringify(cfg.specimen_doctors)
+        + ", days=" + JSON.stringify(cfg.specimen_days));
+      var dateSet = {};
+      for (var di = 0; di < assignments.length; di++) {
+        dateSet[String(assignments[di].date)] = true;
+      }
+      var uniqueDates = Object.keys(dateSet);
+      Logger.log("検体確認: " + ym + " の日付数=" + uniqueDates.length
+        + ", サンプル日付=" + (uniqueDates[0] || "なし"));
+      for (var ui = 0; ui < uniqueDates.length; ui++) {
+        var dateStr = uniqueDates[ui];
+        var dayAssignments = [];
+        for (var dai = 0; dai < assignments.length; dai++) {
+          if (String(assignments[dai].date) === dateStr) dayAssignments.push(assignments[dai]);
+        }
+        var specResult = getSpecimenAssignee(cfg, dateStr, dayAssignments, doctors);
+        if (specResult) {
+          specimenByDate[dateStr] = specResult;
+          Logger.log("検体確認担当: " + dateStr + " → " + specResult.doctorName
+            + " (id=" + specResult.doctorId + ", conflict=" + specResult.conflict + ")");
+        }
+      }
+      Logger.log("検体確認結果: " + ym + " → " + Object.keys(specimenByDate).length + " 日");
+    } else {
+      Logger.log("検体確認: セクション '" + section + "' の設定が見つかりません");
+    }
+
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
-      var title = (a.doctor_name || "") + " - " + (a.slot_name || "");
+      var specimenSuffix = "";
+      var specimenDesc = "";
+      var spec = specimenByDate[String(a.date)];
+      if (spec && String(spec.doctorId) === String(a.doctor_id)) {
+        if (spec.conflict) {
+          var otherNames = [];
+          for (var sci = 0; sci < spec.conflictDoctors.length; sci++) {
+            if (spec.conflictDoctors[sci].id !== String(a.doctor_id)) {
+              otherNames.push(spec.conflictDoctors[sci].name);
+            }
+          }
+          specimenSuffix = " 🧪同意書・検体確認";
+          specimenDesc = "\n同意書・検体確認: 同学年のため" + otherNames.join("、") + "先生と要相談";
+        } else {
+          specimenSuffix = " 🧪同意書・検体確認";
+          specimenDesc = "\n同意書・検体確認: 担当日";
+        }
+      }
+
+      var title = (a.doctor_name || "") + " - " + (a.slot_name || "") + specimenSuffix;
       var eventDate = new Date(String(a.date) + "T00:00:00+09:00");
       var description = tag + "\nセクション: " + section
         + "\n外勤先: " + clinicName
         + "\n医員: " + (a.doctor_name || "")
-        + "\nスロット: " + (a.slot_name || "");
+        + "\nスロット: " + (a.slot_name || "")
+        + specimenDesc;
 
       if (createAllDayEvent(calId, title, eventDate, description)) createdCount++;
 
@@ -481,11 +587,12 @@ function syncWeekdayCalendar(data, ssMaster) {
         if (allPersonalDoctorIds.indexOf(did) === -1) allPersonalDoctorIds.push(did);
         allPersonalEvents.push({
           doctor_id: did,
-          title: (a.slot_name || "") + "（平日）",
+          title: (a.slot_name || "") + "（平日）" + specimenSuffix,
           date: String(a.date),
           description: tag + "\nセクション: " + section
             + "\n医員: " + (a.doctor_name || "")
             + "\nスロット: " + (a.slot_name || "")
+            + specimenDesc
         });
       }
     }
@@ -559,6 +666,13 @@ function syncShiftSwapCalendar(data, ssMaster) {
     return;
   }
 
+  // 検体確認設定を取得
+  var swConfigs = getWeekdayConfigs(ssMaster);
+  var swCfg = null;
+  for (var swci = 0; swci < swConfigs.length; swci++) {
+    if (swConfigs[swci].section === section) { swCfg = swConfigs[swci]; break; }
+  }
+
   var createdCount = 0;
   var affectedDoctorIds = [];
 
@@ -572,14 +686,37 @@ function syncShiftSwapCalendar(data, ssMaster) {
     deleteTaggedEvents(calendar, calId, tag, dayStart, dayEnd);
 
     var assignments = getWeekdayAssignments(ssSec, ym, dateStr);
+
+    // この日の検体確認担当を判定
+    var swSpecResult = swCfg ? getSpecimenAssignee(swCfg, dateStr, assignments, doctors) : null;
+
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
-      var title = (a.doctor_name || "") + " - " + (a.slot_name || "");
+      var swSpSuffix = "";
+      var swSpDesc = "";
+      if (swSpecResult && String(swSpecResult.doctorId) === String(a.doctor_id)) {
+        if (swSpecResult.conflict) {
+          var swONames = [];
+          for (var swsci = 0; swsci < swSpecResult.conflictDoctors.length; swsci++) {
+            if (swSpecResult.conflictDoctors[swsci].id !== String(a.doctor_id)) {
+              swONames.push(swSpecResult.conflictDoctors[swsci].name);
+            }
+          }
+          swSpSuffix = " 🧪同意書・検体確認";
+          swSpDesc = "\n同意書・検体確認: 同学年のため" + swONames.join("、") + "先生と要相談";
+        } else {
+          swSpSuffix = " 🧪同意書・検体確認";
+          swSpDesc = "\n同意書・検体確認: 担当日";
+        }
+      }
+
+      var title = (a.doctor_name || "") + " - " + (a.slot_name || "") + swSpSuffix;
       var eventDate = new Date(dateStr + "T00:00:00+09:00");
       var description = tag + "\nセクション: " + section
         + "\n外勤先: " + clinicName
         + "\n医員: " + (a.doctor_name || "")
-        + "\nスロット: " + (a.slot_name || "");
+        + "\nスロット: " + (a.slot_name || "")
+        + swSpDesc;
 
       if (createAllDayEvent(calId, title, eventDate, description)) createdCount++;
 
@@ -610,14 +747,38 @@ function syncShiftSwapCalendar(data, ssMaster) {
 
       // この医員のこの日の割り当てを再作成
       var wdAssignments = getWeekdayAssignments(ssSec, ym2, dateStr2);
+
+      // この日の検体確認担当を再判定
+      var pSwSpec = swCfg ? getSpecimenAssignee(swCfg, dateStr2, wdAssignments, doctors) : null;
+
       for (var k = 0; k < wdAssignments.length; k++) {
         var wa = wdAssignments[k];
         if (String(wa.doctor_id) !== affectedDoctorIds[j]) continue;
+
+        var pSwSuffix = "";
+        var pSwDesc = "";
+        if (pSwSpec && String(pSwSpec.doctorId) === affectedDoctorIds[j]) {
+          if (pSwSpec.conflict) {
+            var pSwONames = [];
+            for (var pswi = 0; pswi < pSwSpec.conflictDoctors.length; pswi++) {
+              if (pSwSpec.conflictDoctors[pswi].id !== affectedDoctorIds[j]) {
+                pSwONames.push(pSwSpec.conflictDoctors[pswi].name);
+              }
+            }
+            pSwSuffix = " 🧪同意書・検体確認";
+            pSwDesc = "\n同意書・検体確認: 同学年のため" + pSwONames.join("、") + "先生と要相談";
+          } else {
+            pSwSuffix = " 🧪同意書・検体確認";
+            pSwDesc = "\n同意書・検体確認: 担当日";
+          }
+        }
+
         var evDate = new Date(dateStr2 + "T00:00:00+09:00");
-        var evTitle = (wa.slot_name || "") + "（平日）";
+        var evTitle = (wa.slot_name || "") + "（平日）" + pSwSuffix;
         var evDesc = pTag + "\nセクション: " + section
           + "\n医員: " + doc.name
-          + "\nスロット: " + (wa.slot_name || "");
+          + "\nスロット: " + (wa.slot_name || "")
+          + pSwDesc;
         createAllDayEvent(doc.personal_calendar_id, evTitle, evDate, evDesc);
       }
     }
@@ -704,23 +865,72 @@ function resyncCalendarForDoctor(data) {
     }
 
     // 平日
+    var rAllConfigs = getWeekdayConfigs(ssMaster);
     for (var key in settings) {
       if (key.indexOf("calendar_id_weekday_") !== 0 || !settings[key]) continue;
       var section = key.replace("calendar_id_weekday_", "");
       var ssSec = getWeekdaySectionSpreadsheet(ssMaster, section);
       if (!ssSec) continue;
+
+      // このセクションの検体確認設定を取得
+      var rSecCfg = null;
+      for (var rci = 0; rci < rAllConfigs.length; rci++) {
+        if (rAllConfigs[rci].section === section) { rSecCfg = rAllConfigs[rci]; break; }
+      }
+
       for (var mOff2 = 0; mOff2 < 13; mOff2++) {
         var dt2 = new Date(now.getFullYear(), now.getMonth() + mOff2, 1);
         var ym2 = Utilities.formatDate(dt2, "Asia/Tokyo", "yyyy-MM");
         var wdAssignments = getWeekdayAssignments(ssSec, ym2, null);
+        if (wdAssignments.length === 0) continue;
+
+        // 日付ごとに検体確認担当を判定
+        var rSpecByDate = {};
+        if (rSecCfg) {
+          var rDateSet = {};
+          for (var rdi = 0; rdi < wdAssignments.length; rdi++) {
+            rDateSet[String(wdAssignments[rdi].date)] = true;
+          }
+          var rUniqueDates = Object.keys(rDateSet);
+          for (var rui = 0; rui < rUniqueDates.length; rui++) {
+            var rds = rUniqueDates[rui];
+            var rDayAsgn = [];
+            for (var rdai = 0; rdai < wdAssignments.length; rdai++) {
+              if (String(wdAssignments[rdai].date) === rds) rDayAsgn.push(wdAssignments[rdai]);
+            }
+            var rsr = getSpecimenAssignee(rSecCfg, rds, rDayAsgn, doctors);
+            if (rsr) rSpecByDate[rds] = rsr;
+          }
+        }
+
         var tag2 = "[外勤調整:weekday:" + section + ":" + ym2 + "]";
         for (var j = 0; j < wdAssignments.length; j++) {
           var wa = wdAssignments[j];
           if (String(wa.doctor_id) !== doctorId) continue;
+
+          var rSpSuffix = "";
+          var rSpDesc = "";
+          var rsp = rSpecByDate[String(wa.date)];
+          if (rsp && String(rsp.doctorId) === doctorId) {
+            if (rsp.conflict) {
+              var rONames = [];
+              for (var rsci = 0; rsci < rsp.conflictDoctors.length; rsci++) {
+                if (rsp.conflictDoctors[rsci].id !== doctorId) {
+                  rONames.push(rsp.conflictDoctors[rsci].name);
+                }
+              }
+              rSpSuffix = " 🧪同意書・検体確認";
+              rSpDesc = "\n同意書・検体確認: 同学年のため" + rONames.join("、") + "先生と要相談";
+            } else {
+              rSpSuffix = " 🧪同意書・検体確認";
+              rSpDesc = "\n同意書・検体確認: 担当日";
+            }
+          }
+
           var evDate = new Date(String(wa.date) + "T00:00:00+09:00");
-          if (createAllDayEvent(newCalId, (wa.slot_name || "") + "（平日）", evDate,
+          if (createAllDayEvent(newCalId, (wa.slot_name || "") + "（平日）" + rSpSuffix, evDate,
             tag2 + "\nセクション: " + section + "\n医員: " + doctorName
-            + "\nスロット: " + (wa.slot_name || ""))) createdCount++;
+            + "\nスロット: " + (wa.slot_name || "") + rSpDesc)) createdCount++;
         }
       }
     }
@@ -770,17 +980,17 @@ function testSyncSaturdayCalendar() {
 function testSyncWeekdayCalendar() {
   var ssMaster = getMasterSpreadsheet();
   var configs = getWeekdayConfigs(ssMaster);
+  // 今月から12ヶ月先までを動的に生成
+  var now = new Date();
+  var yearMonths = [];
+  for (var mOff = 0; mOff < 13; mOff++) {
+    var d = new Date(now.getFullYear(), now.getMonth() + mOff, 1);
+    yearMonths.push(Utilities.formatDate(d, "Asia/Tokyo", "yyyy-MM"));
+  }
   for (var i = 0; i < configs.length; i++) {
     var cfg = configs[i];
     if (!cfg.is_active) continue;
-    var yearMonths = [];
-    for (var m = 4; m <= 12; m++) {
-      yearMonths.push("2026-" + (m < 10 ? "0" : "") + m);
-    }
-    for (var m2 = 1; m2 <= 3; m2++) {
-      yearMonths.push("2027-" + (m2 < 10 ? "0" : "") + m2);
-    }
-    Logger.log("テスト実行: syncWeekdayCalendar(" + cfg.section + ", " + yearMonths.length + "ヶ月)");
+    Logger.log("テスト実行: syncWeekdayCalendar(" + cfg.section + ", " + yearMonths.length + "ヶ月, 開始=" + yearMonths[0] + ")");
     syncWeekdayCalendar({
       section: cfg.section,
       clinic_name: cfg.clinic_name || "",

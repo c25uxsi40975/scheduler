@@ -565,9 +565,9 @@ function sendWeekdayDayBeforeReminder() {
               otherNames.push(specResult.conflictDoctors[sc].name);
             }
           }
-          body += "※ 検体確認（同学年のため" + otherNames.join("、") + "先生と相談してください）\n\n";
+          body += "※ 同意書・検体確認（同学年のため" + otherNames.join("、") + "先生と相談してください）\n\n";
         } else {
-          body += "※ 検体確認担当日です\n\n";
+          body += "※ 同意書・検体確認担当日です\n\n";
         }
       }
 

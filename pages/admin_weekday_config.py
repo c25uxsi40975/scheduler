@@ -75,7 +75,7 @@ def render():
 
             with st.container(border=True):
                 ss_key = cfg.get("spreadsheet_key", "")
-                specimen_badge = "　検体確認: ON" if cfg.get("specimen_enabled") else ""
+                specimen_badge = "　同意書・検体確認: ON" if cfg.get("specimen_enabled") else ""
                 view_mode_badge = "　表示: カレンダー" if get_weekday_schedule_view_mode(section) == "calendar" else ""
                 st.markdown(f"**{cfg['clinic_name']}**　{days_str}曜日　{status}　メンバー: {assigned_names}　副管理者: {subadmin_names}{specimen_badge}{view_mode_badge}")
                 if ss_key:
@@ -140,14 +140,14 @@ def render():
                     )
                     st.markdown("---")
                     edit_specimen_enabled = st.checkbox(
-                        "検体確認機能を有効にする",
+                        "同意書・検体確認機能を有効にする",
                         value=bool(cfg.get("specimen_enabled")),
                         key=f"wk_specimen_en_{section}",
                     )
                     if edit_specimen_enabled:
                         cur_specimen_docs = cfg.get("specimen_doctors", [])
                         edit_specimen_doctors = st.multiselect(
-                            "検体確認対象メンバー",
+                            "同意書・検体確認対象メンバー",
                             options=edit_assigned if edit_assigned else [did for did in assigned],
                             default=[did for did in cur_specimen_docs if did in (edit_assigned or assigned)],
                             format_func=lambda x: _doc_map_edit.get(x, "?"),
@@ -155,7 +155,7 @@ def render():
                         )
                         cur_specimen_days = cfg.get("specimen_days", [2, 4])
                         edit_specimen_days = st.multiselect(
-                            "検体確認曜日",
+                            "同意書・検体確認曜日",
                             options=[0, 1, 2, 3, 4],
                             default=cur_specimen_days,
                             format_func=lambda x: DAY_NAMES.get(x, str(x)),

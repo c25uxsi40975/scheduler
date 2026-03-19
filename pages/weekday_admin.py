@@ -1239,7 +1239,7 @@ def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
             missing_weeks.append(dates_str)
 
     if missing_weeks:
-        st.warning(f"🧪 検体確認メンバーが週内に割り当てられていない週があります（{len(missing_weeks)}週）: "
+        st.warning(f"🧪 同意書・検体確認メンバーが週内に割り当てられていない週があります（{len(missing_weeks)}週）: "
                    + "、".join(missing_weeks))
 
 

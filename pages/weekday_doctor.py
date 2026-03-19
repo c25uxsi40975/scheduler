@@ -240,10 +240,10 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
                     if spec["conflict"]:
                         other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
                                        if d["doctor_id"] != doctor["id"]]
-                        specimen_mark = f" 🧪検体確認（{', '.join(other_names)}先生と要相談）"
+                        specimen_mark = f" 🧪同意書・検体確認（{', '.join(other_names)}先生と要相談）"
                         specimen_alerts.append((date_label, spec))
                     else:
-                        specimen_mark = " 🧪検体確認"
+                        specimen_mark = " 🧪同意書・検体確認"
                         specimen_alerts.append((date_label, spec))
             st.write(f"　{date_label}　{r['slot_name']}{specimen_mark}")
         if specimen_alerts:
@@ -251,9 +251,9 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
                 if spec["conflict"]:
                     other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
                                    if d["doctor_id"] != doctor["id"]]
-                    st.warning(f"🧪 {date_label} 検体確認（同学年のため{', '.join(other_names)}先生と要相談）")
+                    st.warning(f"🧪 {date_label} 同意書・検体確認（同学年のため{', '.join(other_names)}先生と要相談）")
                 else:
-                    st.info(f"🧪 {date_label} 検体確認担当日です")
+                    st.info(f"🧪 {date_label} 同意書・検体確認担当日です")
     else:
         st.write("この月の割り当てはありません")
 
