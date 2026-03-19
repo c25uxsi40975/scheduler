@@ -325,33 +325,34 @@ function syncPersonalCalendarForDoctor(doctorId, ssMaster) {
       for (var j = 0; j < wdAssignments.length; j++) {
         var wa = wdAssignments[j];
         if (String(wa.doctor_id) !== String(doctorId)) continue;
-
-        var spSuffix2 = "";
-        var spDesc2 = "";
-        var sp2 = specByDate2[String(wa.date)];
-        if (sp2 && String(sp2.doctorId) === String(doctorId)) {
-          if (sp2.conflict) {
-            var oNames2 = [];
-            for (var sci2 = 0; sci2 < sp2.conflictDoctors.length; sci2++) {
-              if (sp2.conflictDoctors[sci2].id !== String(doctorId)) {
-                oNames2.push(sp2.conflictDoctors[sci2].name);
-              }
-            }
-            spSuffix2 = " 🧪同意書・検体確認";
-            spDesc2 = "\n同意書・検体確認: 同学年のため" + oNames2.join("、") + "先生と要相談";
-          } else {
-            spSuffix2 = " 🧪同意書・検体確認";
-            spDesc2 = "\n同意書・検体確認: 担当日";
-          }
-        }
-
         var eventDate2 = new Date(String(wa.date) + "T00:00:00+09:00");
-        var title2 = (wa.slot_name || "") + "（平日）" + spSuffix2;
+        var title2 = (wa.slot_name || "") + "（平日）";
         var description2 = tag2 + "\nセクション: " + section
           + "\n医員: " + doc.name
-          + "\nスロット: " + (wa.slot_name || "")
-          + spDesc2;
+          + "\nスロット: " + (wa.slot_name || "");
         if (createAllDayEvent(calId, title2, eventDate2, description2)) createdCount++;
+      }
+
+      // 検体確認を別イベントとして作成（自分が担当の日のみ）
+      for (var spd2 in specByDate2) {
+        var sp2 = specByDate2[spd2];
+        if (String(sp2.doctorId) !== String(doctorId)) continue;
+        var spDate2 = new Date(spd2 + "T00:00:00+09:00");
+        var spTitle2, spDesc2;
+        if (sp2.conflict) {
+          var oNames2 = [];
+          for (var sci2 = 0; sci2 < sp2.conflictDoctors.length; sci2++) {
+            if (sp2.conflictDoctors[sci2].id !== String(doctorId)) {
+              oNames2.push(sp2.conflictDoctors[sci2].name);
+            }
+          }
+          spTitle2 = "🧪 同意書・検体確認（" + oNames2.join("、") + "先生と要相談）";
+          spDesc2 = tag2 + "\n同意書・検体確認\n※同学年のため" + oNames2.join("、") + "先生と要相談";
+        } else {
+          spTitle2 = "🧪 同意書・検体確認";
+          spDesc2 = tag2 + "\n同意書・検体確認";
+        }
+        if (createAllDayEvent(calId, spTitle2, spDate2, spDesc2)) createdCount++;
       }
     }
   }
@@ -551,32 +552,12 @@ function syncWeekdayCalendar(data, ssMaster) {
 
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
-      var specimenSuffix = "";
-      var specimenDesc = "";
-      var spec = specimenByDate[String(a.date)];
-      if (spec && String(spec.doctorId) === String(a.doctor_id)) {
-        if (spec.conflict) {
-          var otherNames = [];
-          for (var sci = 0; sci < spec.conflictDoctors.length; sci++) {
-            if (spec.conflictDoctors[sci].id !== String(a.doctor_id)) {
-              otherNames.push(spec.conflictDoctors[sci].name);
-            }
-          }
-          specimenSuffix = " 🧪同意書・検体確認";
-          specimenDesc = "\n同意書・検体確認: 同学年のため" + otherNames.join("、") + "先生と要相談";
-        } else {
-          specimenSuffix = " 🧪同意書・検体確認";
-          specimenDesc = "\n同意書・検体確認: 担当日";
-        }
-      }
-
-      var title = (a.doctor_name || "") + " - " + (a.slot_name || "") + specimenSuffix;
+      var title = (a.doctor_name || "") + " - " + (a.slot_name || "");
       var eventDate = new Date(String(a.date) + "T00:00:00+09:00");
       var description = tag + "\nセクション: " + section
         + "\n外勤先: " + clinicName
         + "\n医員: " + (a.doctor_name || "")
-        + "\nスロット: " + (a.slot_name || "")
-        + specimenDesc;
+        + "\nスロット: " + (a.slot_name || "");
 
       if (createAllDayEvent(calId, title, eventDate, description)) createdCount++;
 
@@ -587,12 +568,54 @@ function syncWeekdayCalendar(data, ssMaster) {
         if (allPersonalDoctorIds.indexOf(did) === -1) allPersonalDoctorIds.push(did);
         allPersonalEvents.push({
           doctor_id: did,
-          title: (a.slot_name || "") + "（平日）" + specimenSuffix,
+          title: (a.slot_name || "") + "（平日）",
           date: String(a.date),
           description: tag + "\nセクション: " + section
             + "\n医員: " + (a.doctor_name || "")
             + "\nスロット: " + (a.slot_name || "")
-            + specimenDesc
+        });
+      }
+    }
+
+    // 検体確認を別イベントとして作成（同じカレンダー・同じタグ）
+    for (var sd in specimenByDate) {
+      var sp = specimenByDate[sd];
+      var spDate = new Date(sd + "T00:00:00+09:00");
+      var spTitle, spDesc;
+      if (sp.conflict) {
+        var spOther = [];
+        for (var spi = 0; spi < sp.conflictDoctors.length; spi++) {
+          if (sp.conflictDoctors[spi].id !== String(sp.doctorId)) {
+            spOther.push(sp.conflictDoctors[spi].name);
+          }
+        }
+        spTitle = "🧪 同意書・検体確認 - " + sp.doctorName + "（" + spOther.join("、") + "先生と要相談）";
+        spDesc = tag + "\n同意書・検体確認\n担当: " + sp.doctorName
+          + "\n※同学年のため" + spOther.join("、") + "先生と要相談";
+      } else {
+        spTitle = "🧪 同意書・検体確認 - " + sp.doctorName;
+        spDesc = tag + "\n同意書・検体確認\n担当: " + sp.doctorName;
+      }
+      if (createAllDayEvent(calId, spTitle, spDate, spDesc)) createdCount++;
+
+      // 個別カレンダー用データ収集（担当医員のみ）
+      var spDoc = doctors[String(sp.doctorId)];
+      if (spDoc && spDoc.notify_calendar && spDoc.personal_calendar_id) {
+        var spDid = String(sp.doctorId);
+        if (allPersonalDoctorIds.indexOf(spDid) === -1) allPersonalDoctorIds.push(spDid);
+        var pSpTitle, pSpDesc;
+        if (sp.conflict) {
+          pSpTitle = "🧪 同意書・検体確認（" + spOther.join("、") + "先生と要相談）";
+          pSpDesc = tag + "\n同意書・検体確認\n※同学年のため" + spOther.join("、") + "先生と要相談";
+        } else {
+          pSpTitle = "🧪 同意書・検体確認";
+          pSpDesc = tag + "\n同意書・検体確認";
+        }
+        allPersonalEvents.push({
+          doctor_id: spDid,
+          title: pSpTitle,
+          date: sd,
+          description: pSpDesc
         });
       }
     }
@@ -692,31 +715,12 @@ function syncShiftSwapCalendar(data, ssMaster) {
 
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
-      var swSpSuffix = "";
-      var swSpDesc = "";
-      if (swSpecResult && String(swSpecResult.doctorId) === String(a.doctor_id)) {
-        if (swSpecResult.conflict) {
-          var swONames = [];
-          for (var swsci = 0; swsci < swSpecResult.conflictDoctors.length; swsci++) {
-            if (swSpecResult.conflictDoctors[swsci].id !== String(a.doctor_id)) {
-              swONames.push(swSpecResult.conflictDoctors[swsci].name);
-            }
-          }
-          swSpSuffix = " 🧪同意書・検体確認";
-          swSpDesc = "\n同意書・検体確認: 同学年のため" + swONames.join("、") + "先生と要相談";
-        } else {
-          swSpSuffix = " 🧪同意書・検体確認";
-          swSpDesc = "\n同意書・検体確認: 担当日";
-        }
-      }
-
-      var title = (a.doctor_name || "") + " - " + (a.slot_name || "") + swSpSuffix;
+      var title = (a.doctor_name || "") + " - " + (a.slot_name || "");
       var eventDate = new Date(dateStr + "T00:00:00+09:00");
       var description = tag + "\nセクション: " + section
         + "\n外勤先: " + clinicName
         + "\n医員: " + (a.doctor_name || "")
-        + "\nスロット: " + (a.slot_name || "")
-        + swSpDesc;
+        + "\nスロット: " + (a.slot_name || "");
 
       if (createAllDayEvent(calId, title, eventDate, description)) createdCount++;
 
@@ -725,6 +729,31 @@ function syncShiftSwapCalendar(data, ssMaster) {
         var did = String(a.doctor_id);
         if (affectedDoctorIds.indexOf(did) === -1) affectedDoctorIds.push(did);
       }
+    }
+
+    // 検体確認を別イベントとして作成（共有カレンダー）
+    if (swSpecResult) {
+      var swSpDate = new Date(dateStr + "T00:00:00+09:00");
+      var swSpTitle, swSpDesc;
+      if (swSpecResult.conflict) {
+        var swONames = [];
+        for (var swsci = 0; swsci < swSpecResult.conflictDoctors.length; swsci++) {
+          if (swSpecResult.conflictDoctors[swsci].id !== String(swSpecResult.doctorId)) {
+            swONames.push(swSpecResult.conflictDoctors[swsci].name);
+          }
+        }
+        swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName + "（" + swONames.join("、") + "先生と要相談）";
+        swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName
+          + "\n※同学年のため" + swONames.join("、") + "先生と要相談";
+      } else {
+        swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName;
+        swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName;
+      }
+      if (createAllDayEvent(calId, swSpTitle, swSpDate, swSpDesc)) createdCount++;
+
+      // 担当医員を影響リストに追加
+      var swSpDid = String(swSpecResult.doctorId);
+      if (affectedDoctorIds.indexOf(swSpDid) === -1) affectedDoctorIds.push(swSpDid);
     }
   }
 
@@ -747,39 +776,36 @@ function syncShiftSwapCalendar(data, ssMaster) {
 
       // この医員のこの日の割り当てを再作成
       var wdAssignments = getWeekdayAssignments(ssSec, ym2, dateStr2);
-
-      // この日の検体確認担当を再判定
-      var pSwSpec = swCfg ? getSpecimenAssignee(swCfg, dateStr2, wdAssignments, doctors) : null;
-
       for (var k = 0; k < wdAssignments.length; k++) {
         var wa = wdAssignments[k];
         if (String(wa.doctor_id) !== affectedDoctorIds[j]) continue;
-
-        var pSwSuffix = "";
-        var pSwDesc = "";
-        if (pSwSpec && String(pSwSpec.doctorId) === affectedDoctorIds[j]) {
-          if (pSwSpec.conflict) {
-            var pSwONames = [];
-            for (var pswi = 0; pswi < pSwSpec.conflictDoctors.length; pswi++) {
-              if (pSwSpec.conflictDoctors[pswi].id !== affectedDoctorIds[j]) {
-                pSwONames.push(pSwSpec.conflictDoctors[pswi].name);
-              }
-            }
-            pSwSuffix = " 🧪同意書・検体確認";
-            pSwDesc = "\n同意書・検体確認: 同学年のため" + pSwONames.join("、") + "先生と要相談";
-          } else {
-            pSwSuffix = " 🧪同意書・検体確認";
-            pSwDesc = "\n同意書・検体確認: 担当日";
-          }
-        }
-
         var evDate = new Date(dateStr2 + "T00:00:00+09:00");
-        var evTitle = (wa.slot_name || "") + "（平日）" + pSwSuffix;
+        var evTitle = (wa.slot_name || "") + "（平日）";
         var evDesc = pTag + "\nセクション: " + section
           + "\n医員: " + doc.name
-          + "\nスロット: " + (wa.slot_name || "")
-          + pSwDesc;
+          + "\nスロット: " + (wa.slot_name || "");
         createAllDayEvent(doc.personal_calendar_id, evTitle, evDate, evDesc);
+      }
+
+      // 検体確認を別イベントとして作成（個別カレンダー、自分が担当の場合のみ）
+      var pSwSpec = swCfg ? getSpecimenAssignee(swCfg, dateStr2, wdAssignments, doctors) : null;
+      if (pSwSpec && String(pSwSpec.doctorId) === affectedDoctorIds[j]) {
+        var pSwDate = new Date(dateStr2 + "T00:00:00+09:00");
+        var pSwTitle, pSwDesc;
+        if (pSwSpec.conflict) {
+          var pSwONames = [];
+          for (var pswi = 0; pswi < pSwSpec.conflictDoctors.length; pswi++) {
+            if (pSwSpec.conflictDoctors[pswi].id !== affectedDoctorIds[j]) {
+              pSwONames.push(pSwSpec.conflictDoctors[pswi].name);
+            }
+          }
+          pSwTitle = "🧪 同意書・検体確認（" + pSwONames.join("、") + "先生と要相談）";
+          pSwDesc = pTag + "\n同意書・検体確認\n※同学年のため" + pSwONames.join("、") + "先生と要相談";
+        } else {
+          pSwTitle = "🧪 同意書・検体確認";
+          pSwDesc = pTag + "\n同意書・検体確認";
+        }
+        createAllDayEvent(doc.personal_calendar_id, pSwTitle, pSwDate, pSwDesc);
       }
     }
   }
@@ -907,30 +933,32 @@ function resyncCalendarForDoctor(data) {
         for (var j = 0; j < wdAssignments.length; j++) {
           var wa = wdAssignments[j];
           if (String(wa.doctor_id) !== doctorId) continue;
-
-          var rSpSuffix = "";
-          var rSpDesc = "";
-          var rsp = rSpecByDate[String(wa.date)];
-          if (rsp && String(rsp.doctorId) === doctorId) {
-            if (rsp.conflict) {
-              var rONames = [];
-              for (var rsci = 0; rsci < rsp.conflictDoctors.length; rsci++) {
-                if (rsp.conflictDoctors[rsci].id !== doctorId) {
-                  rONames.push(rsp.conflictDoctors[rsci].name);
-                }
-              }
-              rSpSuffix = " 🧪同意書・検体確認";
-              rSpDesc = "\n同意書・検体確認: 同学年のため" + rONames.join("、") + "先生と要相談";
-            } else {
-              rSpSuffix = " 🧪同意書・検体確認";
-              rSpDesc = "\n同意書・検体確認: 担当日";
-            }
-          }
-
           var evDate = new Date(String(wa.date) + "T00:00:00+09:00");
-          if (createAllDayEvent(newCalId, (wa.slot_name || "") + "（平日）" + rSpSuffix, evDate,
+          if (createAllDayEvent(newCalId, (wa.slot_name || "") + "（平日）", evDate,
             tag2 + "\nセクション: " + section + "\n医員: " + doctorName
-            + "\nスロット: " + (wa.slot_name || "") + rSpDesc)) createdCount++;
+            + "\nスロット: " + (wa.slot_name || ""))) createdCount++;
+        }
+
+        // 検体確認を別イベントとして作成（自分が担当の日のみ）
+        for (var rsd in rSpecByDate) {
+          var rsp = rSpecByDate[rsd];
+          if (String(rsp.doctorId) !== doctorId) continue;
+          var rSpDate = new Date(rsd + "T00:00:00+09:00");
+          var rSpTitle, rSpDesc;
+          if (rsp.conflict) {
+            var rONames = [];
+            for (var rsci = 0; rsci < rsp.conflictDoctors.length; rsci++) {
+              if (rsp.conflictDoctors[rsci].id !== doctorId) {
+                rONames.push(rsp.conflictDoctors[rsci].name);
+              }
+            }
+            rSpTitle = "🧪 同意書・検体確認（" + rONames.join("、") + "先生と要相談）";
+            rSpDesc = tag2 + "\n同意書・検体確認\n※同学年のため" + rONames.join("、") + "先生と要相談";
+          } else {
+            rSpTitle = "🧪 同意書・検体確認";
+            rSpDesc = tag2 + "\n同意書・検体確認";
+          }
+          if (createAllDayEvent(newCalId, rSpTitle, rSpDate, rSpDesc)) createdCount++;
         }
       }
     }
