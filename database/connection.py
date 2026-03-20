@@ -416,7 +416,7 @@ def _init_monthly_sheet(name, headers):
         try:
             _retry(ws.row_values, 1)
             return ws
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             # シートが外部から削除された場合、キャッシュを無効化して再作成
             cache.pop(name, None)
     sh = _get_spreadsheet_for(name)

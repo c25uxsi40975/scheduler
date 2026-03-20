@@ -5,7 +5,6 @@
 import json
 import logging
 from datetime import datetime
-import gspread
 import streamlit as st
 
 from database.connection import (
@@ -227,7 +226,7 @@ def confirm_schedule(schedule_id):
             continue
         try:
             records = _get_all_records(ws)
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             _logger.warning("削除済みシート '%s' をスキップ", ws_name)
             _ws_cache_operational.pop(ws_name, None)
             continue
@@ -247,7 +246,7 @@ def delete_schedule(schedule_id):
             continue
         try:
             records = _get_all_records(ws)
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             _logger.warning("削除済みシート '%s' をスキップ", ws_name)
             _ws_cache_operational.pop(ws_name, None)
             continue
@@ -265,7 +264,7 @@ def update_schedule_assignments(schedule_id, assignments):
             continue
         try:
             records = _get_all_records(ws)
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             _logger.warning("削除済みシート '%s' をスキップ", ws_name)
             _ws_cache_operational.pop(ws_name, None)
             continue
@@ -292,7 +291,7 @@ def get_all_confirmed_schedules():
         year_month = ws_name.replace("スケジュール_", "")
         try:
             records = _get_all_records(ws)
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             _logger.warning("削除済みシート '%s' をスキップ", ws_name)
             _ws_cache_operational.pop(ws_name, None)
             continue
@@ -317,7 +316,7 @@ def get_confirmed_months():
         year_month = ws_name.replace("スケジュール_", "")
         try:
             records = _get_all_records(ws)
-        except (gspread.exceptions.APIError, Exception):
+        except Exception:
             _logger.warning("削除済みシート '%s' をスキップ", ws_name)
             _ws_cache_operational.pop(ws_name, None)
             continue
@@ -350,6 +349,6 @@ def delete_old_schedules(months_to_keep=4):
                 if ym < cutoff:
                     try:
                         _retry(sh_op.del_worksheet, ws)
-                    except (gspread.exceptions.APIError, Exception):
+                    except Exception:
                         _logger.warning("シート '%s' の削除に失敗（既に削除済み?）", ws_name)
                     _ws_cache_operational.pop(ws_name, None)
