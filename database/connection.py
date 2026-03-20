@@ -407,10 +407,18 @@ def init_db():
 
 
 def _init_monthly_sheet(name, headers):
-    """月別シートを初期化（キャッシュ+リトライ付き）"""
+    """月別シートを初期化（キャッシュ+リトライ付き）
+    外部から削除されたシートのキャッシュも自動復旧する。
+    """
     cache = _get_ws_cache(name)
     if name in cache:
-        return cache[name]
+        ws = cache[name]
+        try:
+            _retry(ws.row_values, 1)
+            return ws
+        except (gspread.exceptions.APIError, Exception):
+            # シートが外部から削除された場合、キャッシュを無効化して再作成
+            cache.pop(name, None)
     sh = _get_spreadsheet_for(name)
     try:
         ws = _retry(sh.worksheet, name)

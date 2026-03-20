@@ -3,7 +3,9 @@
 希望・スケジュール・古データ削除
 """
 import json
+import logging
 from datetime import datetime
+import gspread
 import streamlit as st
 
 from database.connection import (
@@ -14,6 +16,8 @@ from database.connection import (
     _OPERATIONAL_PREFIXES,
 )
 from database.master import get_doctors
+
+_logger = logging.getLogger(__name__)
 
 
 # ---- Preferences ----
@@ -221,7 +225,12 @@ def confirm_schedule(schedule_id):
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):
             continue
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except (gspread.exceptions.APIError, Exception):
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
                 # 全行の is_confirmed を一括更新（ループ update_cell → 1回の batch update）
@@ -236,7 +245,12 @@ def delete_schedule(schedule_id):
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):
             continue
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except (gspread.exceptions.APIError, Exception):
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
                 _retry(ws.delete_rows, i + 2)
@@ -249,7 +263,12 @@ def update_schedule_assignments(schedule_id, assignments):
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):
             continue
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except (gspread.exceptions.APIError, Exception):
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
                 row_num = i + 2
@@ -271,7 +290,12 @@ def get_all_confirmed_schedules():
         if not ws_name.startswith("スケジュール_"):
             continue
         year_month = ws_name.replace("スケジュール_", "")
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except (gspread.exceptions.APIError, Exception):
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for r in records:
             if int(r.get("is_confirmed", 0)):
                 r["id"] = int(r["id"])
@@ -291,13 +315,25 @@ def get_confirmed_months():
         if not ws_name.startswith("スケジュール_"):
             continue
         year_month = ws_name.replace("スケジュール_", "")
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except (gspread.exceptions.APIError, Exception):
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for r in records:
             if int(r.get("is_confirmed", 0)):
                 months.append(year_month)
                 break
     months.sort(reverse=True)
     return months
+
+
+def has_operational_sheets(year_month):
+    """指定月の運用シート（希望/スケジュール）がキャッシュに存在するか判定"""
+    sched_name = f"スケジュール_{year_month}"
+    pref_name = f"希望_{year_month}"
+    return sched_name in _ws_cache_operational or pref_name in _ws_cache_operational
 
 
 # ---- Cleanup ----
@@ -312,5 +348,8 @@ def delete_old_schedules(months_to_keep=4):
             if ws_name.startswith(prefix):
                 ym = ws_name.replace(prefix, "")
                 if ym < cutoff:
-                    _retry(sh_op.del_worksheet, ws)
+                    try:
+                        _retry(sh_op.del_worksheet, ws)
+                    except (gspread.exceptions.APIError, Exception):
+                        _logger.warning("シート '%s' の削除に失敗（既に削除済み?）", ws_name)
                     _ws_cache_operational.pop(ws_name, None)
