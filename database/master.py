@@ -5,7 +5,6 @@
 import json
 import logging
 from datetime import datetime
-import gspread
 import pandas as pd
 import streamlit as st
 
@@ -139,7 +138,7 @@ def delete_doctor(doc_id):
         if ws_name.startswith("希望_"):
             try:
                 recs = _get_all_records(ws)
-            except (gspread.exceptions.APIError, Exception):
+            except Exception:
                 _logger.warning("削除済みシート '%s' をスキップ", ws_name)
                 _ws_cache_operational.pop(ws_name, None)
                 continue
