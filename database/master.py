@@ -3,7 +3,9 @@
 医員・外勤先・優先度・日別設定
 """
 import json
+import logging
 from datetime import datetime
+import gspread
 import pandas as pd
 import streamlit as st
 
@@ -13,6 +15,8 @@ from database.connection import (
     _safe_json_loads, _hash_password, _sanitize_cell_value,
     _ws_cache_operational, SHEET_HEADERS,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 def _safe_int(val, default=0):
@@ -133,7 +137,12 @@ def delete_doctor(doc_id):
     # 希望シートから削除（キャッシュ済みシートを使用 — worksheets() API不要）
     for ws_name, ws in list(_ws_cache_operational.items()):
         if ws_name.startswith("希望_"):
-            recs = _get_all_records(ws)
+            try:
+                recs = _get_all_records(ws)
+            except (gspread.exceptions.APIError, Exception):
+                _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+                _ws_cache_operational.pop(ws_name, None)
+                continue
             for i, r in enumerate(recs):
                 if str(r.get("doctor_id", "")) == str(doc_id):
                     _retry(ws.delete_rows, i + 2)

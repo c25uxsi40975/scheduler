@@ -21,6 +21,7 @@ from database.operational import (
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, get_confirmed_months,
     delete_old_schedules,
+    has_operational_sheets,
 )
 from database.auth import (
     is_admin_password_set, set_admin_password, verify_admin_password,

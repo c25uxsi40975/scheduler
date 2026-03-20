@@ -14,7 +14,7 @@ from database import (
     verify_doctor_individual_password, verify_doctor_by_account,
     update_doctor_email, update_doctor_account_name, update_doctor_notification_settings,
     get_open_month, set_open_month, get_input_deadline, set_input_deadline,
-    get_confirmed_months,
+    get_confirmed_months, has_operational_sheets,
     save_reset_code, verify_reset_code,
     get_doctor_email_by_account, get_doctor_id_by_account,
     clear_must_change_pw,
@@ -407,6 +407,7 @@ def _show_admin_header():
 
     # デフォルト月: session_stateに明示的な値があればそれを使う。
     # なければ公開月（open_month）をデフォルトにする。
+    # 当月の運用シートが存在しない場合は翌月をデフォルトにする。
     key = "admin_target_month"
     # スケジュール確定後の次月切替（widget keyは直接設定不可なので間接キー経由）
     pending = st.session_state.pop("_pending_target_month", None)
@@ -416,6 +417,9 @@ def _show_admin_header():
         current_open = get_open_month()
         if current_open and current_open in months:
             st.session_state[key] = current_open
+        elif not has_operational_sheets(months[0]) and len(months) > 1:
+            # 当月のシートが削除されている場合、翌月をデフォルトにする
+            st.session_state[key] = months[1]
     elif st.session_state[key] not in months:
         # 選択肢外の値（過去月など）はリセット
         del st.session_state[key]
