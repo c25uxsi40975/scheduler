@@ -479,6 +479,42 @@ function syncSaturdayCalendar(yearMonth, ssMaster) {
   }
 }
 
+/**
+ * 土曜スケジュール確定解除時にカレンダーイベントを削除
+ * 共有カレンダーおよび個別カレンダーから該当月のイベントを削除
+ */
+function clearSaturdayCalendar(yearMonth) {
+  var ssMaster = getMasterSpreadsheet();
+  var settings = getCalendarSettings(ssMaster);
+  var calId = settings["calendar_id_saturday"];
+  var calendar = getCalendarSafe(calId);
+
+  var tag = "[外勤調整:saturday:" + yearMonth + "]";
+  var range = getMonthRange(yearMonth);
+
+  // 共有カレンダーのイベント削除
+  if (calendar) {
+    deleteTaggedEvents(calendar, calId, tag, range.start, range.end);
+    Logger.log("土曜カレンダー削除完了（共有）: " + yearMonth);
+  }
+
+  // 個別カレンダーのイベント削除
+  var doctors = getDoctorMap(ssMaster);
+  var deletedCount = 0;
+  for (var did in doctors) {
+    var doc = doctors[did];
+    if (doc.notify_calendar && doc.personal_calendar_id) {
+      var pCal = getCalendarSafe(doc.personal_calendar_id);
+      if (pCal) {
+        deleteTaggedEvents(pCal, doc.personal_calendar_id, tag, range.start, range.end);
+        deletedCount++;
+      }
+    }
+  }
+  Logger.log("土曜カレンダー削除完了（個別）: " + deletedCount + " 名分 (" + yearMonth + ")");
+}
+
+
 // ---- 平日カレンダー同期 ----
 
 /**

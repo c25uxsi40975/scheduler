@@ -103,6 +103,10 @@ function doPost(e) {
     } else if (data.action === "weekday_schedule_readjusted") {
       sendWeekdayScheduleReadjusted(data);
 
+    // スケジュール確定解除（カレンダーイベント削除）
+    } else if (data.action === "schedule_unconfirmed") {
+      clearSaturdayCalendar(data.year_month);
+
     // カレンダー再同期
     } else if (data.action === "calendar_resync_doctor") {
       resyncCalendarForDoctor(data);

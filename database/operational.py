@@ -240,6 +240,19 @@ def confirm_schedule(schedule_id):
                 return
 
 
+def unconfirm_schedule(schedule_id):
+    """スケジュールの確定を解除（is_confirmed を 0 に戻す）"""
+    for ws_name, ws in list(_ws_cache_operational.items()):
+        if not ws_name.startswith("スケジュール_"):
+            continue
+        records = _get_all_records(ws)
+        for i, r in enumerate(records):
+            if str(r.get("id", "")) == str(schedule_id):
+                _retry(ws.update, [[0]], f"F{i+2}")
+                _clear_data_cache()
+                return
+
+
 def delete_schedule(schedule_id):
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):

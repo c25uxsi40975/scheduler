@@ -17,7 +17,7 @@ from database.master import (
 )
 from database.operational import (
     get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences,
-    get_schedules, save_schedule, confirm_schedule,
+    get_schedules, save_schedule, confirm_schedule, unconfirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, get_confirmed_months,
     delete_old_schedules,
