@@ -245,7 +245,12 @@ def unconfirm_schedule(schedule_id):
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):
             continue
-        records = _get_all_records(ws)
+        try:
+            records = _get_all_records(ws)
+        except Exception:
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
                 _retry(ws.update, [[0]], f"F{i+2}")
