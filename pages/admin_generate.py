@@ -202,7 +202,7 @@ def render(target_month, year, month):
                 # アクションボタン
                 btn_cols = st.columns(2)
                 with btn_cols[0]:
-                    if st.button("下書きとして保存", key=f"save_draft_{sched['id']}",
+                    if st.button("下書きとして保存", key=f"gen_save_draft_{sched['id']}",
                                  type="primary"):
                         _save_as_draft(target_month, sched, schedules)
                         st.session_state["_toast_msg"] = "下書きとして保存しました。下書き編集タブで編集できます。"
