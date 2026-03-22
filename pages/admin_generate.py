@@ -146,7 +146,7 @@ def render(target_month, year, month):
                         if st.button(f"下書きをすべて削除（{len(drafts)}件）",
                                      key=f"del_all_drafts_{sched['id']}", type="secondary"):
                             for d in drafts:
-                                delete_schedule(d["id"])
+                                delete_schedule(d["id"], year_month=target_month)
                             st.session_state["_toast_msg"] = f"{len(drafts)}件の下書きを削除しました"
                             st.rerun()
 
@@ -156,7 +156,7 @@ def render(target_month, year, month):
                     uc1, uc2 = st.columns(2)
                     with uc1:
                         if st.button("確定を解除する", key=f"do_unconfirm_{sched['id']}", type="primary"):
-                            unconfirm_schedule(sched["id"])
+                            unconfirm_schedule(sched["id"], year_month=target_month)
                             _send_calendar_clear(target_month)
                             st.session_state.pop(f"confirm_unconfirm_{sched['id']}", None)
                             st.session_state["_toast_msg"] = "確定を解除しました。下書き編集タブで再編集できます。"
@@ -217,7 +217,7 @@ def render(target_month, year, month):
                     dc1, dc2 = st.columns(2)
                     with dc1:
                         if st.button("削除する", key=f"do_del_{sched['id']}", type="primary"):
-                            delete_schedule(sched["id"])
+                            delete_schedule(sched["id"], year_month=target_month)
                             st.session_state.pop(f"confirm_del_sched_{sched['id']}", None)
                             st.rerun()
                     with dc2:
@@ -237,7 +237,7 @@ def _save_as_draft(target_month, sched, all_schedules):
     existing_drafts = [s for s in all_schedules if not s["is_confirmed"] and s["id"] != sched["id"]]
     # 既存の他の下書きを削除
     for d in existing_drafts:
-        delete_schedule(d["id"])
+        delete_schedule(d["id"], year_month=target_month)
     # 選択した案のassignmentsはそのまま保持（既にGoogle Sheetsに保存済み）
 
 

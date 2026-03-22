@@ -170,7 +170,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
         dc1, dc2 = st.columns(2)
         with dc1:
             if st.button("削除する", key=f"do_del_draft_{sched['id']}", type="primary"):
-                delete_schedule(sched["id"])
+                delete_schedule(sched["id"], year_month=target_month)
                 st.session_state.pop(f"confirm_del_draft_{sched['id']}", None)
                 st.session_state["_toast_msg"] = "下書きを削除しました"
                 st.rerun()
@@ -218,7 +218,7 @@ def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clin
     # まずassignmentsを保存
     update_schedule_assignments(sched["id"], new_assignments, year_month=target_month)
     # 確定
-    confirm_schedule(sched["id"])
+    confirm_schedule(sched["id"], year_month=target_month)
     delete_old_schedules(months_to_keep=4)
     # 学習データ追記
     all_confirmed = get_all_confirmed_schedules()

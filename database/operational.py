@@ -219,60 +219,63 @@ def get_schedules(year_month):
     return result
 
 
-def confirm_schedule(schedule_id):
+def _find_schedule_row(schedule_id, year_month=None):
+    """schedule_id に対応する (ws, row_index, records) を返すヘルパー。
+    year_month 指定時は直接シートを取得し、キャッシュ不整合を回避する。"""
+    if year_month:
+        ws = _get_sched_sheet(year_month)
+        records = _get_all_records(ws)
+        for i, r in enumerate(records):
+            if str(r.get("id", "")) == str(schedule_id):
+                return ws, i, records
+        return None, None, None
+
+    for ws_name, ws in list(_ws_cache_operational.items()):
+        if not ws_name.startswith("スケジュール_"):
+            continue
+        try:
+            records = _get_all_records(ws)
+        except Exception:
+            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
+            _ws_cache_operational.pop(ws_name, None)
+            continue
+        for i, r in enumerate(records):
+            if str(r.get("id", "")) == str(schedule_id):
+                return ws, i, records
+    return None, None, None
+
+
+def confirm_schedule(schedule_id, year_month=None):
     """スケジュールを確定（バッチ更新で1回のAPI呼出に統合）"""
-    for ws_name, ws in list(_ws_cache_operational.items()):
-        if not ws_name.startswith("スケジュール_"):
-            continue
-        try:
-            records = _get_all_records(ws)
-        except Exception:
-            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
-            _ws_cache_operational.pop(ws_name, None)
-            continue
-        for i, r in enumerate(records):
-            if str(r.get("id", "")) == str(schedule_id):
-                # 全行の is_confirmed を一括更新（ループ update_cell → 1回の batch update）
-                values = [[0]] * len(records)
-                values[i] = [1]
-                _retry(ws.update, values, f"F2:F{len(records)+1}")
-                _clear_data_cache()
-                return
+    ws, idx, records = _find_schedule_row(schedule_id, year_month)
+    if ws is None:
+        _logger.warning("confirm_schedule: id=%s が見つかりません", schedule_id)
+        return
+    values = [[0]] * len(records)
+    values[idx] = [1]
+    _retry(ws.update, values, f"F2:F{len(records)+1}")
+    _clear_data_cache()
+    _logger.info("スケジュール確定: schedule_id=%s", schedule_id)
 
 
-def unconfirm_schedule(schedule_id):
+def unconfirm_schedule(schedule_id, year_month=None):
     """スケジュールの確定を解除（is_confirmed を 0 に戻す）"""
-    for ws_name, ws in list(_ws_cache_operational.items()):
-        if not ws_name.startswith("スケジュール_"):
-            continue
-        try:
-            records = _get_all_records(ws)
-        except Exception:
-            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
-            _ws_cache_operational.pop(ws_name, None)
-            continue
-        for i, r in enumerate(records):
-            if str(r.get("id", "")) == str(schedule_id):
-                _retry(ws.update, [[0]], f"F{i+2}")
-                _clear_data_cache()
-                return
+    ws, idx, _ = _find_schedule_row(schedule_id, year_month)
+    if ws is None:
+        _logger.warning("unconfirm_schedule: id=%s が見つかりません", schedule_id)
+        return
+    _retry(ws.update, [[0]], f"F{idx+2}")
+    _clear_data_cache()
+    _logger.info("スケジュール確定解除: schedule_id=%s", schedule_id)
 
 
-def delete_schedule(schedule_id):
-    for ws_name, ws in list(_ws_cache_operational.items()):
-        if not ws_name.startswith("スケジュール_"):
-            continue
-        try:
-            records = _get_all_records(ws)
-        except Exception:
-            _logger.warning("削除済みシート '%s' をスキップ", ws_name)
-            _ws_cache_operational.pop(ws_name, None)
-            continue
-        for i, r in enumerate(records):
-            if str(r.get("id", "")) == str(schedule_id):
-                _retry(ws.delete_rows, i + 2)
-                _clear_data_cache()
-                return
+def delete_schedule(schedule_id, year_month=None):
+    ws, idx, _ = _find_schedule_row(schedule_id, year_month)
+    if ws is None:
+        _logger.warning("delete_schedule: id=%s が見つかりません", schedule_id)
+        return
+    _retry(ws.delete_rows, idx + 2)
+    _clear_data_cache()
 
 
 def update_schedule_assignments(schedule_id, assignments, year_month=None):
