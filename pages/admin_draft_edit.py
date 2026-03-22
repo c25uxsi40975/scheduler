@@ -101,9 +101,10 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
             cname, options=options, required=True, width="small",
         )
 
+    edit_ver = st.session_state.get(f"_draft_edit_ver_{sched['id']}", 0)
     edited_df = st.data_editor(
         df, column_config=col_config, use_container_width=True,
-        key=f"draft_edit_matrix_{sched['id']}",
+        key=f"draft_edit_matrix_{sched['id']}_v{edit_ver}",
     )
 
     confirm_save_key = f"confirm_save_warnings_draft_{sched['id']}"
@@ -129,6 +130,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     st.rerun()
                 else:
                     update_schedule_assignments(sched["id"], new_assignments)
+                    st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
     with btn_cols[1]:
@@ -187,6 +189,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                 else:
                     update_schedule_assignments(sched["id"], saved_confirm["assignments"])
                     st.session_state.pop(confirm_save_key, None)
+                    st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
         with wc2:
