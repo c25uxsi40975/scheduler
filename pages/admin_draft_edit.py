@@ -215,11 +215,20 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
 
 def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clinics, affinities):
     """下書きを確定する（assignments更新 + 確定 + 学習データ + 通知）"""
+    import logging
+    _log = logging.getLogger(__name__)
+    _log.info("[確定開始] schedule_id=%s, target_month=%s", sched["id"], target_month)
+
     # まずassignmentsを保存
     update_schedule_assignments(sched["id"], new_assignments, year_month=target_month)
+    _log.info("[確定] assignments保存完了")
+
     # 確定
     confirm_schedule(sched["id"], year_month=target_month)
+    _log.info("[確定] confirm_schedule完了")
+
     delete_old_schedules(months_to_keep=4)
+
     # 学習データ追記
     all_confirmed = get_all_confirmed_schedules()
     # 確定後のschedを再構築（assignmentsを更新済みのものに差し替え）
@@ -231,10 +240,8 @@ def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clin
         all_confirmed, affinities, get_target_saturdays(year, month),
     )
     _send_confirmation_notification(target_month, confirmed_sched)
-    # 確定後は次の月をデフォルト表示にする
-    next_month = (date(year, month, 1) + relativedelta(months=1)).strftime("%Y-%m")
-    st.session_state["_pending_target_month"] = next_month
-    st.session_state["_toast_msg"] = "確定しました！"
+    # 確定後もそのまま同月表示（確認タブで確認できるようにする）
+    st.session_state["_toast_msg"] = "確定しました！ スケジュール確認タブで確認してください。"
     st.rerun()
 
 
