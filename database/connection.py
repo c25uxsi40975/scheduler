@@ -50,7 +50,7 @@ def _get_master_spreadsheet():
     gc = _get_gspread_client()
     spreadsheet_key = st.secrets.get("spreadsheet_key", "")
     if spreadsheet_key:
-        return gc.open_by_key(spreadsheet_key)
+        return _open_spreadsheet_with_retry(gc, spreadsheet_key)
     return gc.open(st.secrets.get("spreadsheet_name", "外勤調整データ"))
 
 
@@ -58,7 +58,20 @@ def _get_master_spreadsheet():
 def _get_operational_spreadsheet():
     """運用データ用スプレッドシートに接続（必須）"""
     gc = _get_gspread_client()
-    return gc.open_by_key(st.secrets["spreadsheet_key_operational"])
+    return _open_spreadsheet_with_retry(gc, st.secrets["spreadsheet_key_operational"])
+
+
+def _open_spreadsheet_with_retry(gc, key, max_retries=5):
+    """スプレッドシート接続をリトライ付きで実行（レート制限対応）"""
+    for attempt in range(max_retries):
+        try:
+            return gc.open_by_key(key)
+        except gspread.exceptions.APIError:
+            if attempt < max_retries - 1:
+                wait = 2 ** (attempt + 1)
+                time.sleep(wait)
+            else:
+                raise
 
 
 def _get_spreadsheet_for(sheet_name: str):
