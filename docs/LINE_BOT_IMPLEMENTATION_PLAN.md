@@ -97,13 +97,14 @@ Bot → Reply（無料）
 ### レイアウト
 
 ```
-┌──────────┬──────────┬──────────┐
-│ 希望入力  │ 予定確認  │  ヘルプ   │
-└──────────┴──────────┴──────────┘
+┌──────────┬──────────┬──────────┬──────────┐
+│  連携     │ 希望入力  │ 予定確認  │  ヘルプ   │
+└──────────┴──────────┴──────────┴──────────┘
 ```
 
 | ボタン | タップ時の動作 | 送信テキスト |
 |--------|--------------|-------------|
+| 連携 | アカウント連携を開始（初回のみ） | `連携` |
 | 希望入力 | 来月の休み希望を入力開始 | `希望入力` |
 | 予定確認 | 自分の確定スケジュールを表示 | `予定確認` |
 | ヘルプ | 使い方を表示 | `ヘルプ` |
@@ -119,15 +120,19 @@ function createRichMenu() {
     "chatBarText": "メニュー",
     "areas": [
       {
-        "bounds": {"x": 0, "y": 0, "width": 833, "height": 843},
+        "bounds": {"x": 0, "y": 0, "width": 625, "height": 843},
+        "action": {"type": "message", "text": "連携"}
+      },
+      {
+        "bounds": {"x": 625, "y": 0, "width": 625, "height": 843},
         "action": {"type": "message", "text": "希望入力"}
       },
       {
-        "bounds": {"x": 833, "y": 0, "width": 834, "height": 843},
+        "bounds": {"x": 1250, "y": 0, "width": 625, "height": 843},
         "action": {"type": "message", "text": "予定確認"}
       },
       {
-        "bounds": {"x": 1667, "y": 0, "width": 833, "height": 843},
+        "bounds": {"x": 1875, "y": 0, "width": 625, "height": 843},
         "action": {"type": "message", "text": "ヘルプ"}
       }
     ]
@@ -161,10 +166,13 @@ function createRichMenu() {
 ### 5-1. フロー全体図
 
 ```
-── ① アカウント連携（初回のみ） ──
-Bot: 「アカウント連携をしてください。アカウント名を入力してください」
-User: 「連携 yamada」
-Bot: 「山田太郎さんとして連携しました」          ← Reply（無料）
+── ① アカウント連携（初回のみ・リッチメニューから起動） ──
+User: リッチメニューの「連携」をタップ → 自動で「連携」と送信
+Bot: 「アカウント名を入力してください」           ← Reply（無料）
+User: 「yamada」
+Bot: 「パスワードを入力してください」             ← Reply（無料）
+User: 「mypassword」
+Bot: 「山田太郎さんとして連携しました！」          ← Reply（無料）
 
 ── ② 希望入力開始（リッチメニュー） ──
 User: リッチメニューの「希望入力」をタップ
@@ -232,16 +240,23 @@ Bot: 「4月の希望を登録しました！」                ← Reply（無�
 
 ```
 1. 医員がLINE公式アカウントを友だち追加
-2. 「連携 {account_name}」とメッセージ送信
-3. GASがaccount_nameで医員マスタを検索
-4. 見つかった場合 → LINE User IDを医員マスタに保存、氏名を返答
-5. 見つからない場合 → エラーメッセージ
+2. リッチメニュー「連携」をタップ → 「連携」と自動送信
+3. Bot: 「アカウント名を入力してください」
+4. 医員がアカウント名を入力
+5. GASがaccount_nameで医員マスタを検索
+6. 見つからない場合 → 「アカウントが見つかりません」で終了
+7. 見つかった場合 → Bot: 「パスワードを入力してください」
+8. 医員がパスワードを入力
+9. パスワード照合（SHA-256ハッシュ比較）
+10. 一致 → LINE User IDを医員マスタに保存、「○○さんとして連携しました！」
+11. 不一致 → 「パスワードが正しくありません」（リトライ可能）
 ```
 
-### 6-3. セキュリティ考慮
+### 6-3. セキュリティ
 
-- 基本は account_name での簡易連携（内部利用のため）
-- 必要に応じてパスワード確認やワンタイムコードを追加可能
+- アカウント名 + パスワードの2段階で本人確認
+- パスワードはSHA-256ハッシュで照合（既存のpassword_hashカラムを使用）
+- 連携済みユーザーが再度「連携」した場合は、既に連携済みであることを通知
 
 ---
 
@@ -343,9 +358,16 @@ function handleTextMessage(event) {
   var text = event.message.text.trim();
   var replyToken = event.replyToken;
 
-  // アカウント連携
-  if (text.indexOf("連携 ") === 0) {
-    handleAccountLink(userId, text.substring(3), replyToken);
+  // 連携開始（リッチメニューから）
+  if (text === "連携") {
+    startAccountLink(userId, replyToken);  // → 「アカウント名を入力してください」
+    return;
+  }
+
+  // 連携フロー中の入力（アカウント名・パスワード）を処理
+  var linkSession = getLinkSession(userId);
+  if (linkSession) {
+    handleLinkInput(userId, text, replyToken, linkSession);
     return;
   }
 
@@ -354,7 +376,7 @@ function handleTextMessage(event) {
   if (!doctor) {
     replyMessage(replyToken, [{
       "type": "text",
-      "text": "まずアカウント連携をしてください。\n「連携 あなたのアカウント名」と入力してください"
+      "text": "まずアカウント連携をしてください。\nメニューの「連携」ボタンをタップしてください"
     }]);
     return;
   }
@@ -399,6 +421,11 @@ GASにはメモリ内状態を持てないため、**Google Sheets の `LINEセ�
 
 ```
 (初期状態)
+    → "awaiting_account"     : アカウント名入力待ち（連携フロー）
+    → "awaiting_password"    : パスワード入力待ち（連携フロー）
+    → (セッション削除)        : 連携完了
+
+(連携済みユーザー)
     → "selecting_month"      : 月選択中
     → "selecting_preference" : 日付ごとの希望入力中
     → "confirming"           : 最終確認中
