@@ -37,6 +37,12 @@ def render(target_month, year, month):
     # 下書きは同月1件を想定（複数ある場合は最新を使用）
     sched = drafts[0]
 
+    # 保存直後のデータを優先（キャッシュ/API遅延対策）
+    saved_key = f"_draft_saved_assignments_{sched['id']}"
+    if saved_key in st.session_state:
+        sched = dict(sched)
+        sched["assignments"] = st.session_state.pop(saved_key)
+
     doctors = get_doctors()
     clinics = get_clinics()
     prefs = get_all_preferences(target_month)
@@ -131,6 +137,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                 else:
                     update_schedule_assignments(sched["id"], new_assignments)
                     st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
+                    st.session_state[f"_draft_saved_assignments_{sched['id']}"] = new_assignments
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
     with btn_cols[1]:
@@ -190,6 +197,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     update_schedule_assignments(sched["id"], saved_confirm["assignments"])
                     st.session_state.pop(confirm_save_key, None)
                     st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
+                    st.session_state[f"_draft_saved_assignments_{sched['id']}"] = saved_confirm["assignments"]
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
         with wc2:
