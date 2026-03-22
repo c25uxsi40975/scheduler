@@ -135,7 +135,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     }
                     st.rerun()
                 else:
-                    update_schedule_assignments(sched["id"], new_assignments)
+                    update_schedule_assignments(sched["id"], new_assignments, year_month=target_month)
                     st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
                     st.session_state[f"_draft_saved_assignments_{sched['id']}"] = new_assignments
                     st.session_state["_toast_msg"] = "下書きを保存しました"
@@ -194,7 +194,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                 if action == "confirm":
                     _do_confirm(sched, saved_confirm["assignments"], target_month, year, month, doctors, clinics, affinities)
                 else:
-                    update_schedule_assignments(sched["id"], saved_confirm["assignments"])
+                    update_schedule_assignments(sched["id"], saved_confirm["assignments"], year_month=target_month)
                     st.session_state.pop(confirm_save_key, None)
                     st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
                     st.session_state[f"_draft_saved_assignments_{sched['id']}"] = saved_confirm["assignments"]
@@ -216,7 +216,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
 def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clinics, affinities):
     """下書きを確定する（assignments更新 + 確定 + 学習データ + 通知）"""
     # まずassignmentsを保存
-    update_schedule_assignments(sched["id"], new_assignments)
+    update_schedule_assignments(sched["id"], new_assignments, year_month=target_month)
     # 確定
     confirm_schedule(sched["id"])
     delete_old_schedules(months_to_keep=4)

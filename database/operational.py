@@ -275,8 +275,26 @@ def delete_schedule(schedule_id):
                 return
 
 
-def update_schedule_assignments(schedule_id, assignments):
+def update_schedule_assignments(schedule_id, assignments, year_month=None):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # year_month が指定されていれば直接シートにアクセス（キャッシュ不整合を回避）
+    if year_month:
+        ws = _get_sched_sheet(year_month)
+        records = _get_all_records(ws)
+        for i, r in enumerate(records):
+            if str(r.get("id", "")) == str(schedule_id):
+                row_num = i + 2
+                assignments_json = json.dumps(assignments, ensure_ascii=False)
+                _retry(ws.update, [[assignments_json]], f"C{row_num}")
+                _retry(ws.update, [[now]], f"G{row_num}")
+                _clear_data_cache()
+                _logger.info("下書き保存完了: schedule_id=%s, row=%d", schedule_id, row_num)
+                return
+        _logger.warning("update_schedule_assignments: id=%s がシート '%s' に見つかりません", schedule_id, f"スケジュール_{year_month}")
+        return
+
+    # year_month 未指定時は全シートを検索（後方互換）
     for ws_name, ws in list(_ws_cache_operational.items()):
         if not ws_name.startswith("スケジュール_"):
             continue
@@ -289,12 +307,11 @@ def update_schedule_assignments(schedule_id, assignments):
         for i, r in enumerate(records):
             if str(r.get("id", "")) == str(schedule_id):
                 row_num = i + 2
-                # 2つのセルを1回のbatch_updateで更新（C列=assignments, G列=updated_at）
-                _retry(ws.batch_update, [
-                    {'range': f'C{row_num}', 'values': [[json.dumps(assignments)]]},
-                    {'range': f'G{row_num}', 'values': [[now]]},
-                ])
+                assignments_json = json.dumps(assignments, ensure_ascii=False)
+                _retry(ws.update, [[assignments_json]], f"C{row_num}")
+                _retry(ws.update, [[now]], f"G{row_num}")
                 _clear_data_cache()
+                _logger.info("下書き保存完了: schedule_id=%s, row=%d", schedule_id, row_num)
                 return
 
 
