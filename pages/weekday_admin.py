@@ -187,16 +187,7 @@ def _render_target_dates(section: str, days_of_week: list):
     existing = db_get_target_dates(section)
     existing_map = {r["date"]: r["is_active"] for r in existing}
 
-    # 週単位でグループ化
-    weeks = {}
-    for dt in all_dates:
-        week_key = dt.isocalendar()[:2]  # (year, week_number)
-        monday = dt - timedelta(days=dt.weekday())
-        if week_key not in weeks:
-            weeks[week_key] = {"monday": monday, "dates": []}
-        weeks[week_key]["dates"].append(dt)
-
-    # 月ごとにグループ化（各日付は自分の暦月に属する）
+    # 月ごと・週ごとにグループ化（各日付は自分の暦月に属する）
     # 月をまたぐ週は各月に分割して表示する
     months_weeks = {}
     for dt in all_dates:
