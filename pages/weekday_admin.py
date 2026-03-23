@@ -36,6 +36,36 @@ HOURS = list(range(25))  # 0〜24
 MINUTES = [0, 30]
 
 
+def _build_target_dates_for_months(
+    section: str, selected_months: list[str], days_of_week: list[int],
+) -> list[date]:
+    """選択月の対象日リストを構築（月またぎ週の誤分類を自動補正）
+
+    get_weekday_target_dates で各月の期待日を生成し、DB の is_active を参照する。
+    ただし DB で非アクティブでも、ISO 週の月曜が別の月にある日付（＝旧ロジックで
+    誤って非アクティブ化された可能性がある日付）は対象に含める。
+    """
+    all_saved = {r["date"]: r["is_active"]
+                 for r in db_get_target_dates(section)}
+
+    target_dates = []
+    for ym in selected_months:
+        y, m = map(int, ym.split("-"))
+        for dt in get_weekday_target_dates(y, m, days_of_week):
+            ds = dt.isoformat()
+            if ds not in all_saved or all_saved[ds]:
+                # DB に未登録 or アクティブ → 含める
+                target_dates.append(dt)
+            else:
+                # DB で非アクティブ → 月またぎ週なら旧バグの可能性あり、含める
+                iso_week_monday = dt - timedelta(days=dt.weekday())
+                if iso_week_monday.month != dt.month:
+                    target_dates.append(dt)
+                # else: ユーザーが明示的に無効化 → 除外
+    target_dates.sort()
+    return target_dates
+
+
 def _time_select(label: str, default: str, key_prefix: str):
     """X時Y分のプルダウンで時間を入力し "HH:MM" を返す"""
     h_default, m_default = 9, 0
@@ -407,17 +437,8 @@ def _render_slot_overrides(section: str, days_of_week: list):
         st.info("スロットが登録されていません。「スロット管理」タブで設定してください。")
         return
 
-    active_dates_str = get_active_target_dates(section)
-    year_m, month_m = map(int, ovr_month.split("-"))
-    target_dates = []
-    for ds in active_dates_str:
-        try:
-            dt = date.fromisoformat(ds)
-            if dt.year == year_m and dt.month == month_m:
-                target_dates.append(dt)
-        except ValueError:
-            pass
-    target_dates.sort()
+    # 対象月の日付を構築（月またぎ週の誤分類を自動補正）
+    target_dates = _build_target_dates_for_months(section, [ovr_month], days_of_week)
 
     if not target_dates:
         st.info("この月の対象日がありません。")
@@ -873,19 +894,8 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         ei = months.index(end_month)
         selected_months = months[si:ei + 1]
 
-    active_dates_str = get_active_target_dates(section)
-
-    # 選択期間の全対象日をフィルタ
-    target_dates = []
-    for ds in active_dates_str:
-        try:
-            dt = date.fromisoformat(ds)
-            ym = dt.strftime("%Y-%m")
-            if ym in selected_months:
-                target_dates.append(dt)
-        except ValueError:
-            pass
-    target_dates.sort()
+    # 選択期間の全対象日を構築（月またぎ週の誤分類を自動補正）
+    target_dates = _build_target_dates_for_months(section, selected_months, days_of_week)
 
     if not target_dates:
         st.info("この期間の対象日がありません。「対象日管理」タブで設定してください。")
