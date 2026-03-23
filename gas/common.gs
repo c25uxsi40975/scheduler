@@ -70,6 +70,11 @@ function doPost(e) {
   try {
     var data = JSON.parse(e.postData.contents);
 
+    // LINE Webhook（events 配列があれば LINE からのリクエスト）
+    if (data.events !== undefined) {
+      return handleLineWebhook(e);
+    }
+
     // 土曜関連
     if (data.action === "schedule_confirmed") {
       sendConfirmationEmails(data.year_month, data.plan_name);
@@ -214,6 +219,7 @@ function getDoctorMap(ss) {
   var colNotifyEmail = headers.indexOf("notify_email");
   var colNotifyCal = headers.indexOf("notify_calendar");
   var colPersonalCal = headers.indexOf("personal_calendar_id");
+  var colLineId = headers.indexOf("line_user_id");
 
   var map = {};
   for (var i = 1; i < data.length; i++) {
@@ -225,7 +231,8 @@ function getDoctorMap(ss) {
       account: colAccount >= 0 ? String(row[colAccount] || "") : "",
       notify_email: colNotifyEmail >= 0 ? String(row[colNotifyEmail]) !== "0" : true,
       notify_calendar: colNotifyCal >= 0 ? String(row[colNotifyCal]) === "1" : false,
-      personal_calendar_id: colPersonalCal >= 0 ? String(row[colPersonalCal] || "").trim() : ""
+      personal_calendar_id: colPersonalCal >= 0 ? String(row[colPersonalCal] || "").trim() : "",
+      line_user_id: colLineId >= 0 ? String(row[colLineId] || "").trim() : ""
     };
   }
   return map;

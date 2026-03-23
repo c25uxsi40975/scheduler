@@ -63,6 +63,7 @@ def get_doctors(active_only=True):
         r["notify_email"] = _safe_int(r.get("notify_email", 1), default=1)
         r["notify_calendar"] = _safe_int(r.get("notify_calendar", 0))
         r["personal_calendar_id"] = str(r.get("personal_calendar_id", "")).strip()
+        r["line_user_id"] = str(r.get("line_user_id", "")).strip()
         if active_only and not r["is_active"]:
             continue
         result.append(r)
@@ -120,6 +121,28 @@ def update_doctor(doc_id, is_active=None, max_assignments=None, job_rank=None, c
     if updates:
         _retry(ws.batch_update, updates)
     _clear_data_cache()
+
+
+def set_doctor_line_user_id(doctor_id, line_user_id):
+    """医員の LINE User ID を設定する"""
+    ws = _get_sheet("医員マスタ")
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if not row_idx:
+        return
+    actual_headers = _retry(ws.row_values, 1)
+    col = actual_headers.index("line_user_id") + 1
+    _retry(ws.update, f'{_col_letter(col)}{row_idx}', [[str(line_user_id)]])
+    _clear_data_cache()
+
+
+def get_doctor_by_line_user_id(line_user_id):
+    """LINE User ID で医員を検索する（アクティブのみ）"""
+    if not line_user_id:
+        return None
+    for d in get_doctors(active_only=True):
+        if d.get("line_user_id") == line_user_id:
+            return d
+    return None
 
 
 def delete_doctor(doc_id):
