@@ -35,7 +35,13 @@
 // Original: https://github.com/dcodeIO/bcrypt.js (Apache License 2.0)
 // Modified UMD wrapper for GAS compatibility
 
-var bcryptjs = (function() {
+// bcryptjs 遅延ロード版（GAS グローバル初期化エラー回避）
+// getBcryptjs() で初回呼び出し時にのみ初期化される
+var _bcryptjs_instance = null;
+
+function getBcryptjs() {
+  if (_bcryptjs_instance) return _bcryptjs_instance;
+  _bcryptjs_instance = (function() {
     "use strict";
 
     /**
@@ -59,26 +65,17 @@ var bcryptjs = (function() {
      * @throws {Error} If no random implementation is available
      * @inner
      */
-    function random(len) {
-        /* node */ if (typeof module !== 'undefined' && module && module['exports'])
-            try {
-                return require("crypto")['randomBytes'](len);
-            } catch (e) {}
-        /* WCA */ try {
-            var a; (self['crypto']||self['msCrypto'])['getRandomValues'](a = new Uint32Array(len));
-            return Array.prototype.slice.call(a);
-        } catch (e) {}
-        /* fallback */ if (!randomFallback)
-            throw Error("Neither WebCryptoAPI nor a crypto module is available. Use bcrypt.setRandomFallback to set an alternative");
-        return randomFallback(len);
+
+     function random(len) {
+        // GAS環境ではハッシュ生成(salt生成)は不要。検証のみ使用。
+        // フォールバックとして簡易乱数を返す（salt生成時のみ呼ばれる）
+        var a = [];
+        for (var i = 0; i < len; i++) a.push(Math.floor(Math.random() * 256));
+        return a;
     }
 
     // Test if any secure randomness source is available
-    var randomAvailable = false;
-    try {
-        random(1);
-        randomAvailable = true;
-    } catch (e) {}
+    var randomAvailable = true;
 
     // Default fallback, if any
     randomFallback = null;
@@ -1371,4 +1368,13 @@ var bcryptjs = (function() {
     bcrypt.decodeBase64 = base64_decode;
 
     return bcrypt;
-})();
+  })();
+  return _bcryptjs_instance;
+}
+
+// グローバル互換: bcryptjs.compareSync() を維持
+var bcryptjs = {
+  compareSync: function(s, hash) {
+    return getBcryptjs().compareSync(s, hash);
+  }
+};
