@@ -212,6 +212,14 @@ function startPreferenceInput(doctor, userId, replyToken) {
     return;
   }
 
+  // 確定済みチェック
+  if (isMonthConfirmed(openMonth)) {
+    replyText(replyToken,
+      openMonth.replace("-", "年") + "月 のスケジュールは確定済みです。\n希望の変更はできません。"
+    );
+    return;
+  }
+
   // 対象土曜日を取得
   var dates = getTargetSaturdays(openMonth);
   if (dates.length === 0) {
@@ -591,4 +599,25 @@ function savePreference(session, doctor) {
   } else {
     sheet.appendRow(rowData);
   }
+}
+
+/**
+ * 指定月のスケジュールが確定済みかチェック
+ */
+function isMonthConfirmed(yearMonth) {
+  var ss = getOperationalSpreadsheet();
+  var sheetName = "スケジュール_" + yearMonth;
+  var sheet = getSheet(ss, sheetName);
+  if (!sheet) return false;
+
+  var data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return false;
+  var headers = data[0];
+  var colConfirmed = headers.indexOf("is_confirmed");
+  if (colConfirmed < 0) return false;
+
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][colConfirmed]) === "1") return true;
+  }
+  return false;
 }
