@@ -72,7 +72,23 @@ function doPost(e) {
 
     // LINE Webhook（events 配列があれば LINE からのリクエスト）
     if (data.events !== undefined) {
-      return handleLineWebhook(e);
+      // LINE Webhook の処理（非同期で実行、即座に200を返す）
+      try {
+        var events = data.events || [];
+        for (var i = 0; i < events.length; i++) {
+          var event = events[i];
+          if (event.type === "message" && event.message.type === "text") {
+            handleTextMessage(event);
+          } else if (event.type === "follow") {
+            handleFollow(event);
+          }
+        }
+      } catch (lineErr) {
+        Logger.log("LINE Webhook error: " + lineErr.message);
+      }
+      return ContentService.createTextOutput(
+        JSON.stringify({"status": "ok"})
+      ).setMimeType(ContentService.MimeType.JSON);
     }
 
     // 土曜関連
