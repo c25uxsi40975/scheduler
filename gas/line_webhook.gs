@@ -81,6 +81,14 @@ function handleTextMessage(event) {
     return;
   }
 
+  // コマンド判定（入力フロー中でもコマンドが来たらフローを中断）
+  var isCommand = ["希望入力", "入力", "予定確認", "ヘルプ", "help", "キャンセル", "連携"].indexOf(text) >= 0;
+  if (isCommand && session) {
+    // フロー中に別コマンド → セッションを破棄して新コマンドを処理
+    deleteSession(userId);
+    session = null;
+  }
+
   // コマンド振り分け
   switch (text) {
     case "希望入力":
@@ -95,7 +103,6 @@ function handleTextMessage(event) {
       showHelp(replyToken);
       break;
     case "キャンセル":
-      deleteSession(userId);
       replyText(replyToken, "キャンセルしました。");
       break;
     default:

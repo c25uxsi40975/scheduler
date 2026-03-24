@@ -80,6 +80,13 @@ function sendConfirmationEmails(yearMonth, planName) {
 
   Logger.log("確定通知完了: " + sentCount + " 件送信");
 
+  // LINE連携済み医員にPush通知
+  try {
+    sendLineScheduleConfirmed(yearMonth, allAssignments, doctors, clinics);
+  } catch (e) {
+    Logger.log("LINE確定通知エラー: " + e.message);
+  }
+
   // カレンダー同期（失敗してもメール通知には影響しない）
   try {
     syncSaturdayCalendar(yearMonth, ssMaster);
@@ -222,6 +229,13 @@ function sendFridayReminder() {
   }
 
   Logger.log("送信完了: " + sentCount + "/" + confirmedAssignments.length + " 件");
+
+  // LINE連携済み医員にPush通知
+  try {
+    sendLineFridayReminder(confirmedAssignments, doctors, clinics);
+  } catch (e) {
+    Logger.log("LINE金曜リマインダーエラー: " + e.message);
+  }
 }
 
 // ---- 土曜入力期限チェック ----
@@ -326,6 +340,14 @@ function checkDeadline() {
       }
     }
     Logger.log("期限リマインダー完了: " + sentCount + " 件送信");
+
+    // LINE連携済み医員にPush通知
+    try {
+      var submittedIdList = Object.keys(submittedIds);
+      sendLineDeadlineReminder(openMonth, doctors, submittedIdList);
+    } catch (e) {
+      Logger.log("LINE期限リマインダーエラー: " + e.message);
+    }
 
   } else if (isDayAfter) {
     // ---- 期限日翌日: 管理者に未入力者リストを通知 ----
