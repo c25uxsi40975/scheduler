@@ -179,32 +179,8 @@ function saveDoctorLineUserId(doctorRow, userId) {
   sheet.getRange(doctorRow, colLineId + 1).setValue(userId);
 }
 
-/**
- * パスワードを検証（bcrypt + レガシー SHA-256 の両方に対応）
- * bcrypt: lib_bcrypt.gs の bcryptjs.compareSync() を使用
- * SHA-256: Utilities.computeDigest で計算して比較
- */
-function verifyPassword(inputPassword, storedHash) {
-  if (!storedHash || !inputPassword) return false;
-
-  // bcrypt ハッシュ ($2b$ or $2a$)
-  if (storedHash.indexOf("$2b$") === 0 || storedHash.indexOf("$2a$") === 0) {
-    try {
-      return bcryptjs.compareSync(inputPassword, storedHash);
-    } catch (e) {
-      Logger.log("bcrypt検証エラー: " + e.message);
-      return false;
-    }
-  }
-
-  // レガシー SHA-256 ハッシュ
-  var hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
-    Utilities.newBlob(inputPassword).getBytes());
-  var hexHash = hash.map(function(b) {
-    return ("0" + ((b + 256) % 256).toString(16)).slice(-2);
-  }).join("");
-  return hexHash === storedHash;
-}
+// パスワード検証は LIFF 経由で Streamlit（Python bcrypt）側で行うため、
+// GAS 側の verifyPassword() は不要になりました。
 
 // ---- セッション管理 ----
 

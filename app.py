@@ -18,6 +18,7 @@ from database import (
     save_reset_code, verify_reset_code,
     get_doctor_email_by_account, get_doctor_id_by_account,
     clear_must_change_pw,
+    set_doctor_line_user_id, get_doctor_by_line_user_id,
     # 平日外勤
     get_weekday_configs,
     is_subadmin_password_set, verify_subadmin_password,
@@ -117,6 +118,68 @@ def _check_session_timeout():
     st.session_state["_last_activity"] = now
 
 _check_session_timeout()
+
+
+# ---- LINE LIFF アカウント連携 ----
+import re as _re
+
+def _handle_line_link():
+    """LINE LIFF 経由のアカウント連携フロー"""
+    line_user_id = st.query_params.get("line_user_id", "")
+    if not line_user_id:
+        return False
+
+    # LINE User ID フォーマット検証
+    if not _re.match(r'^U[0-9a-f]{32}$', line_user_id):
+        st.error("無効なリクエストです。")
+        st.stop()
+
+    # 既に連携済みか確認
+    existing = get_doctor_by_line_user_id(line_user_id)
+    if existing:
+        st.success(f"{existing['name']} さんとして連携済みです。\nこの画面を閉じて LINE に戻ってください。")
+        st.stop()
+
+    st.title("LINE アカウント連携")
+    st.info("LINE アカウントとシステムを連携します。\nアカウント名とパスワードを入力してください。")
+
+    account = st.text_input("アカウント名", key="line_link_account")
+    pw = st.text_input("パスワード", type="password", key="line_link_pw")
+
+    if st.button("連携する", type="primary"):
+        if not account or not pw:
+            st.error("アカウント名とパスワードを入力してください。")
+        else:
+            doctor = verify_doctor_by_account(account.strip(), pw)
+            if not doctor:
+                st.error("アカウント名またはパスワードが正しくありません。")
+            else:
+                # 既に別の LINE アカウントに紐付いている場合
+                if doctor.get("line_user_id") and doctor["line_user_id"] != line_user_id:
+                    st.error("このアカウントは既に別の LINE アカウントに連携済みです。\n管理者にお問い合わせください。")
+                else:
+                    # LINE User ID を保存
+                    set_doctor_line_user_id(doctor["id"], line_user_id)
+                    log_event("line_account_linked", account.strip(), f"line_user_id={line_user_id}")
+
+                    # GAS にリッチメニュー切替を依頼
+                    gas_url = st.secrets.get("gas_webapp_url", "")
+                    if gas_url:
+                        try:
+                            requests.post(gas_url, json={
+                                "action": "line_link_complete",
+                                "line_user_id": line_user_id,
+                                "doctor_name": doctor["name"],
+                            }, timeout=10)
+                        except requests.RequestException:
+                            pass
+
+                    st.success(f"連携が完了しました！\n{doctor['name']} さん、ようこそ。\n\nこの画面を閉じて LINE に戻ってください。")
+    st.stop()
+
+# LINE 連携リクエストの場合は通常フローをスキップ
+if st.query_params.get("line_user_id"):
+    _handle_line_link()
 
 
 def _show_role_selection():

@@ -133,6 +133,16 @@ function doPost(e) {
       resyncCalendarForDoctor(data);
     } else if (data.action === "calendar_resync_all") {
       resyncCalendarForAllDoctors();
+
+    // LINE LIFF連携完了（Streamlitから呼ばれる）
+    } else if (data.action === "line_link_complete") {
+      switchToLinkedRichMenu(data.line_user_id);
+      if (data.doctor_name) {
+        pushText(data.line_user_id,
+          data.doctor_name + " さん、アカウント連携が完了しました！\n" +
+          "メニューの「希望入力」から、希望入力を開始できます。"
+        );
+      }
     }
 
     return ContentService.createTextOutput(
@@ -321,6 +331,39 @@ function createSpreadsheetForSection(title, shareWith) {
     ss.addEditor(shareWith);
   }
   return { id: ss.getId(), url: ss.getUrl() };
+}
+
+// ---- LIFF アカウント連携ページ ----
+
+/**
+ * LIFF 経由のアカウント連携: LINE User ID を取得して Streamlit にリダイレクト
+ * スクリプトプロパティに LIFF_ID と STREAMLIT_URL を設定すること
+ */
+function doGet(e) {
+  var liffId = PropertiesService.getScriptProperties().getProperty("LIFF_ID") || "";
+  var streamlitUrl = PropertiesService.getScriptProperties().getProperty("STREAMLIT_URL") || "";
+
+  var html = HtmlService.createHtmlOutput(
+    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>アカウント連携</title>' +
+    '<style>body{font-family:sans-serif;text-align:center;padding-top:40vh;color:#666}</style>' +
+    '<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"><\/script>' +
+    '</head><body>' +
+    '<p>連携処理中...</p>' +
+    '<script>' +
+    'liff.init({liffId:"' + liffId + '"}).then(function(){' +
+    '  if(!liff.isInClient()&&!liff.isLoggedIn()){liff.login();return;}' +
+    '  liff.getProfile().then(function(p){' +
+    '    window.location.href="' + streamlitUrl + '?line_user_id="+p.userId;' +
+    '  });' +
+    '}).catch(function(e){' +
+    '  document.body.innerHTML="<p>エラーが発生しました: "+e.message+"</p>";' +
+    '});' +
+    '<\/script></body></html>'
+  );
+  html.setTitle("アカウント連携");
+  return html;
 }
 
 // ---- テスト用 ----

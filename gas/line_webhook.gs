@@ -62,15 +62,8 @@ function handleTextMessage(event) {
     return;
   }
 
-  // セッション確認（連携フロー中の入力を処理）
+  // セッション確認
   var session = getSession(userId);
-  if (session) {
-    var state = session.state;
-    if (state === "awaiting_account" || state === "awaiting_password") {
-      handleLinkInput(userId, text, replyToken, session);
-      return;
-    }
-  }
 
   // 連携チェック
   var doctor = findDoctorByLineId(userId);
@@ -115,10 +108,11 @@ function handleTextMessage(event) {
   }
 }
 
-// ---- アカウント連携 ----
+// ---- アカウント連携（LIFF方式） ----
 
 /**
- * 連携開始: アカウント名の入力を促す
+ * 連携開始: LIFF URL を返信して Streamlit のログインページに誘導
+ * パスワード検証は Streamlit（Python bcrypt）側で行う
  */
 function startAccountLink(userId, replyToken) {
   // 既に連携済みか確認
@@ -130,81 +124,16 @@ function startAccountLink(userId, replyToken) {
     return;
   }
 
-  upsertSession(userId, {
-    state: "awaiting_account",
-    doctor_id: "",
-    target_month: "",
-    current_date_index: "",
-    preferences_json: "",
-    free_text: "",
-    pending_account: ""
-  });
-
-  replyText(replyToken, "アカウント名を入力してください。");
-}
-
-/**
- * 連携フロー中の入力（アカウント名 or パスワード）を処理
- */
-function handleLinkInput(userId, text, replyToken, session) {
-  if (session.state === "awaiting_account") {
-    // アカウント名を検索
-    var doctor = findDoctorByAccountName(text);
-    if (!doctor) {
-      replyText(replyToken,
-        "アカウント名「" + text + "」が見つかりません。\n正しいアカウント名を確認してください。"
-      );
-      return;
-    }
-
-    // 既に別のLINEユーザーに紐付いている場合
-    var existingLineId = String(doctor.line_user_id || "").trim();
-    if (existingLineId && existingLineId !== userId) {
-      replyText(replyToken,
-        "このアカウントは既に別のLINEアカウントに連携済みです。\n管理者にお問い合わせください。"
-      );
-      deleteSession(userId);
-      return;
-    }
-
-    // パスワード入力待ちに遷移
-    upsertSession(userId, {
-      state: "awaiting_password",
-      pending_account: text
-    });
-    replyText(replyToken, "パスワードを入力してください。");
-
-  } else if (session.state === "awaiting_password") {
-    var accountName = session.pending_account;
-    var doctor = findDoctorByAccountName(accountName);
-    if (!doctor) {
-      replyText(replyToken, "エラーが発生しました。もう一度「連携」からやり直してください。");
-      deleteSession(userId);
-      return;
-    }
-
-    // パスワード検証
-    var storedHash = String(doctor.password_hash || "");
-    if (!verifyPassword(text, storedHash)) {
-      replyText(replyToken,
-        "パスワードが正しくありません。\nもう一度パスワードを入力してください。"
-      );
-      return;
-    }
-
-    // 連携成功: LINE User ID を保存
-    saveDoctorLineUserId(doctor.row, userId);
-    deleteSession(userId);
-
-    // 連携済みリッチメニューに切り替え
-    switchToLinkedRichMenu(userId);
-
-    replyText(replyToken,
-      "アカウント連携が完了しました！\n" +
-      doctor.name + " さん、ようこそ。\n\n" +
-      "メニューの「希望入力」から、希望入力を開始できます。"
-    );
+  var liffId = PropertiesService.getScriptProperties().getProperty("LIFF_ID") || "";
+  if (!liffId) {
+    replyText(replyToken, "連携機能の設定が完了していません。\n管理者にお問い合わせください。");
+    return;
   }
+
+  replyText(replyToken,
+    "以下のリンクからアカウント連携を行ってください。\n\n" +
+    "https://liff.line.me/" + liffId
+  );
 }
 
 // ---- 希望入力フロー ----
