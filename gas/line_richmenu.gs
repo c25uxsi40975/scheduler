@@ -101,7 +101,7 @@ function uploadRichMenuImage(richMenuId, driveFileId) {
     {
       "method": "post",
       "headers": {
-        "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN,
+        "Authorization": "Bearer " + getLineChannelAccessToken(),
         "Content-Type": blob.getContentType()
       },
       "payload": blob.getBytes()
@@ -126,7 +126,7 @@ function setDefaultRichMenu() {
     "https://api.line.me/v2/bot/user/all/richmenu/" + richMenuId,
     {
       "method": "post",
-      "headers": {"Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN}
+      "headers": {"Authorization": "Bearer " + getLineChannelAccessToken()}
     }
   );
   Logger.log("デフォルトメニュー設定完了: " + richMenuId);
@@ -147,7 +147,7 @@ function switchToLinkedRichMenu(userId) {
       "https://api.line.me/v2/bot/user/" + userId + "/richmenu/" + richMenuId,
       {
         "method": "post",
-        "headers": {"Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN}
+        "headers": {"Authorization": "Bearer " + getLineChannelAccessToken()}
       }
     );
   } catch (e) {
@@ -165,7 +165,7 @@ function createRichMenuApi(menuData) {
   var res = UrlFetchApp.fetch("https://api.line.me/v2/bot/richmenu", {
     "method": "post",
     "headers": {
-      "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN,
+      "Authorization": "Bearer " + getLineChannelAccessToken(),
       "Content-Type": "application/json"
     },
     "payload": JSON.stringify(menuData)

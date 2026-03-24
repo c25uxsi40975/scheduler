@@ -7,11 +7,14 @@
  */
 
 // ---- LINE API 認証情報 ----
+// グローバル変数ではなく関数で都度取得（Web App実行時の評価タイミング問題を回避）
 
-var LINE_CHANNEL_SECRET = PropertiesService.getScriptProperties()
-    .getProperty("LINE_CHANNEL_SECRET") || "";
-var LINE_CHANNEL_ACCESS_TOKEN = PropertiesService.getScriptProperties()
-    .getProperty("LINE_CHANNEL_ACCESS_TOKEN") || "";
+function getLineChannelSecret() {
+  return PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_SECRET") || "";
+}
+function getLineChannelAccessToken() {
+  return PropertiesService.getScriptProperties().getProperty("LINE_CHANNEL_ACCESS_TOKEN") || "";
+}
 
 // ---- セッション設定 ----
 
@@ -24,7 +27,8 @@ var LINE_SESSION_SHEET_NAME = "LINEセッション";
  * Reply API でメッセージを送信（無料）
  */
 function replyMessage(replyToken, messages) {
-  if (!replyToken || !LINE_CHANNEL_ACCESS_TOKEN) {
+  var token = getLineChannelAccessToken();
+  if (!replyToken || !token) {
     Logger.log("replyMessage: トークンまたはアクセストークンが未設定");
     return;
   }
@@ -32,7 +36,7 @@ function replyMessage(replyToken, messages) {
     UrlFetchApp.fetch("https://api.line.me/v2/bot/message/reply", {
       "method": "post",
       "headers": {
-        "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN,
+        "Authorization": "Bearer " + token,
         "Content-Type": "application/json"
       },
       "payload": JSON.stringify({
@@ -76,12 +80,13 @@ function replyWithQuickReply(replyToken, text, items) {
  * Push API でメッセージを送信（課金対象）
  */
 function pushMessage(userId, messages) {
-  if (!userId || !LINE_CHANNEL_ACCESS_TOKEN) return;
+  var token = getLineChannelAccessToken();
+  if (!userId || !token) return;
   try {
     UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
       "method": "post",
       "headers": {
-        "Authorization": "Bearer " + LINE_CHANNEL_ACCESS_TOKEN,
+        "Authorization": "Bearer " + token,
         "Content-Type": "application/json"
       },
       "payload": JSON.stringify({
@@ -313,7 +318,20 @@ function getSettingValue(key) {
  * 公開月を取得
  */
 function getOpenMonth() {
-  return getSettingValue("open_month");
+  var val = getSettingValue("open_month");
+  if (!val) return null;
+  // YYYY-MM 形式ならそのまま返す
+  if (val.match && val.match(/^\d{4}-\d{2}$/)) return val;
+  // Google Sheets が日付として解釈した場合の対応
+  try {
+    var d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      var y = d.getFullYear();
+      var m = ("0" + (d.getMonth() + 1)).slice(-2);
+      return y + "-" + m;
+    }
+  } catch (e) {}
+  return val;
 }
 
 /**
