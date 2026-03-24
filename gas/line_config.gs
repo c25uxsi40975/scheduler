@@ -180,15 +180,24 @@ function saveDoctorLineUserId(doctorRow, userId) {
 }
 
 /**
- * パスワードを検証（SHA-256 ハッシュ）
+ * パスワードを検証（bcrypt + レガシー SHA-256 の両方に対応）
+ * bcrypt: lib_bcrypt.gs の bcryptjs.compareSync() を使用
+ * SHA-256: Utilities.computeDigest で計算して比較
  */
 function verifyPassword(inputPassword, storedHash) {
   if (!storedHash || !inputPassword) return false;
-  // bcrypt ハッシュの場合は GAS では検証不可 → false
+
+  // bcrypt ハッシュ ($2b$ or $2a$)
   if (storedHash.indexOf("$2b$") === 0 || storedHash.indexOf("$2a$") === 0) {
-    Logger.log("bcrypt hash detected - GAS cannot verify bcrypt. Please use SHA-256 password.");
-    return false;
+    try {
+      return bcryptjs.compareSync(inputPassword, storedHash);
+    } catch (e) {
+      Logger.log("bcrypt検証エラー: " + e.message);
+      return false;
+    }
   }
+
+  // レガシー SHA-256 ハッシュ
   var hash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
     Utilities.newBlob(inputPassword).getBytes());
   var hexHash = hash.map(function(b) {
