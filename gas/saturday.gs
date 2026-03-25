@@ -421,37 +421,3 @@ function getConfirmedAssignments(schedSheet, dateStr) {
   return result;
 }
 
-/**
- * テスト用：翌日のスケジュール内容をログ出力（メール送信しない）
- */
-function dryRunReminder() {
-  var tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  var tomorrowStr = Utilities.formatDate(tomorrow, "Asia/Tokyo", "yyyy-MM-dd");
-  var yearMonth = Utilities.formatDate(tomorrow, "Asia/Tokyo", "yyyy-MM");
-
-  Logger.log("=== ドライラン ===");
-  Logger.log("対象日: " + tomorrowStr);
-
-  var ssOp = getOperationalSpreadsheet();
-  var ssMaster = getMasterSpreadsheet();
-
-  var schedSheet = getSheet(ssOp, "スケジュール_" + yearMonth);
-  if (!schedSheet) {
-    Logger.log("スケジュールシートなし");
-    return;
-  }
-
-  var assignments = getConfirmedAssignments(schedSheet, tomorrowStr);
-  Logger.log("割り当て件数: " + assignments.length);
-
-  var doctors = getDoctorMap(ssMaster);
-  var clinics = getClinicMap(ssMaster);
-
-  for (var i = 0; i < assignments.length; i++) {
-    var a = assignments[i];
-    var doc = doctors[a.doctor_id] || { name: "不明", email: "" };
-    var cli = clinics[a.clinic_id] || "不明";
-    Logger.log("  " + doc.name + " → " + cli + " (email: " + (doc.email || "未設定") + ")");
-  }
-}

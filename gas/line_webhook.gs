@@ -95,7 +95,7 @@ function handleTextMessage(event) {
       startPreferenceInput(doctor, userId, replyToken);
       break;
     case "予定確認":
-      showSchedule(doctor, replyToken);
+      showSchedule(doctor, userId, replyToken);
       break;
     case "ヘルプ":
     case "help":
@@ -286,7 +286,9 @@ function startPreferenceInput(doctor, userId, replyToken) {
 function handleSessionInput(doctor, userId, text, replyToken, session) {
   var state = session.state;
 
-  if (state === "selecting_preference") {
+  if (state === "awaiting_schedule_month") {
+    handleScheduleMonthSelection(doctor, userId, text, replyToken);
+  } else if (state === "selecting_preference") {
     handlePreferenceSelection(doctor, userId, text, replyToken, session);
   } else if (state === "awaiting_free_text") {
     handleFreeTextInput(doctor, userId, text, replyToken, session);
@@ -295,6 +297,21 @@ function handleSessionInput(doctor, userId, text, replyToken, session) {
   } else {
     showHelp(replyToken);
   }
+}
+
+/**
+ * 月選択の応答を処理（予定確認フロー）
+ * Quick Reply から "YYYY年MM月" 形式のテキストを受け取る
+ */
+function handleScheduleMonthSelection(doctor, userId, text, replyToken) {
+  var match = text.match(/^(\d{4})年(\d{1,2})月$/);
+  if (!match) {
+    replyText(replyToken, "表示する月を選んでください。");
+    return;
+  }
+  var yearMonth = match[1] + "-" + ("0" + match[2]).slice(-2);
+  deleteSession(userId);
+  showMonthSchedule(doctor, replyToken, yearMonth);
 }
 
 /**
@@ -436,58 +453,165 @@ function handleConfirmation(doctor, userId, text, replyToken, session) {
 // ---- 予定確認 ----
 
 /**
- * 確定済みスケジュールを表示
+ * 確定済みスケジュールがある月を収集し、Quick Reply で月選択を表示
  */
-function showSchedule(doctor, replyToken) {
+function showSchedule(doctor, userId, replyToken) {
   var ss = getOperationalSpreadsheet();
   var ssMaster = getMasterSpreadsheet();
-  var clinicMap = getClinicMap(ssMaster);
+  var monthSet = {};
 
-  // 直近2ヶ月分を確認
-  var now = new Date();
-  var messages = [];
-
-  for (var offset = 0; offset <= 1; offset++) {
-    var d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-    var ym = Utilities.formatDate(d, "Asia/Tokyo", "yyyy-MM");
-    var sheetName = "スケジュール_" + ym;
-    var sheet = getSheet(ss, sheetName);
-    if (!sheet) continue;
-
-    var data = sheet.getDataRange().getValues();
+  // 土曜スケジュール: シート名 "スケジュール_YYYY-MM" を走査
+  var sheets = ss.getSheets();
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    var match = name.match(/^スケジュール_(\d{4}-\d{2})$/);
+    if (!match) continue;
+    var ym = match[1];
+    var data = sheets[i].getDataRange().getValues();
     if (data.length <= 1) continue;
     var headers = data[0];
     var colConfirmed = headers.indexOf("is_confirmed");
     var colAssignments = headers.indexOf("assignments");
-
-    for (var i = 1; i < data.length; i++) {
-      if (String(data[i][colConfirmed]) !== "1") continue;
-      var assignments;
+    for (var r = 1; r < data.length; r++) {
+      if (String(data[r][colConfirmed]) !== "1") continue;
       try {
-        assignments = JSON.parse(data[i][colAssignments]);
-      } catch (e) { continue; }
-
-      var myAssignments = assignments.filter(function(a) {
-        return String(a.doctor_id) === doctor.id;
-      });
-
-      if (myAssignments.length > 0) {
-        var monthLabel = ym.replace("-", "年") + "月";
-        var lines = ["【" + monthLabel + "】"];
-        myAssignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
-        myAssignments.forEach(function(a) {
-          var clinicName = clinicMap[String(a.clinic_id)] || "不明";
-          lines.push("  " + formatDateLabel(a.date) + " : " + clinicName);
+        var assignments = JSON.parse(data[r][colAssignments]);
+        var hasMe = assignments.some(function(a) {
+          return String(a.doctor_id) === doctor.id;
         });
-        messages.push(lines.join("\n"));
+        if (hasMe) { monthSet[ym] = true; break; }
+      } catch (e) {}
+    }
+  }
+
+  // 平日スケジュール: 医員が所属するセクションを走査
+  var configs = getWeekdayConfigs(ssMaster);
+  for (var c = 0; c < configs.length; c++) {
+    var cfg = configs[c];
+    if (!cfg.is_active) continue;
+    var isMember = cfg.assigned_doctors.some(function(id) {
+      return String(id) === doctor.id;
+    });
+    if (!isMember) continue;
+
+    var ssSec = getWeekdaySectionSpreadsheet(ssMaster, cfg.section);
+    if (!ssSec) continue;
+    var secSheets = ssSec.getSheets();
+    for (var s = 0; s < secSheets.length; s++) {
+      var secName = secSheets[s].getName();
+      var secMatch = secName.match(/^平日スケジュール_(\d{4}-\d{2})$/);
+      if (!secMatch) continue;
+      var secYm = secMatch[1];
+      if (monthSet[secYm]) continue; // 既に追加済み
+      var secData = secSheets[s].getDataRange().getValues();
+      if (secData.length <= 1) continue;
+      var secHeaders = secData[0];
+      var colDoctorId = secHeaders.indexOf("doctor_id");
+      for (var sr = 1; sr < secData.length; sr++) {
+        if (String(secData[sr][colDoctorId]) === doctor.id) {
+          monthSet[secYm] = true;
+          break;
+        }
       }
     }
   }
 
-  if (messages.length === 0) {
+  var months = Object.keys(monthSet).sort();
+  if (months.length === 0) {
     replyText(replyToken, "現在、確定済みのスケジュールはありません。");
+    return;
+  }
+
+  // セッションに状態を保存
+  upsertSession(userId, {
+    state: "awaiting_schedule_month",
+    doctor_id: doctor.id,
+    target_month: "",
+    current_date_index: "",
+    preferences_json: "",
+    free_text: "",
+    pending_account: ""
+  });
+
+  var items = months.map(function(ym) {
+    var label = ym.replace("-", "年") + "月";
+    return {label: label, text: label};
+  });
+  replyWithQuickReply(replyToken, "表示する月を選んでください。", items);
+}
+
+/**
+ * 選択された月の土曜＋平日スケジュールを表示
+ */
+function showMonthSchedule(doctor, replyToken, yearMonth) {
+  var ss = getOperationalSpreadsheet();
+  var ssMaster = getMasterSpreadsheet();
+  var clinicMap = getClinicMap(ssMaster);
+  var messages = [];
+
+  // ---- 土曜外勤 ----
+  var satSheet = getSheet(ss, "スケジュール_" + yearMonth);
+  if (satSheet) {
+    var satData = satSheet.getDataRange().getValues();
+    if (satData.length > 1) {
+      var satHeaders = satData[0];
+      var colConfirmed = satHeaders.indexOf("is_confirmed");
+      var colAssignments = satHeaders.indexOf("assignments");
+      var satAssignments = [];
+      for (var i = 1; i < satData.length; i++) {
+        if (String(satData[i][colConfirmed]) !== "1") continue;
+        try {
+          var parsed = JSON.parse(satData[i][colAssignments]);
+          parsed.forEach(function(a) {
+            if (String(a.doctor_id) === doctor.id) satAssignments.push(a);
+          });
+        } catch (e) {}
+      }
+      if (satAssignments.length > 0) {
+        satAssignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
+        var satLines = ["■ 土曜外勤"];
+        satAssignments.forEach(function(a) {
+          var clinicName = clinicMap[String(a.clinic_id)] || "不明";
+          satLines.push("  " + formatDateLabel(a.date) + " : " + clinicName);
+        });
+        messages.push(satLines.join("\n"));
+      }
+    }
+  }
+
+  // ---- 平日外勤 ----
+  var configs = getWeekdayConfigs(ssMaster);
+  for (var c = 0; c < configs.length; c++) {
+    var cfg = configs[c];
+    if (!cfg.is_active) continue;
+    var isMember = cfg.assigned_doctors.some(function(id) {
+      return String(id) === doctor.id;
+    });
+    if (!isMember) continue;
+
+    var ssSec = getWeekdaySectionSpreadsheet(ssMaster, cfg.section);
+    if (!ssSec) continue;
+    var wdAssignments = getWeekdayAssignments(ssSec, yearMonth, null);
+    var myWd = wdAssignments.filter(function(a) {
+      return String(a.doctor_id) === doctor.id;
+    });
+    if (myWd.length > 0) {
+      myWd.sort(function(a, b) { return String(a.date) > String(b.date) ? 1 : -1; });
+      var sectionLabel = cfg.clinic_name || cfg.section;
+      var wdLines = ["■ 平日外勤（" + sectionLabel + "）"];
+      myWd.forEach(function(a) {
+        var slotLabel = a.slot_name ? " " + a.slot_name : "";
+        wdLines.push("  " + formatDateLabel(String(a.date)) + slotLabel);
+      });
+      messages.push(wdLines.join("\n"));
+    }
+  }
+
+  var monthLabel = yearMonth.replace("-", "年") + "月";
+  if (messages.length === 0) {
+    replyText(replyToken, "【" + monthLabel + "】\n該当する予定はありません。");
   } else {
-    replyText(replyToken, messages.join("\n\n"));
+    replyText(replyToken, "【" + monthLabel + "】\n" + messages.join("\n\n"));
   }
 }
 
@@ -496,7 +620,7 @@ function showSchedule(doctor, replyToken) {
 function showHelp(replyToken) {
   replyText(replyToken,
     "【使い方】\n" +
-    "■ 連携: アカウント名とパスワードでシステムと紐づけます（初回のみ）\n" +
+    "■ 連携: Webアプリで表示される連携コード（6桁）で紐づけます（初回のみ）\n" +
     "■ 希望入力: 来月の出勤/休みの希望を登録します\n" +
     "■ 予定確認: 確定済みのスケジュールを表示します\n\n" +
     "困ったときは管理者にお問い合わせください。"
