@@ -204,10 +204,70 @@ def _render_preference_input(doctor: dict, section: str, cfg: dict):
 
 def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     """スケジュール確認タブ"""
+    # 表示モード切替: 月ごと / すべて表示
+    display_mode = st.radio(
+        "表示範囲",
+        ["月ごと", "すべて表示"],
+        horizontal=True,
+        key=f"wkdoc_display_mode_{section}",
+    )
+
+    if display_mode == "すべて表示":
+        _render_schedule_all(doctor, section, cfg)
+    else:
+        _render_schedule_monthly(doctor, section, cfg)
+
+
+def _render_schedule_monthly(doctor: dict, section: str, cfg: dict):
+    """月ごとのスケジュール表示"""
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
     view_month = st.selectbox("月を選択", months, index=1, key=f"wkdoc_view_month_{section}")
 
+    _render_month_schedule(doctor, section, cfg, view_month)
+
+
+def _render_schedule_all(doctor: dict, section: str, cfg: dict):
+    """確定済み全月のスケジュールをカレンダー形式で一覧表示"""
+    confirmed_months = sorted(get_weekday_confirmed_months(section))
+    if not confirmed_months:
+        st.info("確定済みのスケジュールはありません。")
+        return
+
+    from scheduling_utils import is_nenmatsu_nenshi
+
+    # 全月の自分の割り当て数を集計
+    all_my_count = 0
+    all_doctors = get_doctors()
+    slots = get_weekday_slots(section)
+
+    for ym in confirmed_months:
+        schedule = get_weekday_schedule(ym, section)
+        if not schedule:
+            continue
+        schedule = [r for r in schedule
+                    if not is_nenmatsu_nenshi(date.fromisoformat(r["date"]))]
+        if not schedule:
+            continue
+
+        my_assignments = [r for r in schedule if r["doctor_id"] == doctor["id"]]
+        all_my_count += len(my_assignments)
+
+        month_label = ym.replace("-", "年") + "月"
+        st.subheader(month_label)
+
+        if my_assignments:
+            st.write(f"**あなたの割り当て: {len(my_assignments)}回**")
+
+        render_weekday_calendar(schedule, slots, ym, all_doctors,
+                                highlight_doctor_id=doctor["id"])
+        st.markdown("---")
+
+    st.caption(f"確定済み全期間の合計割り当て: {all_my_count}回")
+
+
+def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: str):
+    """指定月のスケジュールを表示（共通処理）"""
     schedule = get_weekday_schedule(view_month, section)
     if not schedule:
         st.info("この月のスケジュールはまだありません。")
