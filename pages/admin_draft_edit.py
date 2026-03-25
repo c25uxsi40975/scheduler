@@ -69,6 +69,30 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
     doc_name_to_id = build_reverse_display_name_map(doctors)
     clinic_id_to_name = {cid: c["name"] for cid, c in clinic_map.items()}
 
+    # 現在の割当に対するNG/△警告を表示
+    ng_map = constraints["ng_map"]
+    avoid_map = constraints["avoid_map"]
+    ng_hits = []
+    avoid_hits = []
+    for a in assignments:
+        did, ds, cid = a["doctor_id"], a["date"], a["clinic_id"]
+        if ds in ng_map.get(did, set()):
+            d_obj = date.fromisoformat(ds)
+            ng_hits.append(
+                f"⛔ {doc_id_to_name.get(did, '?')} → "
+                f"{d_obj.strftime('%m/%d')} {clinic_id_to_name.get(cid, '?')}【NG】"
+            )
+        elif ds in avoid_map.get(did, set()):
+            d_obj = date.fromisoformat(ds)
+            avoid_hits.append(
+                f"⚠ {doc_id_to_name.get(did, '?')} → "
+                f"{d_obj.strftime('%m/%d')} {clinic_id_to_name.get(cid, '?')}【△】"
+            )
+    if ng_hits:
+        st.error(f"NG日に割り当てがあります（{len(ng_hits)}件）:\n" + "、".join(ng_hits))
+    if avoid_hits:
+        st.warning(f"△（できれば避けたい）日に割り当てがあります（{len(avoid_hits)}件）:\n" + "、".join(avoid_hits))
+
     # スケジュールの日付と外勤先を抽出
     dates = sorted(set(a["date"] for a in assignments))
     clinics_in_sched = sorted(

@@ -8,6 +8,7 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+from audit import log_event
 from database import (
     get_doctors,
     get_weekday_config_by_section,
@@ -340,8 +341,8 @@ def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: st
 
 
 def _render_shift_swap(doctor: dict, section: str, cfg: dict):
-    """シフト交換タブ"""
-    st.write("他のメンバーとシフトを交換できます")
+    """シフト交換タブ — 任意の2医員のシフトを交換可能"""
+    st.write("メンバー同士のシフトを交換できます")
 
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
@@ -352,66 +353,106 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
         st.info("この月のスケジュールがありません。")
         return
 
-    my_assignments = [r for r in schedule if r["doctor_id"] == doctor["id"]]
-    other_assignments = [r for r in schedule if r["doctor_id"] != doctor["id"]]
-
-    if not my_assignments:
-        st.info("この月の自分の割り当てがありません。")
-        return
-
-    if not other_assignments:
+    if len(schedule) < 2:
         st.info("交換可能なシフトがありません。")
         return
 
-    # Step 1: 自分の交換元を選択
-    def _my_label(r):
+    # NG/△の事前計算
+    prefs = get_weekday_preferences(section)
+    ng_set = set()
+    avoid_set = set()
+    for pref in prefs:
+        did = pref.get("doctor_id")
+        for ds in (pref.get("ng_dates") or []):
+            ng_set.add((did, ds))
+        for ds in (pref.get("avoid_dates") or []):
+            avoid_set.add((did, ds))
+
+    def _label(r):
         try:
             dt = date.fromisoformat(r["date"])
-            return f"{dt.strftime('%m/%d(%a)')} {r['slot_name']}"
+            base = f"{dt.strftime('%m/%d(%a)')} {r['slot_name']} - {r['doctor_name']}"
         except ValueError:
-            return f"{r['date']} {r['slot_name']}"
+            base = f"{r['date']} {r['slot_name']} - {r['doctor_name']}"
+        did, ds = r["doctor_id"], r["date"]
+        if (did, ds) in ng_set:
+            return f"⛔ {base}【NG】"
+        if (did, ds) in avoid_set:
+            return f"⚠ {base}【△】"
+        return base
 
-    selected_mine = st.selectbox(
-        "交換するあなたのシフト",
-        my_assignments,
-        format_func=_my_label,
-        key=f"swap_mine_{section}",
+    # Step 1: 交換元のシフトを選択（全メンバー対象）
+    selected_a = st.selectbox(
+        "交換元のシフト",
+        schedule,
+        format_func=_label,
+        key=f"swap_a_{section}",
     )
 
-    # Step 2: 交換相手を選択
-    def _other_label(r):
-        try:
-            dt = date.fromisoformat(r["date"])
-            return f"{dt.strftime('%m/%d(%a)')} {r['slot_name']} - {r['doctor_name']}"
-        except ValueError:
-            return f"{r['date']} {r['slot_name']} - {r['doctor_name']}"
+    # Step 2: 交換先（交換元と異なる医員のみ）
+    if selected_a:
+        candidates = [r for r in schedule if r["doctor_id"] != selected_a["doctor_id"]]
+        if not candidates:
+            st.info("交換先の候補がありません。")
+            return
 
-    selected_target = st.selectbox(
-        "交換先のシフト",
-        other_assignments,
-        format_func=_other_label,
-        key=f"swap_target_{section}",
-    )
+        selected_b = st.selectbox(
+            "交換先のシフト",
+            candidates,
+            format_func=_label,
+            key=f"swap_b_{section}",
+        )
+    else:
+        return
 
-    if selected_mine and selected_target:
-        # 確認ダイアログ
+    if selected_a and selected_b:
         st.markdown("---")
         st.write("**交換内容の確認**")
-        st.write(f"あなた: {_my_label(selected_mine)} → {_other_label(selected_target)}")
-        st.write(f"相手: {_other_label(selected_target)} → {_my_label(selected_mine)}")
+        st.write(f"操作者: {doctor['name']}")
+        # 交換後の相手先日付でNG/△チェック
+        a_did, b_did = selected_a["doctor_id"], selected_b["doctor_id"]
+        a_to_date, b_to_date = selected_b["date"], selected_a["date"]
+        swap_warnings = []
+        if (a_did, a_to_date) in ng_set:
+            swap_warnings.append(f"⛔ {selected_a['doctor_name']} は {a_to_date} がNG日です")
+        elif (a_did, a_to_date) in avoid_set:
+            swap_warnings.append(f"⚠ {selected_a['doctor_name']} は {a_to_date} が△（できれば避けたい）日です")
+        if (b_did, b_to_date) in ng_set:
+            swap_warnings.append(f"⛔ {selected_b['doctor_name']} は {b_to_date} がNG日です")
+        elif (b_did, b_to_date) in avoid_set:
+            swap_warnings.append(f"⚠ {selected_b['doctor_name']} は {b_to_date} が△（できれば避けたい）日です")
+
+        st.write(f"{selected_a['doctor_name']}: {_label(selected_a)} → {_label(selected_b)}")
+        st.write(f"{selected_b['doctor_name']}: {_label(selected_b)} → {_label(selected_a)}")
+
+        if swap_warnings:
+            for w in swap_warnings:
+                st.warning(w)
 
         if st.button("交換を実行", type="primary", key=f"do_swap_{section}"):
             execute_swap(
                 swap_month, section,
-                requester_id=doctor["id"],
-                original_date=selected_mine["date"],
-                original_slot_id=selected_mine["slot_id"],
-                target_id=selected_target["doctor_id"],
-                target_date=selected_target["date"],
-                target_slot_id=selected_target["slot_id"],
+                requester_id=selected_a["doctor_id"],
+                original_date=selected_a["date"],
+                original_slot_id=selected_a["slot_id"],
+                target_id=selected_b["doctor_id"],
+                target_date=selected_b["date"],
+                target_slot_id=selected_b["slot_id"],
+                actor_id=doctor["id"],
             )
 
-            # メール通知（GAS webhook）
+            # 監査ログ
+            log_event(
+                "shift_swap",
+                actor=doctor["name"],
+                detail=(
+                    f"{cfg['clinic_name']} {swap_month}: "
+                    f"{selected_a['doctor_name']}({selected_a['date']}) ↔ "
+                    f"{selected_b['doctor_name']}({selected_b['date']})"
+                ),
+            )
+
+            # 通知（GAS webhook）
             gas_url = st.secrets.get("gas_webapp_url", "")
             if gas_url:
                 try:
@@ -419,10 +460,13 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
                         "action": "shift_swap_executed",
                         "section": section,
                         "clinic_name": cfg["clinic_name"],
-                        "requester_name": doctor["name"],
-                        "requester_shift": _my_label(selected_mine),
-                        "target_name": selected_target["doctor_name"],
-                        "target_shift": _other_label(selected_target),
+                        "actor_name": doctor["name"],
+                        "actor_id": doctor["id"],
+                        "requester_name": selected_a["doctor_name"],
+                        "requester_shift": _label(selected_a),
+                        "target_name": selected_b["doctor_name"],
+                        "target_shift": _label(selected_b),
+                        "subadmin_doctors": cfg.get("subadmin_doctors", []),
                     }, timeout=10)
                 except requests.RequestException:
                     pass
@@ -435,8 +479,10 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
         history = get_swap_history(swap_month, section)
         if history:
             for h in history:
+                actor = h.get("actor_name", "")
+                actor_info = f"[{actor}] " if actor else ""
                 st.write(
-                    f"{h.get('executed_at', '')}　"
+                    f"{h.get('executed_at', '')}　{actor_info}"
                     f"{h.get('requester_name', '')}({h.get('original_date', '')}) ↔ "
                     f"{h.get('target_name', '')}({h.get('target_date', '')})"
                 )

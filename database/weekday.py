@@ -778,7 +778,9 @@ def delete_weekday_assignment(year_month: str, section: str, assignment_id: int)
 # ---- シフト交換 ----
 
 _swap_headers = [
-    "id", "section", "requester_id", "requester_name",
+    "id", "section",
+    "actor_id", "actor_name",
+    "requester_id", "requester_name",
     "original_date", "original_slot_id",
     "target_id", "target_name", "target_date", "target_slot_id",
     "executed_at",
@@ -793,7 +795,8 @@ def _get_swap_sheet(year_month: str, section: str):
 
 def execute_swap(year_month: str, section: str,
                  requester_id: int, original_date: str, original_slot_id: int,
-                 target_id: int, target_date: str, target_slot_id: int):
+                 target_id: int, target_date: str, target_slot_id: int,
+                 actor_id: int = 0):
     """シフト交換を即時実行
 
     1. 平日スケジュールシートで2つの割り当てを入れ替え
@@ -845,6 +848,8 @@ def execute_swap(year_month: str, section: str,
     swap_values = {
         "id": swap_id,
         "section": section,
+        "actor_id": actor_id if actor_id else requester_id,
+        "actor_name": name_map.get(actor_id if actor_id else requester_id, ""),
         "requester_id": requester_id,
         "requester_name": name_map.get(requester_id, ""),
         "original_date": original_date,
