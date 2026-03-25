@@ -14,6 +14,7 @@ from database.master import (
     get_training_data, append_training_data,
     get_suitability_training_data, append_suitability_training_data,
     get_double_shift_pairs, add_double_shift_pair, delete_double_shift_pair,
+    set_doctor_line_user_id, get_doctor_by_line_user_id,
 )
 from database.operational import (
     get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences,
