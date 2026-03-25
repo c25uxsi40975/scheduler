@@ -36,6 +36,36 @@ HOURS = list(range(25))  # 0〜24
 MINUTES = [0, 30]
 
 
+def _build_target_dates_for_months(
+    section: str, selected_months: list[str], days_of_week: list[int],
+) -> list[date]:
+    """選択月の対象日リストを構築（月またぎ週の誤分類を自動補正）
+
+    get_weekday_target_dates で各月の期待日を生成し、DB の is_active を参照する。
+    ただし DB で非アクティブでも、ISO 週の月曜が別の月にある日付（＝旧ロジックで
+    誤って非アクティブ化された可能性がある日付）は対象に含める。
+    """
+    all_saved = {r["date"]: r["is_active"]
+                 for r in db_get_target_dates(section)}
+
+    target_dates = []
+    for ym in selected_months:
+        y, m = map(int, ym.split("-"))
+        for dt in get_weekday_target_dates(y, m, days_of_week):
+            ds = dt.isoformat()
+            if ds not in all_saved or all_saved[ds]:
+                # DB に未登録 or アクティブ → 含める
+                target_dates.append(dt)
+            else:
+                # DB で非アクティブ → 月またぎ週なら旧バグの可能性あり、含める
+                iso_week_monday = dt - timedelta(days=dt.weekday())
+                if iso_week_monday.month != dt.month:
+                    target_dates.append(dt)
+                # else: ユーザーが明示的に無効化 → 除外
+    target_dates.sort()
+    return target_dates
+
+
 def _time_select(label: str, default: str, key_prefix: str):
     """X時Y分のプルダウンで時間を入力し "HH:MM" を返す"""
     h_default, m_default = 9, 0
@@ -187,49 +217,43 @@ def _render_target_dates(section: str, days_of_week: list):
     existing = db_get_target_dates(section)
     existing_map = {r["date"]: r["is_active"] for r in existing}
 
-    # 週単位でグループ化
-    weeks = {}
-    for dt in all_dates:
-        week_key = dt.isocalendar()[:2]  # (year, week_number)
-        monday = dt - timedelta(days=dt.weekday())
-        if week_key not in weeks:
-            weeks[week_key] = {"monday": monday, "dates": []}
-        weeks[week_key]["dates"].append(dt)
-
-    # 月ごとにグループ化
+    # 月ごと・週ごとにグループ化（各日付は自分の暦月に属する）
+    # 月をまたぐ週は各月に分割して表示する
     months_weeks = {}
-    for week_key in sorted(weeks.keys()):
-        week_info = weeks[week_key]
-        # 週の最初の対象日の月で分類
-        first_date = week_info["dates"][0]
-        month_key = first_date.strftime("%Y-%m")
+    for dt in all_dates:
+        month_key = dt.strftime("%Y-%m")
+        week_key = dt.isocalendar()[:2]
         if month_key not in months_weeks:
-            months_weeks[month_key] = []
-        months_weeks[month_key].append((week_key, week_info))
+            months_weeks[month_key] = {}
+        if week_key not in months_weeks[month_key]:
+            monday = dt - timedelta(days=dt.weekday())
+            months_weeks[month_key][week_key] = {"monday": monday, "dates": []}
+        months_weeks[month_key][week_key]["dates"].append(dt)
+    # リスト形式に変換（既存コードとの互換性のため）
+    months_weeks = {
+        mk: [(wk, wi) for wk, wi in sorted(mw.items())]
+        for mk, mw in months_weeks.items()
+    }
 
     # ---- 一括操作ボタン ----
     bc1, bc2 = st.columns(2)
     with bc1:
         if st.button("全選択", key=f"td_select_all_{section}", use_container_width=True):
-            for week_key in weeks:
-                st.session_state[f"wk_week_{section}_{week_key[0]}_{week_key[1]}"] = True
+            for mk, mw_list in months_weeks.items():
+                for wk, _ in mw_list:
+                    st.session_state[f"wk_week_{section}_{mk}_{wk[0]}_{wk[1]}"] = True
             st.rerun()
     with bc2:
         if st.button("全選択解除", key=f"td_deselect_all_{section}", use_container_width=True):
-            for week_key in weeks:
-                st.session_state[f"wk_week_{section}_{week_key[0]}_{week_key[1]}"] = False
+            for mk, mw_list in months_weeks.items():
+                for wk, _ in mw_list:
+                    st.session_state[f"wk_week_{section}_{mk}_{wk[0]}_{wk[1]}"] = False
             st.rerun()
 
     # ---- 月ごとに表示 ----
     changes = {}
     for month_key in sorted(months_weeks.keys()):
         month_week_list = months_weeks[month_key]
-        # 月内の全週がアクティブか判定
-        all_week_keys_in_month = [wk for wk, _ in month_week_list]
-        month_all_active = all(
-            all(existing_map.get(d.isoformat(), 1) for d in weeks[wk]["dates"])
-            for wk in all_week_keys_in_month
-        )
 
         try:
             y, m = map(int, month_key.split("-"))
@@ -243,14 +267,14 @@ def _render_target_dates(section: str, days_of_week: list):
             with mc1:
                 if st.button("この月を全選択", key=f"td_mon_sel_{section}_{month_key}",
                              use_container_width=True):
-                    for wk in all_week_keys_in_month:
-                        st.session_state[f"wk_week_{section}_{wk[0]}_{wk[1]}"] = True
+                    for wk, _ in month_week_list:
+                        st.session_state[f"wk_week_{section}_{month_key}_{wk[0]}_{wk[1]}"] = True
                     st.rerun()
             with mc2:
                 if st.button("この月を全解除", key=f"td_mon_desel_{section}_{month_key}",
                              use_container_width=True):
-                    for wk in all_week_keys_in_month:
-                        st.session_state[f"wk_week_{section}_{wk[0]}_{wk[1]}"] = False
+                    for wk, _ in month_week_list:
+                        st.session_state[f"wk_week_{section}_{month_key}_{wk[0]}_{wk[1]}"] = False
                     st.rerun()
 
             # 週ごとのチェックボックス
@@ -263,7 +287,7 @@ def _render_target_dates(section: str, days_of_week: list):
                 date_strs = [d.isoformat() for d in dates]
                 current_active = all(existing_map.get(ds, 1) for ds in date_strs)
 
-                cb_key = f"wk_week_{section}_{week_key[0]}_{week_key[1]}"
+                cb_key = f"wk_week_{section}_{month_key}_{week_key[0]}_{week_key[1]}"
                 # 一括ボタンで既にセッション状態が設定済みなら value を渡さない
                 if cb_key in st.session_state:
                     is_on = st.checkbox(week_label, key=cb_key)
@@ -413,17 +437,8 @@ def _render_slot_overrides(section: str, days_of_week: list):
         st.info("スロットが登録されていません。「スロット管理」タブで設定してください。")
         return
 
-    active_dates_str = get_active_target_dates(section)
-    year_m, month_m = map(int, ovr_month.split("-"))
-    target_dates = []
-    for ds in active_dates_str:
-        try:
-            dt = date.fromisoformat(ds)
-            if dt.year == year_m and dt.month == month_m:
-                target_dates.append(dt)
-        except ValueError:
-            pass
-    target_dates.sort()
+    # 対象月の日付を構築（月またぎ週の誤分類を自動補正）
+    target_dates = _build_target_dates_for_months(section, [ovr_month], days_of_week)
 
     if not target_dates:
         st.info("この月の対象日がありません。")
@@ -879,19 +894,8 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         ei = months.index(end_month)
         selected_months = months[si:ei + 1]
 
-    active_dates_str = get_active_target_dates(section)
-
-    # 選択期間の全対象日をフィルタ
-    target_dates = []
-    for ds in active_dates_str:
-        try:
-            dt = date.fromisoformat(ds)
-            ym = dt.strftime("%Y-%m")
-            if ym in selected_months:
-                target_dates.append(dt)
-        except ValueError:
-            pass
-    target_dates.sort()
+    # 選択期間の全対象日を構築（月またぎ週の誤分類を自動補正）
+    target_dates = _build_target_dates_for_months(section, selected_months, days_of_week)
 
     if not target_dates:
         st.info("この期間の対象日がありません。「対象日管理」タブで設定してください。")

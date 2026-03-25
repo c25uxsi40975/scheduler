@@ -38,7 +38,8 @@ def render(target_month, year, month):
     sched = drafts[0]
 
     # 保存直後のデータを優先（キャッシュ/API遅延対策）
-    saved_key = f"_draft_saved_assignments_{sched['id']}"
+    # NOTE: キーに target_month を含めて月間のID衝突を防止
+    saved_key = f"_draft_saved_assignments_{target_month}_{sched['id']}"
     if saved_key in st.session_state:
         sched = dict(sched)
         sched["assignments"] = st.session_state.pop(saved_key)
@@ -107,17 +108,17 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
             cname, options=options, required=True, width="small",
         )
 
-    edit_ver = st.session_state.get(f"_draft_edit_ver_{sched['id']}", 0)
+    edit_ver = st.session_state.get(f"_draft_edit_ver_{target_month}_{sched['id']}", 0)
     edited_df = st.data_editor(
         df, column_config=col_config, use_container_width=True,
-        key=f"draft_edit_matrix_{sched['id']}_v{edit_ver}",
+        key=f"draft_edit_matrix_{target_month}_{sched['id']}_v{edit_ver}",
     )
 
-    confirm_save_key = f"confirm_save_warnings_draft_{sched['id']}"
+    confirm_save_key = f"confirm_save_warnings_draft_{target_month}_{sched['id']}"
 
     btn_cols = st.columns(3)
     with btn_cols[0]:
-        if st.button("下書き保存", key=f"save_draft_{sched['id']}", type="primary"):
+        if st.button("下書き保存", key=f"save_draft_{target_month}_{sched['id']}", type="primary"):
             new_assignments, hard_errors = _validate_and_convert(
                 edited_df, dates, clinics_in_sched,
                 doc_name_to_id, clinic_id_to_name, constraints,
@@ -136,12 +137,12 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     st.rerun()
                 else:
                     update_schedule_assignments(sched["id"], new_assignments, year_month=target_month)
-                    st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
-                    st.session_state[f"_draft_saved_assignments_{sched['id']}"] = new_assignments
+                    st.session_state[f"_draft_edit_ver_{target_month}_{sched['id']}"] = edit_ver + 1
+                    st.session_state[f"_draft_saved_assignments_{target_month}_{sched['id']}"] = new_assignments
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
     with btn_cols[1]:
-        if st.button("確定する", key=f"confirm_draft_{sched['id']}"):
+        if st.button("確定する", key=f"confirm_draft_{target_month}_{sched['id']}"):
             new_assignments, hard_errors = _validate_and_convert(
                 edited_df, dates, clinics_in_sched,
                 doc_name_to_id, clinic_id_to_name, constraints,
@@ -161,22 +162,22 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                 else:
                     _do_confirm(sched, new_assignments, target_month, year, month, doctors, clinics, affinities)
     with btn_cols[2]:
-        if st.button("下書き削除", key=f"del_draft_{sched['id']}", type="secondary"):
-            st.session_state[f"confirm_del_draft_{sched['id']}"] = True
+        if st.button("下書き削除", key=f"del_draft_{target_month}_{sched['id']}", type="secondary"):
+            st.session_state[f"confirm_del_draft_{target_month}_{sched['id']}"] = True
 
     # 下書き削除確認
-    if st.session_state.get(f"confirm_del_draft_{sched['id']}"):
+    if st.session_state.get(f"confirm_del_draft_{target_month}_{sched['id']}"):
         st.warning(f"下書き「{sched['plan_name']}」を削除しますか？")
         dc1, dc2 = st.columns(2)
         with dc1:
-            if st.button("削除する", key=f"do_del_draft_{sched['id']}", type="primary"):
+            if st.button("削除する", key=f"do_del_draft_{target_month}_{sched['id']}", type="primary"):
                 delete_schedule(sched["id"], year_month=target_month)
-                st.session_state.pop(f"confirm_del_draft_{sched['id']}", None)
+                st.session_state.pop(f"confirm_del_draft_{target_month}_{sched['id']}", None)
                 st.session_state["_toast_msg"] = "下書きを削除しました"
                 st.rerun()
         with dc2:
-            if st.button("キャンセル", key=f"cancel_del_draft_{sched['id']}"):
-                st.session_state.pop(f"confirm_del_draft_{sched['id']}", None)
+            if st.button("キャンセル", key=f"cancel_del_draft_{target_month}_{sched['id']}"):
+                st.session_state.pop(f"confirm_del_draft_{target_month}_{sched['id']}", None)
                 st.rerun()
 
     # ソフト制約違反の確認ダイアログ
@@ -190,18 +191,19 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
         action = saved_confirm["action"]
         with wc1:
             label = "確認して確定" if action == "confirm" else "確認して保存"
-            if st.button(label, key=f"force_{action}_draft_{sched['id']}", type="primary"):
+            if st.button(label, key=f"force_{action}_draft_{target_month}_{sched['id']}", type="primary"):
                 if action == "confirm":
+                    st.session_state.pop(confirm_save_key, None)
                     _do_confirm(sched, saved_confirm["assignments"], target_month, year, month, doctors, clinics, affinities)
                 else:
                     update_schedule_assignments(sched["id"], saved_confirm["assignments"], year_month=target_month)
                     st.session_state.pop(confirm_save_key, None)
-                    st.session_state[f"_draft_edit_ver_{sched['id']}"] = edit_ver + 1
-                    st.session_state[f"_draft_saved_assignments_{sched['id']}"] = saved_confirm["assignments"]
+                    st.session_state[f"_draft_edit_ver_{target_month}_{sched['id']}"] = edit_ver + 1
+                    st.session_state[f"_draft_saved_assignments_{target_month}_{sched['id']}"] = saved_confirm["assignments"]
                     st.session_state["_toast_msg"] = "下書きを保存しました"
                     st.rerun()
         with wc2:
-            if st.button("編集に戻る", key=f"back_edit_draft_{sched['id']}"):
+            if st.button("編集に戻る", key=f"back_edit_draft_{target_month}_{sched['id']}"):
                 st.session_state.pop(confirm_save_key, None)
                 st.rerun()
 
