@@ -122,12 +122,39 @@ _check_session_timeout()
 
 # ---- LINE LIFF アカウント連携 ----
 import re as _re
+import streamlit.components.v1 as _components
 
 def _handle_line_link():
-    """LINE LIFF 経由のアカウント連携フロー"""
+    """LINE LIFF 経由のアカウント連携フロー
+    1. LIFF SDK で LINE User ID を取得（JS → URL パラメータに追加）
+    2. Streamlit でログインフォームを表示
+    3. パスワード検証後に line_user_id を保存
+    """
     line_user_id = st.query_params.get("line_user_id", "")
+    liff_id = st.secrets.get("liff_id", "")
+
     if not line_user_id:
-        return False
+        # LIFF SDK で LINE User ID を取得してリダイレクト
+        st.title("LINE アカウント連携")
+        st.info("LINE からユーザー情報を取得しています...")
+        _components.html(f"""
+        <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+        <script>
+        liff.init({{liffId: "{liff_id}"}}).then(function() {{
+            if (!liff.isLoggedIn()) {{ liff.login(); return; }}
+            liff.getProfile().then(function(profile) {{
+                var url = new URL(window.parent.location.href);
+                url.searchParams.set("line_user_id", profile.userId);
+                url.searchParams.delete("liff.state");
+                window.parent.location.href = url.toString();
+            }});
+        }}).catch(function(err) {{
+            document.body.innerHTML = "<p>エラー: " + err.message + "</p>";
+        }});
+        </script>
+        <p>処理中...</p>
+        """, height=50)
+        st.stop()
 
     # LINE User ID フォーマット検証
     if not _re.match(r'^U[0-9a-f]{32}$', line_user_id):
@@ -158,7 +185,6 @@ def _handle_line_link():
                 if doctor.get("line_user_id") and doctor["line_user_id"] != line_user_id:
                     st.error("このアカウントは既に別の LINE アカウントに連携済みです。\n管理者にお問い合わせください。")
                 else:
-                    # LINE User ID を保存
                     set_doctor_line_user_id(doctor["id"], line_user_id)
                     log_event("line_account_linked", account.strip(), f"line_user_id={line_user_id}")
 
@@ -177,8 +203,8 @@ def _handle_line_link():
                     st.success(f"連携が完了しました！\n{doctor['name']} さん、ようこそ。\n\nこの画面を閉じて LINE に戻ってください。")
     st.stop()
 
-# LINE 連携リクエストの場合は通常フローをスキップ
-if st.query_params.get("line_user_id"):
+# LINE LIFF 連携リクエストの場合は通常フローをスキップ
+if st.query_params.get("mode") == "line_link" or st.query_params.get("line_user_id"):
     _handle_line_link()
 
 
