@@ -12,7 +12,7 @@ from database import (
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, verify_doctor_by_account,
-    update_doctor_email, update_doctor_account_name, update_doctor_notification_settings,
+    update_doctor_email, update_doctor_account_name, update_doctor_notification_settings, update_calendar_shared_emails,
     get_open_month, set_open_month, get_input_deadline, set_input_deadline,
     get_confirmed_months, has_operational_sheets,
     save_reset_code, verify_reset_code,
@@ -500,6 +500,23 @@ def _request_calendar_resync(doctor, enabled: bool):
         pass
 
 
+def _request_calendar_sharing_update(doctor, shared_emails: list):
+    """GAS Web App経由でカレンダー共有先を更新"""
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    cal_id = doctor.get("personal_calendar_id", "")
+    if not gas_url or not cal_id:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "calendar_update_sharing",
+            "calendar_id": cal_id,
+            "shared_emails": shared_emails,
+            "owner_email": doctor.get("email", ""),
+        }, timeout=30)
+    except requests.RequestException:
+        pass
+
+
 def _show_doctor_settings(doctor):
     """医員設定: アカウント名変更・パスワード変更・メールアドレス設定・LINE連携"""
     with st.expander("アカウント設定", expanded=True):
@@ -611,6 +628,43 @@ def _show_doctor_settings(doctor):
                         _request_calendar_resync(doctor, new_notify_cal)
                     st.success("通知設定を保存しました")
                     st.rerun()
+
+            # カレンダー共有設定（フォーム外 — カレンダー連携中のみ表示）
+            if has_email and doctor.get("personal_calendar_id"):
+                st.divider()
+                st.subheader("カレンダー共有設定")
+                st.caption(
+                    "他の方にカレンダーを共有できます（閲覧のみ）。"
+                    "共有先のGoogleアカウントのメールアドレスを入力してください。"
+                )
+                current_shared = doctor.get("calendar_shared_emails", "")
+                with st.form("calendar_sharing_form"):
+                    shared_input = st.text_area(
+                        "共有先メールアドレス（1行に1つ）",
+                        value=current_shared.replace(",", "\n") if current_shared else "",
+                        height=120,
+                        help="Googleアカウントのメールアドレスを1行に1つずつ入力してください。共有先は閲覧のみ（編集不可）です。",
+                    )
+                    if st.form_submit_button("共有設定を保存"):
+                        # パース＆バリデーション
+                        raw_lines = [line.strip() for line in shared_input.strip().splitlines() if line.strip()]
+                        valid_emails = []
+                        has_error = False
+                        for line in raw_lines:
+                            if validate_email(line):
+                                valid_emails.append(line.lower())
+                            else:
+                                st.error(f"メールアドレスの形式が正しくありません: {line}")
+                                has_error = True
+                        if not has_error:
+                            csv_emails = ",".join(valid_emails)
+                            update_calendar_shared_emails(doctor["id"], csv_emails)
+                            _request_calendar_sharing_update(doctor, valid_emails)
+                            st.success(
+                                f"共有設定を保存しました（{len(valid_emails)}件）"
+                                if valid_emails else "共有先をすべて解除しました"
+                            )
+                            st.rerun()
 
         with tab_line:
             line_uid = doctor.get("line_user_id", "")

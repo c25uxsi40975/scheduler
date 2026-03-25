@@ -1032,6 +1032,107 @@ function resyncCalendarForAllDoctors() {
   Logger.log("全医員カレンダー再同期完了");
 }
 
+// ---- カレンダー共有管理 ----
+
+/**
+ * 医員個別カレンダーの共有先を更新する
+ * 新しいメールリストと現在のACLを比較し、追加・削除を行う
+ * @param {string} calendarId - 個別カレンダーID
+ * @param {string[]} newEmails - 新しい共有先メールアドレスの配列
+ * @param {string} ownerEmail - 医員本人のメールアドレス（除外対象）
+ */
+function updateCalendarSharing(calendarId, newEmails, ownerEmail) {
+  if (!calendarId) {
+    Logger.log("カレンダー共有更新: カレンダーIDが未設定");
+    return;
+  }
+
+  // 現在のACLを取得
+  var currentViewers = [];
+  try {
+    var acl = Calendar.Acl.list(calendarId);
+    var items = acl.items || [];
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i];
+      if (item.role === "reader" && item.scope && item.scope.type === "user") {
+        var email = item.scope.value.toLowerCase();
+        // 医員本人は管理対象外
+        if (email !== ownerEmail.toLowerCase()) {
+          currentViewers.push({ email: email, ruleId: item.id });
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log("ACL取得失敗: " + calendarId + " - " + e.message);
+    return;
+  }
+
+  // 正規化
+  var newSet = {};
+  for (var j = 0; j < newEmails.length; j++) {
+    var em = newEmails[j].trim().toLowerCase();
+    if (em) newSet[em] = true;
+  }
+
+  var currentSet = {};
+  for (var k = 0; k < currentViewers.length; k++) {
+    currentSet[currentViewers[k].email] = currentViewers[k].ruleId;
+  }
+
+  // 削除: 現在あるが新リストにないもの
+  for (var removeEmail in currentSet) {
+    if (!newSet[removeEmail]) {
+      try {
+        Calendar.Acl.remove(calendarId, currentSet[removeEmail]);
+        Logger.log("カレンダー共有解除: " + removeEmail);
+      } catch (e) {
+        Logger.log("カレンダー共有解除失敗: " + removeEmail + " - " + e.message);
+      }
+    }
+  }
+
+  // 追加: 新リストにあるが現在ないもの（招待メールなし）
+  for (var addEmail in newSet) {
+    if (!currentSet[addEmail]) {
+      try {
+        Calendar.Acl.insert({
+          role: "reader",
+          scope: { type: "user", value: addEmail },
+          sendNotifications: false
+        }, calendarId);
+        Logger.log("カレンダー共有追加: " + addEmail);
+      } catch (e) {
+        Logger.log("カレンダー共有追加失敗: " + addEmail + " - " + e.message);
+        // フォールバック
+        try {
+          var cal = CalendarApp.getCalendarById(calendarId);
+          if (cal) cal.addViewer(addEmail);
+        } catch (e2) {
+          Logger.log("カレンダー共有追加失敗 (フォールバック): " + addEmail + " - " + e2.message);
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Streamlitからのカレンダー共有更新リクエストを処理
+ */
+function handleCalendarSharingUpdate(data) {
+  var calendarId = data.calendar_id || "";
+  var emails = data.shared_emails || [];
+  var ownerEmail = data.owner_email || "";
+
+  if (!calendarId) {
+    Logger.log("カレンダー共有更新: カレンダーIDが未指定");
+    return;
+  }
+
+  updateCalendarSharing(calendarId, emails, ownerEmail);
+  Logger.log("カレンダー共有更新完了: " + emails.length + "件");
+}
+
+
 // ---- テスト用 ----
 
 function testSyncSaturdayCalendar() {

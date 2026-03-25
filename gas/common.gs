@@ -134,6 +134,10 @@ function doPost(e) {
     } else if (data.action === "calendar_resync_all") {
       resyncCalendarForAllDoctors();
 
+    // カレンダー共有更新
+    } else if (data.action === "calendar_update_sharing") {
+      handleCalendarSharingUpdate(data);
+
     // LINE LIFF連携完了（Streamlitから呼ばれる）
     } else if (data.action === "line_link_complete") {
       switchToLinkedRichMenu(data.line_user_id);
@@ -342,11 +346,3 @@ function doGet(e) {
   return ContentService.createTextOutput("OK");
 }
 
-// ---- テスト用 ----
-
-/**
- * テスト用：次の土曜日のリマインダーを送信（実際にメール送信します）
- */
-function testSendReminder() {
-  sendFridayReminder();
-}

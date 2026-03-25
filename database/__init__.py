@@ -30,7 +30,7 @@ from database.auth import (
     verify_doctor_individual_password,
     get_doctor_by_account, verify_doctor_by_account,
     update_doctor_account_name,
-    update_doctor_email, update_doctor_notification_settings,
+    update_doctor_email, update_doctor_notification_settings, update_calendar_shared_emails,
     get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
     save_reset_code, verify_reset_code,

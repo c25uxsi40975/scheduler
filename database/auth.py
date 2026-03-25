@@ -201,6 +201,18 @@ def update_doctor_notification_settings(doctor_id, notify_email: bool, notify_ca
     _clear_data_cache()
 
 
+def update_calendar_shared_emails(doctor_id, emails: str):
+    """医員のカレンダー共有先メールアドレスを更新（カンマ区切り）"""
+    ws = _get_sheet("医員マスタ")
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if not row_idx:
+        return
+    actual_headers = _retry(ws.row_values, 1)
+    col_idx = actual_headers.index("calendar_shared_emails") + 1
+    _retry(ws.update_cell, row_idx, col_idx, emails)
+    _clear_data_cache()
+
+
 # ---- Password Reset (パスワードリセット) ----
 
 _RESET_CODE_TTL = 900  # 15分
