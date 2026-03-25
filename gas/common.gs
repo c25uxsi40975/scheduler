@@ -350,19 +350,20 @@ function doGet(e) {
     '<style>body{font-family:sans-serif;text-align:center;padding-top:40vh;color:#666}</style>' +
     '<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"><\/script>' +
     '</head><body>' +
-    '<p>連携処理中...</p>' +
+    '<p id="msg">連携処理中...</p>' +
     '<script>' +
     'liff.init({liffId:"' + liffId + '"}).then(function(){' +
-    '  if(!liff.isInClient()&&!liff.isLoggedIn()){liff.login();return;}' +
+    '  if(!liff.isLoggedIn()){liff.login();return;}' +
     '  liff.getProfile().then(function(p){' +
     '    window.location.href="' + streamlitUrl + '?line_user_id="+p.userId;' +
     '  });' +
     '}).catch(function(e){' +
-    '  document.body.innerHTML="<p>エラーが発生しました: "+e.message+"</p>";' +
+    '  document.getElementById("msg").textContent="エラー: "+e.message;' +
     '});' +
     '<\/script></body></html>'
-  );
-  html.setTitle("アカウント連携");
+  )
+  .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
+  .setTitle("アカウント連携");
   return html;
 }
 
