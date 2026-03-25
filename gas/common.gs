@@ -333,38 +333,13 @@ function createSpreadsheetForSection(title, shareWith) {
   return { id: ss.getId(), url: ss.getUrl() };
 }
 
-// ---- LIFF アカウント連携ページ ----
+// ---- doGet ----
 
 /**
- * LIFF 経由のアカウント連携: LINE User ID を取得して Streamlit にリダイレクト
- * スクリプトプロパティに LIFF_ID と STREAMLIT_URL を設定すること
+ * GAS Web App の GET リクエストハンドラ（現在未使用）
  */
 function doGet(e) {
-  var liffId = PropertiesService.getScriptProperties().getProperty("LIFF_ID") || "";
-  var streamlitUrl = PropertiesService.getScriptProperties().getProperty("STREAMLIT_URL") || "";
-
-  var html = HtmlService.createHtmlOutput(
-    '<!DOCTYPE html><html><head><meta charset="utf-8">' +
-    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
-    '<title>アカウント連携</title>' +
-    '<style>body{font-family:sans-serif;text-align:center;padding-top:40vh;color:#666}</style>' +
-    '<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"><\/script>' +
-    '</head><body>' +
-    '<p id="msg">連携処理中...</p>' +
-    '<script>' +
-    'liff.init({liffId:"' + liffId + '"}).then(function(){' +
-    '  if(!liff.isLoggedIn()){liff.login();return;}' +
-    '  liff.getProfile().then(function(p){' +
-    '    window.location.href="' + streamlitUrl + '?line_user_id="+p.userId;' +
-    '  });' +
-    '}).catch(function(e){' +
-    '  document.getElementById("msg").textContent="エラー: "+e.message;' +
-    '});' +
-    '<\/script></body></html>'
-  )
-  .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
-  .setTitle("アカウント連携");
-  return html;
+  return ContentService.createTextOutput("OK");
 }
 
 // ---- テスト用 ----

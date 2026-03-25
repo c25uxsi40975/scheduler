@@ -34,6 +34,7 @@ from database.auth import (
     get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
     save_reset_code, verify_reset_code,
+    save_line_linking_code, get_line_linking_code, verify_line_linking_code,
     get_doctor_email_by_account, get_doctor_id_by_account,
     clear_must_change_pw,
     # 副管理者認証

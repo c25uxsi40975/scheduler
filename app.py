@@ -19,6 +19,7 @@ from database import (
     get_doctor_email_by_account, get_doctor_id_by_account,
     clear_must_change_pw,
     set_doctor_line_user_id, get_doctor_by_line_user_id,
+    save_line_linking_code, get_line_linking_code,
     # 平日外勤
     get_weekday_configs,
     is_subadmin_password_set, verify_subadmin_password,
@@ -118,68 +119,6 @@ def _check_session_timeout():
     st.session_state["_last_activity"] = now
 
 _check_session_timeout()
-
-
-# ---- LINE LIFF アカウント連携 ----
-import re as _re
-
-def _handle_line_link():
-    """LINE LIFF 経由のアカウント連携フロー
-    GAS doGet() → LIFF SDK で LINE User ID 取得 → Streamlit にリダイレクト
-    ?line_user_id={userId} で到着 → ログインフォーム表示 → 連携完了
-    """
-    line_user_id = st.query_params.get("line_user_id", "")
-
-    # LINE User ID フォーマット検証
-    if not _re.match(r'^U[0-9a-f]{32}$', line_user_id):
-        st.error("無効なリクエストです。")
-        st.stop()
-
-    # 既に連携済みか確認
-    existing = get_doctor_by_line_user_id(line_user_id)
-    if existing:
-        st.success(f"{existing['name']} さんとして連携済みです。\nこの画面を閉じて LINE に戻ってください。")
-        st.stop()
-
-    st.title("LINE アカウント連携")
-    st.info("LINE アカウントとシステムを連携します。\nアカウント名とパスワードを入力してください。")
-
-    account = st.text_input("アカウント名", key="line_link_account")
-    pw = st.text_input("パスワード", type="password", key="line_link_pw")
-
-    if st.button("連携する", type="primary"):
-        if not account or not pw:
-            st.error("アカウント名とパスワードを入力してください。")
-        else:
-            doctor = verify_doctor_by_account(account.strip(), pw)
-            if not doctor:
-                st.error("アカウント名またはパスワードが正しくありません。")
-            else:
-                # 既に別の LINE アカウントに紐付いている場合
-                if doctor.get("line_user_id") and doctor["line_user_id"] != line_user_id:
-                    st.error("このアカウントは既に別の LINE アカウントに連携済みです。\n管理者にお問い合わせください。")
-                else:
-                    set_doctor_line_user_id(doctor["id"], line_user_id)
-                    log_event("line_account_linked", account.strip(), f"line_user_id={line_user_id}")
-
-                    # GAS にリッチメニュー切替を依頼
-                    gas_url = st.secrets.get("gas_webapp_url", "")
-                    if gas_url:
-                        try:
-                            requests.post(gas_url, json={
-                                "action": "line_link_complete",
-                                "line_user_id": line_user_id,
-                                "doctor_name": doctor["name"],
-                            }, timeout=10)
-                        except requests.RequestException:
-                            pass
-
-                    st.success(f"連携が完了しました！\n{doctor['name']} さん、ようこそ。\n\nこの画面を閉じて LINE に戻ってください。")
-    st.stop()
-
-# LINE LIFF 連携リクエストの場合は通常フローをスキップ
-if st.query_params.get("line_user_id"):
-    _handle_line_link()
 
 
 def _show_role_selection():
@@ -562,11 +501,11 @@ def _request_calendar_resync(doctor, enabled: bool):
 
 
 def _show_doctor_settings(doctor):
-    """医員設定: アカウント名変更・パスワード変更・メールアドレス設定"""
+    """医員設定: アカウント名変更・パスワード変更・メールアドレス設定・LINE連携"""
     with st.expander("アカウント設定", expanded=True):
         st.caption(f"ID: {doctor.get('account', '')}　|　アカウント名: {doctor.get('account_name', '')}")
 
-        tab_acc, tab_pw, tab_email = st.tabs(["アカウント名変更", "パスワード変更", "メールアドレス設定"])
+        tab_acc, tab_pw, tab_email, tab_line = st.tabs(["アカウント名変更", "パスワード変更", "メールアドレス設定", "LINE連携"])
 
         with tab_acc:
             with st.form("change_account_name_form"):
@@ -671,6 +610,34 @@ def _show_doctor_settings(doctor):
                     if new_notify_cal != cur_notify_cal:
                         _request_calendar_resync(doctor, new_notify_cal)
                     st.success("通知設定を保存しました")
+                    st.rerun()
+
+        with tab_line:
+            line_uid = doctor.get("line_user_id", "")
+            if line_uid:
+                st.success("LINE 連携済みです。")
+                if st.button("LINE 連携を解除する"):
+                    set_doctor_line_user_id(doctor["id"], "")
+                    st.session_state["_toast_msg"] = "LINE 連携を解除しました"
+                    st.rerun()
+            else:
+                st.info("LINE と連携すると、希望入力やリマインダーを LINE で受け取れます。")
+                st.markdown("**手順**: 下のコードを LINE Bot のトーク画面で入力してください。")
+
+                # コード生成・表示
+                existing_code = get_line_linking_code(doctor["id"])
+                if existing_code:
+                    code = existing_code
+                else:
+                    code = generate_reset_code()
+                    save_line_linking_code(doctor["id"], code)
+
+                st.markdown(f"### 連携コード: `{code}`")
+                st.caption("※ このコードは5分間有効です。期限切れの場合はページを再読み込みしてください。")
+
+                if st.button("コードを再発行"):
+                    new_code = generate_reset_code()
+                    save_line_linking_code(doctor["id"], new_code)
                     st.rerun()
 
         if st.button("設定を閉じる"):

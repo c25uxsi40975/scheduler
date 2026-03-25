@@ -65,6 +65,12 @@ function handleTextMessage(event) {
   // セッション確認
   var session = getSession(userId);
 
+  // 連携コード入力中の処理
+  if (session && session.state === "awaiting_link_code") {
+    handleLinkCodeInput(userId, text, replyToken, session);
+    return;
+  }
+
   // 連携チェック
   var doctor = findDoctorByLineId(userId);
   if (!doctor) {
@@ -108,11 +114,11 @@ function handleTextMessage(event) {
   }
 }
 
-// ---- アカウント連携（LIFF方式） ----
+// ---- アカウント連携（ワンタイムコード方式） ----
 
 /**
- * 連携開始: LIFF URL を返信して Streamlit のログインページに誘導
- * パスワード検証は Streamlit（Python bcrypt）側で行う
+ * 連携開始: コード入力を促す
+ * Streamlit の設定画面で表示される6桁コードを入力してもらう
  */
 function startAccountLink(userId, replyToken) {
   // 既に連携済みか確認
@@ -124,15 +130,102 @@ function startAccountLink(userId, replyToken) {
     return;
   }
 
-  var liffId = PropertiesService.getScriptProperties().getProperty("LIFF_ID") || "";
-  if (!liffId) {
-    replyText(replyToken, "連携機能の設定が完了していません。\n管理者にお問い合わせください。");
+  upsertSession(userId, {
+    state: "awaiting_link_code",
+    doctor_id: "",
+    target_month: "",
+    current_date_index: "",
+    preferences_json: "",
+    free_text: "",
+    pending_account: ""
+  });
+
+  replyText(replyToken,
+    "Webアプリにログインし、アカウント設定の「LINE連携」タブに表示されている連携コード（6桁）を入力してください。"
+  );
+}
+
+/**
+ * 連携コードを検証して LINE User ID を保存
+ */
+function handleLinkCodeInput(userId, text, replyToken, session) {
+  var code = text.trim();
+
+  // 6桁の数字以外は無視
+  if (!/^\d{6}$/.test(code)) {
+    replyText(replyToken, "6桁の連携コードを入力してください。\n\nキャンセルするには「キャンセル」と入力してください。");
     return;
   }
 
+  // 設定シートから全ての連携コードを検索
+  var ss = getMasterSpreadsheet();
+  var sheet = getSheet(ss, "設定");
+  if (!sheet) {
+    replyText(replyToken, "システムエラーが発生しました。管理者にお問い合わせください。");
+    deleteSession(userId);
+    return;
+  }
+
+  var data = sheet.getDataRange().getValues();
+  var matchedDoctorId = null;
+
+  for (var i = 1; i < data.length; i++) {
+    var key = String(data[i][0]);
+    if (!key.startsWith("line_link_")) continue;
+
+    var raw = String(data[i][1]);
+    try {
+      var parsed = JSON.parse(raw);
+      // 有効期限チェック
+      if (parsed.expires && new Date().getTime() / 1000 > parsed.expires) continue;
+      if (parsed.code === code) {
+        matchedDoctorId = key.replace("line_link_", "");
+        // コードを削除（使い捨て）
+        sheet.getRange(i + 1, 2).setValue("");
+        break;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+
+  if (!matchedDoctorId) {
+    replyText(replyToken, "コードが一致しないか、期限切れです。\nWebアプリで新しいコードを確認してください。");
+    return;
+  }
+
+  // 医員マスタから該当医員を取得して line_user_id を保存
+  var doctorMap = getDoctorMap(ss);
+  var doctor = doctorMap[matchedDoctorId];
+  if (!doctor) {
+    replyText(replyToken, "該当するアカウントが見つかりません。管理者にお問い合わせください。");
+    deleteSession(userId);
+    return;
+  }
+
+  // 医員マスタの行番号を取得して保存
+  var masterSheet = getSheet(ss, "医員マスタ");
+  var masterData = masterSheet.getDataRange().getValues();
+  var headers = masterData[0];
+  var colId = headers.indexOf("id");
+  var colLineId = headers.indexOf("line_user_id");
+
+  for (var j = 1; j < masterData.length; j++) {
+    if (String(masterData[j][colId]) === matchedDoctorId) {
+      masterSheet.getRange(j + 1, colLineId + 1).setValue(userId);
+      break;
+    }
+  }
+
+  deleteSession(userId);
+
+  // リッチメニュー切替
+  switchToLinkedRichMenu(userId);
+
   replyText(replyToken,
-    "以下のリンクからアカウント連携を行ってください。\n\n" +
-    "https://liff.line.me/" + liffId
+    "アカウント連携が完了しました！\n" +
+    doctor.name + " さん、ようこそ。\n\n" +
+    "メニューの「希望入力」から、希望入力を開始できます。"
   );
 }
 

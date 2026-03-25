@@ -232,6 +232,50 @@ def verify_reset_code(account_name: str, code: str) -> bool:
     return True
 
 
+# ---- LINE連携コード ----
+
+_LINE_LINK_CODE_TTL = 300  # 5分
+
+
+def save_line_linking_code(doctor_id, code: str):
+    """LINE連携コードを設定シートに保存（有効期限付き）"""
+    data = json.dumps({"code": code, "expires": time.time() + _LINE_LINK_CODE_TTL,
+                        "doctor_id": str(doctor_id)})
+    _set_setting(f"line_link_{doctor_id}", data)
+
+
+def get_line_linking_code(doctor_id) -> str | None:
+    """LINE連携コードを取得（有効期限内のもののみ）"""
+    raw = _get_setting(f"line_link_{doctor_id}")
+    if not raw:
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if time.time() > data.get("expires", 0):
+        return None
+    return data.get("code")
+
+
+def verify_line_linking_code(doctor_id, code: str) -> bool:
+    """LINE連携コードを検証。成功したらコードを削除。"""
+    raw = _get_setting(f"line_link_{doctor_id}")
+    if not raw:
+        return False
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if time.time() > data.get("expires", 0):
+        _set_setting(f"line_link_{doctor_id}", "")
+        return False
+    if data.get("code") != code:
+        return False
+    _set_setting(f"line_link_{doctor_id}", "")
+    return True
+
+
 def get_doctor_email_by_account(account_name: str) -> str | None:
     """アカウント名から医員のメールアドレスを取得"""
     doctors = get_doctors(active_only=False)
