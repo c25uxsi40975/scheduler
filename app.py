@@ -10,6 +10,7 @@ import requests
 from database import (
     init_db, get_doctors,
     is_admin_password_set, set_admin_password, verify_admin_password,
+    is_dev_password_set, set_dev_password, verify_dev_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password, verify_doctor_by_account,
     update_doctor_email, update_doctor_account_name, update_doctor_notification_settings, update_calendar_shared_emails,
@@ -36,6 +37,7 @@ from pages import (
     admin_weekday_config, admin_calendar,
 )
 from pages import weekday_admin, weekday_doctor
+from pages import dev_test
 
 # ---- 初期設定 ----
 st.set_page_config(
@@ -93,6 +95,8 @@ if "doctor_section" not in st.session_state:
     st.session_state.doctor_section = None  # 医員の現在のセクション選択
 if "subadmin_doctor" not in st.session_state:
     st.session_state.subadmin_doctor = None  # 副管理者としてログインした医員dict
+if "dev_authenticated" not in st.session_state:
+    st.session_state.dev_authenticated = False
 
 # ---- rerun 後のトースト通知 ----
 if "_toast_msg" in st.session_state:
@@ -114,11 +118,66 @@ def _check_session_timeout():
         st.session_state.doctor_authenticated = False
         st.session_state.doctor_id = None
         st.session_state.doctor_section = None
+        st.session_state.dev_authenticated = False
         st.warning("セッションがタイムアウトしました。再度ログインしてください。")
         st.stop()
     st.session_state["_last_activity"] = now
 
 _check_session_timeout()
+
+
+def _show_dev_login():
+    """開発者パスワード認証画面"""
+    st.markdown("<h2>🔧 開発者ログイン</h2>", unsafe_allow_html=True)
+    st.markdown("---")
+
+    if not is_dev_password_set():
+        st.info("開発者パスワードが未設定です。初回セットアップを行います。")
+        setup_token_input = st.text_input(
+            "セットアップトークン", type="password", key="dev_setup_token",
+            help="Streamlit Secretsに設定された setup_token を入力してください",
+        )
+        pw1 = st.text_input("パスワード", type="password", key="dev_pw_new1")
+        pw2 = st.text_input("パスワード（確認）", type="password", key="dev_pw_new2")
+        if st.button("パスワードを設定", type="primary"):
+            import hmac
+            expected_token = st.secrets.get("setup_token", "")
+            if not expected_token:
+                st.error("setup_token が Secrets に未設定です。")
+            elif not hmac.compare_digest(setup_token_input, expected_token):
+                st.error("セットアップトークンが正しくありません")
+            elif not pw1 or pw1 != pw2:
+                st.error("パスワードが一致しないか未入力です")
+            else:
+                pw_ok, pw_msg = validate_password(pw1)
+                if not pw_ok:
+                    st.error(pw_msg)
+                else:
+                    set_dev_password(pw1)
+                    log_event("dev_password_set", "developer", "初回セットアップ")
+                    st.success("開発者パスワードを設定しました。ログインしてください。")
+                    st.rerun()
+    else:
+        allowed, remaining = check_rate_limit("developer")
+        if not allowed:
+            st.error(f"ログイン試行回数の上限に達しました。{remaining}秒後にお試しください。")
+        else:
+            pw = st.text_input("パスワード", type="password", key="dev_pw_login")
+            if st.button("ログイン", type="primary", key="dev_login_submit"):
+                if verify_dev_password(pw):
+                    reset_rate_limit("developer")
+                    log_event("dev_login", "developer")
+                    st.session_state.dev_authenticated = True
+                    st.rerun()
+                else:
+                    record_failed_attempt("developer")
+                    log_event("dev_login_failed", "developer")
+                    st.error("パスワードが正しくありません")
+
+    st.markdown("---")
+    if st.button("← 戻る", key="dev_back"):
+        st.session_state.role = None
+        st.rerun()
 
 
 def _show_role_selection():
@@ -131,6 +190,12 @@ def _show_role_selection():
         st.rerun()
     if st.button("医員としてログイン", use_container_width=True, type="primary"):
         st.session_state.role = "doctor"
+        st.rerun()
+
+    # 開発者ログイン（左下にスパナアイコン）
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    if st.button("🔧", key="dev_login_btn", help="開発者ログイン"):
+        st.session_state.role = "developer"
         st.rerun()
 
 
@@ -855,3 +920,18 @@ elif st.session_state.role == "doctor":
             st.markdown("---")
 
             _show_doctor_tabs(doctor)
+
+elif st.session_state.role == "developer":
+    if not st.session_state.dev_authenticated:
+        _show_dev_login()
+    else:
+        col_title, _, col_logout = st.columns([3, 1, 2])
+        with col_title:
+            st.markdown("**🔧 開発テスト**")
+        with col_logout:
+            if st.button("ログアウト", use_container_width=True):
+                st.session_state.role = None
+                st.session_state.dev_authenticated = False
+                st.rerun()
+        st.markdown("---")
+        dev_test.render()

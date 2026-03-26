@@ -26,6 +26,7 @@ from database.operational import (
 )
 from database.auth import (
     is_admin_password_set, set_admin_password, verify_admin_password,
+    is_dev_password_set, set_dev_password, verify_dev_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
     verify_doctor_individual_password,
     get_doctor_by_account, verify_doctor_by_account,

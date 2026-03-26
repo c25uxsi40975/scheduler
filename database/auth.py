@@ -78,6 +78,27 @@ def verify_admin_password(password: str) -> bool:
     return True
 
 
+# ---- Developer Auth ----
+
+def is_dev_password_set() -> bool:
+    return _get_setting("dev_password") is not None
+
+
+def set_dev_password(password: str):
+    _set_setting("dev_password", _hash_password(password))
+
+
+def verify_dev_password(password: str) -> bool:
+    stored = _get_setting("dev_password")
+    if not stored:
+        return False
+    if not _verify_password(password, stored):
+        return False
+    if _is_legacy_hash(stored):
+        _set_setting("dev_password", _hash_password(password))
+    return True
+
+
 # ---- Doctor Auth ----
 
 def is_doctor_individual_password_set(doctor_id) -> bool:

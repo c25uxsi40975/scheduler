@@ -138,6 +138,141 @@ function doPost(e) {
     } else if (data.action === "calendar_update_sharing") {
       handleCalendarSharingUpdate(data);
 
+    // ---- 開発テスト用 ----
+    // 土曜メールテスト
+    } else if (data.action === "test_sat_schedule_confirmed") {
+      var testResult = testSatScheduleConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_sat_preference_confirmed") {
+      var testResult = testSatPreferenceConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_sat_all_complete") {
+      var testResult = testSatAllComplete(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_sat_deadline_reminder") {
+      var testResult = testSatDeadlineReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_sat_deadline_overdue") {
+      var testResult = testSatDeadlineOverdue(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_sat_friday_reminder") {
+      var testResult = testSatFridayReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_password_reset") {
+      var testResult = testPasswordReset(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // 平日メールテスト
+    } else if (data.action === "test_wd_schedule_confirmed") {
+      var testResult = testWdScheduleConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_preference_confirmed") {
+      var testResult = testWdPreferenceConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_all_complete") {
+      var testResult = testWdAllComplete(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_deadline_reminder") {
+      var testResult = testWdDeadlineReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_deadline_overdue") {
+      var testResult = testWdDeadlineOverdue(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_day_before_reminder") {
+      var testResult = testWdDayBeforeReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_shift_swap") {
+      var testResult = testWdShiftSwap(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_readjust_request") {
+      var testResult = testWdReadjustRequest(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_readjusted") {
+      var testResult = testWdReadjusted(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // 統合メールテスト
+    } else if (data.action === "test_weekly_integrated") {
+      var testResult = testWeeklyIntegrated(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // 土曜LINEテスト
+    } else if (data.action === "test_line_sat_schedule_confirmed") {
+      var testResult = testLineSatScheduleConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_line_sat_deadline_reminder") {
+      var testResult = testLineSatDeadlineReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_line_sat_friday_reminder") {
+      var testResult = testLineSatFridayReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // 平日LINEテスト
+    } else if (data.action === "test_line_wd_schedule_confirmed") {
+      var testResult = testLineWdScheduleConfirmed(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_line_wd_day_before_reminder") {
+      var testResult = testLineWdDayBeforeReminder(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // 統合LINEテスト
+    } else if (data.action === "test_line_weekly_integrated") {
+      var testResult = testLineWeeklyIntegrated(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
+    // LINE Push残数取得
+    } else if (data.action === "get_line_quota") {
+      var testResult = getLineQuota();
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
     // LINE LIFF連携完了（Streamlitから呼ばれる）
     } else if (data.action === "line_link_complete") {
       switchToLinkedRichMenu(data.line_user_id);
