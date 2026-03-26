@@ -161,10 +161,10 @@ def _render_dummy_data_tab():
 
     wd_days = st.multiselect(
         "曜日を選択", DOW_NAMES, default=["月", "水"],
-        key="dev_wd_days",
+        key="dev_wd_days_input",
     )
-    wd_section = st.text_input("セクション名", value="テストセクション", key="dev_wd_section")
-    wd_clinic = st.text_input("外勤先名", value="テスト平日外勤X", key="dev_wd_clinic")
+    wd_section = st.text_input("セクション名", value="テストセクション", key="dev_wd_section_input")
+    wd_clinic = st.text_input("外勤先名", value="テスト平日外勤X", key="dev_wd_clinic_input")
 
     if st.button("平日ダミースケジュールを生成", key="gen_wd"):
         dow_map = {v: i for i, v in enumerate(DOW_NAMES)}
@@ -178,9 +178,9 @@ def _render_dummy_data_tab():
             )
         st.session_state["dev_wd_assignments"] = wd_assignments
         st.session_state["dev_wd_months"] = target_months
-        st.session_state["dev_wd_section"] = wd_section
-        st.session_state["dev_wd_clinic"] = wd_clinic
-        st.session_state["dev_wd_days"] = wd_days
+        st.session_state["dev_wd_section_val"] = wd_section
+        st.session_state["dev_wd_clinic_val"] = wd_clinic
+        st.session_state["dev_wd_days_val"] = wd_days
         st.success(f"平日ダミースケジュールを生成しました ({len(wd_assignments)} 件)")
 
     # ---- 統合プレビュー ----
@@ -307,8 +307,8 @@ def _render_email_test_tab():
     if wd_data:
         st.markdown("---")
         st.markdown("#### 平日メール")
-        wd_section = st.session_state.get("dev_wd_section", "テストセクション")
-        wd_clinic = st.session_state.get("dev_wd_clinic", "テスト平日外勤X")
+        wd_section = st.session_state.get("dev_wd_section_val", "テストセクション")
+        wd_clinic = st.session_state.get("dev_wd_clinic_val", "テスト平日外勤X")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -401,7 +401,7 @@ def _render_email_test_tab():
             payload["sat_assignments"] = sat_data
             payload["wd_assignments"] = wd_data
             payload["sat_clinics"] = [{"id": c["id"], "name": c["name"]} for c in DUMMY_CLINICS_SAT]
-            payload["wd_clinic_name"] = st.session_state.get("dev_wd_clinic", "テスト平日外勤X")
+            payload["wd_clinic_name"] = st.session_state.get("dev_wd_clinic_val", "テスト平日外勤X")
             payload["year_months"] = sat_months
             _post_to_gas("test_weekly_integrated", payload)
 
@@ -467,7 +467,7 @@ def _render_line_test_tab():
     # ---- 平日LINE ----
     if wd_data:
         st.markdown("#### 平日LINE")
-        wd_clinic = st.session_state.get("dev_wd_clinic", "テスト平日外勤X")
+        wd_clinic = st.session_state.get("dev_wd_clinic_val", "テスト平日外勤X")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -495,7 +495,7 @@ def _render_line_test_tab():
             payload["sat_assignments"] = sat_data
             payload["wd_assignments"] = wd_data
             payload["sat_clinics"] = [{"id": c["id"], "name": c["name"]} for c in DUMMY_CLINICS_SAT]
-            payload["wd_clinic_name"] = st.session_state.get("dev_wd_clinic", "テスト平日外勤X")
+            payload["wd_clinic_name"] = st.session_state.get("dev_wd_clinic_val", "テスト平日外勤X")
             payload["year_months"] = sat_months
             _post_to_gas("test_line_weekly_integrated", payload)
 
