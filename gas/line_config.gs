@@ -182,10 +182,11 @@ function saveDoctorLineUserId(doctorRow, userId) {
 // パスワード検証は LIFF 経由で Streamlit（Python bcrypt）側で行うため、
 // GAS 側の verifyPassword() は不要になりました。
 
-// ---- セッション管理 ----
+// ---- セッション管理（CacheService ベース） ----
 
 /**
  * LINEセッションシートを取得（なければ作成）
+ * 移行期間中の互換性のため残す
  */
 function getSessionSheet() {
   var ss = getOperationalSpreadsheet();
@@ -202,101 +203,71 @@ function getSessionSheet() {
 }
 
 /**
- * ユーザーのセッションを取得
- * @return {Object|null} セッションデータ（タイムアウト済みなら null）
+ * ユーザーのセッションを取得（CacheService）
+ * @return {Object|null} セッションデータ
  */
 function getSession(userId) {
-  var sheet = getSessionSheet();
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf("user_id")]) === userId) {
-      var updatedAt = data[i][headers.indexOf("updated_at")];
-      // タイムアウトチェック
-      if (updatedAt) {
-        var elapsed = (new Date() - new Date(updatedAt)) / 60000;
-        if (elapsed > LINE_SESSION_TIMEOUT_MIN) {
-          deleteSession(userId);
-          return null;
-        }
-      }
-      var session = {row: i + 1};
-      for (var j = 0; j < headers.length; j++) {
-        session[headers[j]] = String(data[i][j] || "");
-      }
-      return session;
-    }
+  var cache = CacheService.getScriptCache();
+  var raw = cache.get("line_session_" + userId);
+  if (!raw) return null;
+  try {
+    var session = JSON.parse(raw);
+    return session;
+  } catch (e) {
+    return null;
   }
-  return null;
 }
 
 /**
- * セッションを作成または更新
+ * セッションを作成または更新（CacheService）
  */
 function upsertSession(userId, updates) {
-  var sheet = getSessionSheet();
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-  var now = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy-MM-dd HH:mm:ss");
-
-  // 既存セッションを探す
-  var rowIdx = -1;
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][headers.indexOf("user_id")]) === userId) {
-      rowIdx = i + 1;
-      break;
-    }
+  var cache = CacheService.getScriptCache();
+  var existing = getSession(userId) || {};
+  for (var key in updates) {
+    existing[key] = updates[key];
   }
-
-  updates.updated_at = now;
-  updates.user_id = userId;
-
-  if (rowIdx > 0) {
-    // 更新
-    for (var key in updates) {
-      var colIdx = headers.indexOf(key);
-      if (colIdx >= 0) {
-        sheet.getRange(rowIdx, colIdx + 1).setValue(updates[key]);
-      }
-    }
-  } else {
-    // 新規作成
-    var row = headers.map(function(h) { return updates[h] || ""; });
-    sheet.appendRow(row);
-  }
+  existing.user_id = userId;
+  existing.updated_at = new Date().toISOString();
+  // 30分 = 1800秒
+  cache.put("line_session_" + userId, JSON.stringify(existing), 1800);
 }
 
 /**
- * セッションを削除
+ * セッションを削除（CacheService）
  */
 function deleteSession(userId) {
-  var sheet = getSessionSheet();
-  var data = sheet.getDataRange().getValues();
-  var headers = data[0];
-  var colUserId = headers.indexOf("user_id");
-
-  for (var i = data.length - 1; i >= 1; i--) {
-    if (String(data[i][colUserId]) === userId) {
-      sheet.deleteRow(i + 1);
-    }
-  }
+  var cache = CacheService.getScriptCache();
+  cache.remove("line_session_" + userId);
 }
 
-// ---- 設定シート読み取り ----
+// ---- 設定シート読み取り（リクエスト内キャッシュ） ----
+
+var _settingsCache = null;
+
+/**
+ * 設定シートの全値をマップで取得（リクエスト内キャッシュ）
+ */
+function getAllSettings() {
+  if (_settingsCache) return _settingsCache;
+  var ss = getMasterSpreadsheet();
+  var sheet = getSheet(ss, "設定");
+  if (!sheet) return {};
+  var data = sheet.getDataRange().getValues();
+  var map = {};
+  for (var i = 1; i < data.length; i++) {
+    map[String(data[i][0])] = String(data[i][1]);
+  }
+  _settingsCache = map;
+  return map;
+}
 
 /**
  * 設定シートから値を取得
  */
 function getSettingValue(key) {
-  var ss = getMasterSpreadsheet();
-  var sheet = getSheet(ss, "設定");
-  if (!sheet) return null;
-  var data = sheet.getDataRange().getValues();
-  for (var i = 1; i < data.length; i++) {
-    if (String(data[i][0]) === key) return String(data[i][1]);
-  }
-  return null;
+  var settings = getAllSettings();
+  return settings[key] || null;
 }
 
 /**
