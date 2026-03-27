@@ -453,6 +453,20 @@ function handleConfirmation(doctor, userId, text, replyToken, session) {
 // ---- 予定確認 ----
 
 /**
+ * 直近のスケジュール対象月リストを返す（前2ヶ月〜後3ヶ月）
+ */
+function getRecentScheduleMonths() {
+  var now = new Date();
+  var months = [];
+  for (var offset = -2; offset <= 3; offset++) {
+    var d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+    var ym = Utilities.formatDate(d, "Asia/Tokyo", "yyyy-MM");
+    months.push(ym);
+  }
+  return months;
+}
+
+/**
  * 確定済みスケジュールがある月を収集し、Quick Reply で月選択を表示
  */
 function showSchedule(doctor, userId, replyToken) {
@@ -460,14 +474,13 @@ function showSchedule(doctor, userId, replyToken) {
   var ssMaster = getMasterSpreadsheet();
   var monthSet = {};
 
-  // 土曜スケジュール: シート名 "スケジュール_YYYY-MM" を走査
-  var sheets = ss.getSheets();
-  for (var i = 0; i < sheets.length; i++) {
-    var name = sheets[i].getName();
-    var match = name.match(/^スケジュール_(\d{4}-\d{2})$/);
-    if (!match) continue;
-    var ym = match[1];
-    var data = sheets[i].getDataRange().getValues();
+  // 土曜スケジュール: 直近の月のみ getSheetByName で直接アクセス
+  var candidates = getRecentScheduleMonths();
+  for (var i = 0; i < candidates.length; i++) {
+    var sheet = ss.getSheetByName("スケジュール_" + candidates[i]);
+    if (!sheet) continue;
+    var ym = candidates[i];
+    var data = sheet.getDataRange().getValues();
     if (data.length <= 1) continue;
     var headers = data[0];
     var colConfirmed = headers.indexOf("is_confirmed");
@@ -496,14 +509,13 @@ function showSchedule(doctor, userId, replyToken) {
 
     var ssSec = getWeekdaySectionSpreadsheet(ssMaster, cfg.section);
     if (!ssSec) continue;
-    var secSheets = ssSec.getSheets();
-    for (var s = 0; s < secSheets.length; s++) {
-      var secName = secSheets[s].getName();
-      var secMatch = secName.match(/^平日スケジュール_(\d{4}-\d{2})$/);
-      if (!secMatch) continue;
-      var secYm = secMatch[1];
+    // 直近の月のみ getSheetByName で直接アクセス
+    for (var ci = 0; ci < candidates.length; ci++) {
+      var secYm = candidates[ci];
       if (monthSet[secYm]) continue; // 既に追加済み
-      var secData = secSheets[s].getDataRange().getValues();
+      var secSheet = ssSec.getSheetByName("平日スケジュール_" + secYm);
+      if (!secSheet) continue;
+      var secData = secSheet.getDataRange().getValues();
       if (secData.length <= 1) continue;
       var secHeaders = secData[0];
       var colDoctorId = secHeaders.indexOf("doctor_id");

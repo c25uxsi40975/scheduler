@@ -42,13 +42,19 @@ var ADMIN_EMAIL = "";
 var TEST_MODE = true;
 var TEST_NOTICE = "【テスト送信】このメールはテストです。記載の外勤先は実際のものではありません。実際の外勤先は別途ご確認ください。\n\n";
 
-// ---- スプレッドシート取得 ----
+// ---- スプレッドシート取得（リクエスト内キャッシュ） ----
+
+var _masterSS = null;
+var _operationalSS = null;
 
 /**
  * 運用データ用スプレッドシート（このスクリプトが設置されているスプレッドシート）
  */
 function getOperationalSpreadsheet() {
-  return SpreadsheetApp.getActiveSpreadsheet();
+  if (!_operationalSS) {
+    _operationalSS = SpreadsheetApp.getActiveSpreadsheet();
+  }
+  return _operationalSS;
 }
 
 /**
@@ -58,7 +64,10 @@ function getMasterSpreadsheet() {
   if (!MASTER_SPREADSHEET_ID) {
     throw new Error("MASTER_SPREADSHEET_ID が未設定です。マスタ用スプレッドシートのIDを設定してください。");
   }
-  return SpreadsheetApp.openById(MASTER_SPREADSHEET_ID);
+  if (!_masterSS) {
+    _masterSS = SpreadsheetApp.openById(MASTER_SPREADSHEET_ID);
+  }
+  return _masterSS;
 }
 
 // ---- Web App エンドポイント ----
@@ -356,13 +365,7 @@ function sendToAdmins(subject, body) {
  * シートを名前で取得（存在しなければ null）
  */
 function getSheet(ss, name) {
-  var sheets = ss.getSheets();
-  for (var i = 0; i < sheets.length; i++) {
-    if (sheets[i].getName() === name) {
-      return sheets[i];
-    }
-  }
-  return null;
+  return ss.getSheetByName(name);
 }
 
 /**
@@ -426,33 +429,54 @@ function getClinicMap(ss) {
 
 // ---- 平日セクション別スプレッドシート取得 ----
 
+var _weekdaySectionSSCache = {};
+
 /**
- * 平日外勤設定シートから対象セクションのスプレッドシートを取得
+ * 平日外勤設定シートから対象セクションのスプレッドシートを取得（リクエスト内キャッシュ）
  * @param {Spreadsheet} ssMaster マスタスプレッドシート
  * @param {string} section セクション名
  * @return {Spreadsheet|null}
  */
 function getWeekdaySectionSpreadsheet(ssMaster, section) {
+  if (_weekdaySectionSSCache[section] !== undefined) {
+    return _weekdaySectionSSCache[section];
+  }
   var sheet = getSheet(ssMaster, "平日外勤設定");
-  if (!sheet) return null;
+  if (!sheet) {
+    _weekdaySectionSSCache[section] = null;
+    return null;
+  }
   var data = sheet.getDataRange().getValues();
-  if (data.length <= 1) return null;
+  if (data.length <= 1) {
+    _weekdaySectionSSCache[section] = null;
+    return null;
+  }
   var headers = data[0];
   var colSection = headers.indexOf("section");
   var colKey = headers.indexOf("spreadsheet_key");
-  if (colSection === -1 || colKey === -1) return null;
+  if (colSection === -1 || colKey === -1) {
+    _weekdaySectionSSCache[section] = null;
+    return null;
+  }
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][colSection]) === section) {
       var key = String(data[i][colKey] || "");
-      if (!key) return null;
+      if (!key) {
+        _weekdaySectionSSCache[section] = null;
+        return null;
+      }
       try {
-        return SpreadsheetApp.openById(key);
+        var result = SpreadsheetApp.openById(key);
+        _weekdaySectionSSCache[section] = result;
+        return result;
       } catch (e) {
         Logger.log("セクションSS取得失敗: " + section + " - " + e.message);
+        _weekdaySectionSSCache[section] = null;
         return null;
       }
     }
   }
+  _weekdaySectionSSCache[section] = null;
   return null;
 }
 
