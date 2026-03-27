@@ -7,11 +7,14 @@
 
 // ---- 平日外勤ヘルパー関数 ----
 
+var _weekdayConfigsCache = null;
+
 /**
- * 平日外勤設定を全件取得
+ * 平日外勤設定を全件取得（リクエスト内キャッシュ）
  * @return {Array} [{section, clinic_name, days_of_week, assigned_doctors, subadmin_doctors, is_active}, ...]
  */
 function getWeekdayConfigs(ssMaster) {
+  if (_weekdayConfigsCache) return _weekdayConfigsCache;
   var sheet = getSheet(ssMaster, "平日外勤設定");
   if (!sheet) return [];
 
@@ -36,6 +39,7 @@ function getWeekdayConfigs(ssMaster) {
     try { obj.specimen_days = JSON.parse(obj.specimen_days || "[]"); } catch(e) { obj.specimen_days = []; }
     result.push(obj);
   }
+  _weekdayConfigsCache = result;
   return result;
 }
 
