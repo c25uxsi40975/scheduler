@@ -57,6 +57,8 @@ def get_weekday_configs():
         r["specimen_enabled"] = _safe_int(r.get("specimen_enabled", 0))
         r["specimen_doctors"] = _safe_json_loads(r.get("specimen_doctors", "[]"))
         r["specimen_days"] = _safe_json_loads(r.get("specimen_days", "[]"))
+        r["specimen_priority"] = _safe_json_loads(r.get("specimen_priority", "{}"))
+        r["specimen_subadmin_allowed"] = _safe_int(r.get("specimen_subadmin_allowed", 0))
         result.append(r)
     return result
 
@@ -104,30 +106,37 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
     doctors = get_doctors(active_only=False)
     doc_map = {d["id"]: d for d in doctors}
 
+    priority_map = cfg.get("specimen_priority", {})
+
     candidate_docs = []
     for did in candidates:
         doc = doc_map.get(did)
-        if doc:
+        if not doc:
+            continue
+        if priority_map:
+            rank = priority_map.get(str(did), priority_map.get(did, 9999))
+        else:
+            # フォールバック: 入局年度（小さい=先輩=高優先）
             acct = str(doc.get("account", ""))
-            enrollment_year = acct[:4] if len(acct) >= 4 else "9999"
-            candidate_docs.append({
-                "doctor_id": did,
-                "doctor_name": doc["name"],
-                "enrollment_year": enrollment_year,
-            })
+            rank = acct[:4] if len(acct) >= 4 else "9999"
+        candidate_docs.append({
+            "doctor_id": did,
+            "doctor_name": doc["name"],
+            "rank": rank,
+        })
 
     if not candidate_docs:
         return None
 
-    candidate_docs.sort(key=lambda x: x["enrollment_year"])
-    most_senior_year = candidate_docs[0]["enrollment_year"]
-    same_year = [d for d in candidate_docs if d["enrollment_year"] == most_senior_year]
+    candidate_docs.sort(key=lambda x: (x["rank"] if isinstance(x["rank"], int) else int(x["rank"])))
+    top_rank = candidate_docs[0]["rank"]
+    same_rank = [d for d in candidate_docs if d["rank"] == top_rank]
 
     return {
-        "doctor_id": same_year[0]["doctor_id"],
-        "doctor_name": same_year[0]["doctor_name"],
-        "conflict": len(same_year) > 1,
-        "conflict_doctors": same_year if len(same_year) > 1 else [],
+        "doctor_id": same_rank[0]["doctor_id"],
+        "doctor_name": same_rank[0]["doctor_name"],
+        "conflict": len(same_rank) > 1,
+        "conflict_doctors": same_rank if len(same_rank) > 1 else [],
     }
 
 
@@ -198,7 +207,7 @@ def update_weekday_config(section: str, **kwargs):
     updates = []
     for key, val in kwargs.items():
         if key in ("days_of_week", "assigned_doctors", "subadmin_doctors",
-                   "specimen_doctors", "specimen_days"):
+                   "specimen_doctors", "specimen_days", "specimen_priority"):
             val = json.dumps(val)
         if key == "clinic_name":
             val = _sanitize_cell_value(val)

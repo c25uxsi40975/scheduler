@@ -161,9 +161,57 @@ def render():
                             format_func=lambda x: DAY_NAMES.get(x, str(x)),
                             key=f"wk_specimen_days_{section}",
                         )
+                        # 優先順位設定
+                        if edit_specimen_doctors:
+                            st.markdown("**優先順位設定**（数値が小さいほど優先。同じ数値＝同列・要相談）")
+                            cur_priority = cfg.get("specimen_priority", {})
+                            edit_priority = {}
+                            sorted_spec_docs = sorted(
+                                edit_specimen_doctors,
+                                key=lambda did: (cur_priority.get(str(did), cur_priority.get(did, 999)),
+                                                 _doc_map_edit.get(did, "")),
+                            )
+                            for idx, did in enumerate(sorted_spec_docs):
+                                cur_rank = cur_priority.get(str(did), cur_priority.get(did, idx + 1))
+                                col_n, col_r = st.columns([3, 1])
+                                with col_n:
+                                    st.markdown(f"　{_doc_map_edit.get(did, f'ID:{did}')}")
+                                with col_r:
+                                    rank_val = st.number_input(
+                                        "順位", min_value=1,
+                                        max_value=len(edit_specimen_doctors),
+                                        value=min(int(cur_rank), len(edit_specimen_doctors)),
+                                        key=f"wk_specpri_{section}_{did}",
+                                        label_visibility="collapsed",
+                                    )
+                                    edit_priority[str(did)] = rank_val
+                            # 同列プレビュー
+                            rank_groups = {}
+                            for did_s, rv in edit_priority.items():
+                                rank_groups.setdefault(rv, []).append(did_s)
+                            tied = {r: ids for r, ids in rank_groups.items() if len(ids) > 1}
+                            if tied:
+                                st.caption("同列グループ（同日勤務時は要相談）:")
+                                for r in sorted(tied):
+                                    names = ", ".join(
+                                        _doc_map_edit.get(int(d), _doc_map_edit.get(d, "?"))
+                                        for d in tied[r]
+                                    )
+                                    st.caption(f"　順位 {r}: {names}")
+                        else:
+                            edit_priority = {}
+                        # 副管理者への権限委譲
+                        edit_specimen_subadmin = st.checkbox(
+                            "副管理者に検体管理を許可",
+                            value=bool(cfg.get("specimen_subadmin_allowed")),
+                            key=f"wk_specimen_subadmin_{section}",
+                            help="有効にすると副管理者が検体対象メンバーと優先順位を設定できます",
+                        )
                     else:
                         edit_specimen_doctors = []
                         edit_specimen_days = []
+                        edit_priority = {}
+                        edit_specimen_subadmin = False
                     fc1, fc2 = st.columns(2)
                     with fc1:
                         if st.form_submit_button("保存"):
@@ -180,6 +228,8 @@ def render():
                                     specimen_enabled=1 if edit_specimen_enabled else 0,
                                     specimen_doctors=edit_specimen_doctors,
                                     specimen_days=edit_specimen_days,
+                                    specimen_priority=edit_priority,
+                                    specimen_subadmin_allowed=1 if edit_specimen_subadmin else 0,
                                 )
                                 st.session_state.pop(f"wk_editing_{section}", None)
                                 st.success("保存しました")

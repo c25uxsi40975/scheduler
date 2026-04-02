@@ -37,6 +37,7 @@ function getWeekdayConfigs(ssMaster) {
     obj.specimen_enabled = String(obj.specimen_enabled) === "1";
     try { obj.specimen_doctors = JSON.parse(obj.specimen_doctors || "[]"); } catch(e) { obj.specimen_doctors = []; }
     try { obj.specimen_days = JSON.parse(obj.specimen_days || "[]"); } catch(e) { obj.specimen_days = []; }
+    try { obj.specimen_priority = JSON.parse(obj.specimen_priority || "{}"); } catch(e) { obj.specimen_priority = {}; }
     result.push(obj);
   }
   _weekdayConfigsCache = result;
@@ -75,30 +76,40 @@ function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
     scheduledIds[String(assignments[j].doctor_id)] = true;
   }
 
+  var priorityMap = cfg.specimen_priority || {};
+  var hasPriority = Object.keys(priorityMap).length > 0;
+
   var candidates = [];
   var allIds = Object.keys(specimenDoctors);
   for (var k = 0; k < allIds.length; k++) {
     var did = allIds[k];
     if (scheduledIds[did] && doctors[did]) {
-      var acct = doctors[did].account || "9999";
-      candidates.push({ id: did, name: doctors[did].name, year: acct.substring(0, 4) });
+      var rank;
+      if (hasPriority) {
+        rank = (priorityMap[did] !== undefined) ? Number(priorityMap[did]) : 9999;
+      } else {
+        // フォールバック: 入局年度
+        var acct = doctors[did].account || "9999";
+        rank = acct.substring(0, 4);
+      }
+      candidates.push({ id: did, name: doctors[did].name, rank: rank });
     }
   }
 
   if (candidates.length === 0) return null;
-  candidates.sort(function(a, b) { return a.year < b.year ? -1 : (a.year > b.year ? 1 : 0); });
+  candidates.sort(function(a, b) { return (a.rank < b.rank) ? -1 : (a.rank > b.rank ? 1 : 0); });
 
-  var seniorYear = candidates[0].year;
-  var sameYear = [];
+  var topRank = candidates[0].rank;
+  var sameRank = [];
   for (var m = 0; m < candidates.length; m++) {
-    if (candidates[m].year === seniorYear) sameYear.push(candidates[m]);
+    if (candidates[m].rank === topRank) sameRank.push(candidates[m]);
   }
 
   return {
-    doctorId: sameYear[0].id,
-    doctorName: sameYear[0].name,
-    conflict: sameYear.length > 1,
-    conflictDoctors: sameYear
+    doctorId: sameRank[0].id,
+    doctorName: sameRank[0].name,
+    conflict: sameRank.length > 1,
+    conflictDoctors: sameRank
   };
 }
 
