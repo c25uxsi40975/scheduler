@@ -146,27 +146,34 @@ def render(section: str):
 
     st.markdown("---")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    tab_names = [
         "メンバー管理", "対象日管理", "スロット管理", "日別設定",
         "希望状況一覧", "スケジュール作成", "スケジュール確認", "スケジュール再調整",
-    ])
+    ]
+    show_specimen_tab = cfg.get("specimen_enabled") and cfg.get("specimen_subadmin_allowed")
+    if show_specimen_tab:
+        tab_names.append("同意書・検体管理")
+    tabs = st.tabs(tab_names)
 
-    with tab1:
+    with tabs[0]:
         _render_members(section, cfg, assigned_doctor_ids)
-    with tab2:
+    with tabs[1]:
         _render_target_dates(section, days_of_week)
-    with tab3:
+    with tabs[2]:
         _render_slots(section, days_of_week)
-    with tab4:
+    with tabs[3]:
         _render_slot_overrides(section, days_of_week)
-    with tab5:
+    with tabs[4]:
         _render_preferences(section, assigned_doctor_ids)
-    with tab6:
+    with tabs[5]:
         _render_schedule(section, cfg, assigned_doctor_ids, days_of_week)
-    with tab7:
+    with tabs[6]:
         _render_schedule_view(section, cfg, assigned_doctor_ids, days_of_week)
-    with tab8:
+    with tabs[7]:
         _render_readjust(section, cfg, assigned_doctor_ids, days_of_week)
+    if show_specimen_tab:
+        with tabs[8]:
+            _render_specimen_management(section, cfg, assigned_doctor_ids)
 
 
 def _render_members(section: str, cfg: dict, assigned_doctor_ids: list):
@@ -192,6 +199,82 @@ def _render_members(section: str, cfg: dict, assigned_doctor_ids: list):
         if st.form_submit_button("メンバーを保存", type="primary"):
             update_weekday_config(section, assigned_doctors=new_assigned)
             st.success("メンバーを保存しました")
+            st.rerun()
+
+
+def _render_specimen_management(section: str, cfg: dict, assigned_doctor_ids: list):
+    """同意書・検体管理タブ（副管理者用）"""
+    st.subheader("同意書・検体確認 管理")
+
+    specimen_days = cfg.get("specimen_days", [])
+    days_label = "・".join(DAY_NAMES.get(d, str(d)) for d in specimen_days) if specimen_days else "未設定"
+    st.info(f"検体確認機能: **有効**　｜　対象曜日: **{days_label}**（主管理者が設定）")
+
+    all_doctors = get_doctors()
+    doc_map = build_display_name_map(all_doctors)
+    doc_ids = [d["id"] for d in all_doctors]
+
+    member_options = [did for did in assigned_doctor_ids if did in doc_ids]
+
+    cur_specimen_docs = cfg.get("specimen_doctors", [])
+    cur_priority = cfg.get("specimen_priority", {})
+
+    with st.form(f"wkadm_specimen_mgmt_{section}"):
+        st.markdown("**対象メンバー**")
+        edit_specimen_doctors = st.multiselect(
+            "検体確認対象メンバー",
+            options=member_options,
+            default=[did for did in cur_specimen_docs if did in member_options],
+            format_func=lambda x: doc_map.get(x, "?"),
+            key=f"wkadm_specimen_docs_{section}",
+        )
+
+        edit_priority = {}
+        if edit_specimen_doctors:
+            st.markdown("---")
+            st.markdown("**優先順位設定**（数値が小さいほど優先。同じ数値＝同列・要相談）")
+            sorted_docs = sorted(
+                edit_specimen_doctors,
+                key=lambda did: (cur_priority.get(str(did), cur_priority.get(did, 999)),
+                                 doc_map.get(did, "")),
+            )
+            for idx, did in enumerate(sorted_docs):
+                cur_rank = cur_priority.get(str(did), cur_priority.get(did, idx + 1))
+                col_n, col_r = st.columns([3, 1])
+                with col_n:
+                    st.markdown(f"　{doc_map.get(did, f'ID:{did}')}")
+                with col_r:
+                    rank_val = st.number_input(
+                        "順位", min_value=1,
+                        max_value=len(edit_specimen_doctors),
+                        value=min(int(cur_rank), len(edit_specimen_doctors)),
+                        key=f"wkadm_specpri_{section}_{did}",
+                        label_visibility="collapsed",
+                    )
+                    edit_priority[str(did)] = rank_val
+
+            # 同列プレビュー
+            rank_groups = {}
+            for did_s, rv in edit_priority.items():
+                rank_groups.setdefault(rv, []).append(did_s)
+            tied = {r: ids for r, ids in rank_groups.items() if len(ids) > 1}
+            if tied:
+                st.markdown("---")
+                st.caption("同列グループ（同日勤務時は要相談）:")
+                for r in sorted(tied):
+                    names = ", ".join(
+                        doc_map.get(int(d), doc_map.get(d, "?"))
+                        for d in tied[r]
+                    )
+                    st.caption(f"　順位 {r}: {names}")
+
+        if st.form_submit_button("保存", type="primary", use_container_width=True):
+            update_weekday_config(
+                section,
+                specimen_doctors=edit_specimen_doctors,
+                specimen_priority=edit_priority,
+            )
+            st.success("検体管理設定を保存しました")
             st.rerun()
 
 
