@@ -72,13 +72,20 @@ def get_weekday_config_by_section(section: str):
     return None
 
 
+DOW_LABELS_JA = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
+
+
 def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
-    """検体確認担当者を判定する
+    """検体確認担当者を判定する（週単位）
+
+    同一ISO週に勤務する検体対象メンバーを集め、優先順位でランク付け。
+    同優先順位の医員が同じ週に複数いる場合は conflict=True。
 
     Returns:
         None: 検体確認が無効、対象曜日でない、候補なしの場合
         dict: {"doctor_id", "doctor_name", "conflict", "conflict_doctors"}
-              conflict=True は同学年が複数いて要相談
+              conflict=True は同優先順位が複数いて要相談
+              conflict_doctors の各要素に "weekdays" (勤務曜日リスト) を含む
     """
     from datetime import date as date_cls
 
@@ -86,8 +93,9 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
     if not cfg or not cfg.get("specimen_enabled"):
         return None
 
+    specimen_days = cfg.get("specimen_days", [])
     dt = date_cls.fromisoformat(date_str)
-    if dt.weekday() not in cfg.get("specimen_days", []):
+    if dt.weekday() not in specimen_days:
         return None
 
     specimen_doctor_ids = set(cfg.get("specimen_doctors", []))
@@ -98,15 +106,28 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
         year_month = date_str[:7]
         schedule = get_weekday_schedule(year_month, section)
 
-    scheduled_ids = {r["doctor_id"] for r in schedule if r["date"] == date_str}
-    candidates = specimen_doctor_ids & scheduled_ids
+    # 同一ISO週の全日付から候補を収集（週単位判定）
+    iso_year, iso_week, _ = dt.isocalendar()
+    week_scheduled = {}  # {doctor_id: set(weekday, ...)}
+    for r in schedule:
+        try:
+            rd = date_cls.fromisoformat(r["date"])
+        except (ValueError, TypeError):
+            continue
+        ry, rw, _ = rd.isocalendar()
+        if ry == iso_year and rw == iso_week:
+            week_scheduled.setdefault(r["doctor_id"], set()).add(rd.weekday())
+
+    candidates = specimen_doctor_ids & set(week_scheduled.keys())
     if not candidates:
         return None
 
     doctors = get_doctors(active_only=False)
     doc_map = {d["id"]: d for d in doctors}
 
-    priority_map = cfg.get("specimen_priority", {})
+    priority_map = cfg.get("specimen_priority") or {}
+    if not isinstance(priority_map, dict):
+        priority_map = {}
 
     candidate_docs = []
     for did in candidates:
@@ -123,6 +144,7 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
             "doctor_id": did,
             "doctor_name": doc["name"],
             "rank": rank,
+            "weekdays": sorted(week_scheduled.get(did, set())),
         })
 
     if not candidate_docs:

@@ -302,24 +302,8 @@ function syncPersonalCalendarForDoctor(doctorId, ssMaster) {
       var wdAssignments = getWeekdayAssignments(ssSec, ym2, null);
       if (wdAssignments.length === 0) continue;
 
-      // 日付ごとに検体確認担当を判定
-      var specByDate2 = {};
-      if (secCfg) {
-        var dateSet2 = {};
-        for (var di2 = 0; di2 < wdAssignments.length; di2++) {
-          dateSet2[String(wdAssignments[di2].date)] = true;
-        }
-        var uniqueDates2 = Object.keys(dateSet2);
-        for (var ui2 = 0; ui2 < uniqueDates2.length; ui2++) {
-          var ds2 = uniqueDates2[ui2];
-          var dayAsgn2 = [];
-          for (var dai2 = 0; dai2 < wdAssignments.length; dai2++) {
-            if (String(wdAssignments[dai2].date) === ds2) dayAsgn2.push(wdAssignments[dai2]);
-          }
-          var sr2 = getSpecimenAssignee(secCfg, ds2, dayAsgn2, doctors);
-          if (sr2) specByDate2[ds2] = sr2;
-        }
-      }
+      // 検体確認担当を週単位で判定
+      var specByDate2 = secCfg ? buildSpecimenByDate(secCfg, wdAssignments, doctors) : {};
 
       var tag2 = "[外勤調整:weekday:" + section + ":" + ym2 + "]";
       for (var j = 0; j < wdAssignments.length; j++) {
@@ -340,14 +324,9 @@ function syncPersonalCalendarForDoctor(doctorId, ssMaster) {
         var spDate2 = new Date(spd2 + "T00:00:00+09:00");
         var spTitle2, spDesc2;
         if (sp2.conflict) {
-          var oNames2 = [];
-          for (var sci2 = 0; sci2 < sp2.conflictDoctors.length; sci2++) {
-            if (sp2.conflictDoctors[sci2].id !== String(doctorId)) {
-              oNames2.push(sp2.conflictDoctors[sci2].name);
-            }
-          }
-          spTitle2 = "🧪 同意書・検体確認（" + oNames2.join("、") + "先生と要相談）";
-          spDesc2 = tag2 + "\n同意書・検体確認\n※同学年のため" + oNames2.join("、") + "先生と要相談";
+          var pLabels2 = buildConflictLabels(sp2, doctorId);
+          spTitle2 = "🧪 同意書・検体確認（" + pLabels2.join("・") + "と相談してください）";
+          spDesc2 = tag2 + "\n同意書・検体確認\n※同じ優先順位のため" + pLabels2.join("・") + "と相談してください";
         } else {
           spTitle2 = "🧪 同意書・検体確認";
           spDesc2 = tag2 + "\n同意書・検体確認";
@@ -555,36 +534,9 @@ function syncWeekdayCalendar(data, ssMaster) {
 
     var assignments = getWeekdayAssignments(ssSec, ym, null);
 
-    // 日付ごとに検体確認担当を判定
-    var specimenByDate = {};
-    if (cfg) {
-      Logger.log("検体確認設定: enabled=" + cfg.specimen_enabled
-        + ", doctors=" + JSON.stringify(cfg.specimen_doctors)
-        + ", days=" + JSON.stringify(cfg.specimen_days));
-      var dateSet = {};
-      for (var di = 0; di < assignments.length; di++) {
-        dateSet[String(assignments[di].date)] = true;
-      }
-      var uniqueDates = Object.keys(dateSet);
-      Logger.log("検体確認: " + ym + " の日付数=" + uniqueDates.length
-        + ", サンプル日付=" + (uniqueDates[0] || "なし"));
-      for (var ui = 0; ui < uniqueDates.length; ui++) {
-        var dateStr = uniqueDates[ui];
-        var dayAssignments = [];
-        for (var dai = 0; dai < assignments.length; dai++) {
-          if (String(assignments[dai].date) === dateStr) dayAssignments.push(assignments[dai]);
-        }
-        var specResult = getSpecimenAssignee(cfg, dateStr, dayAssignments, doctors);
-        if (specResult) {
-          specimenByDate[dateStr] = specResult;
-          Logger.log("検体確認担当: " + dateStr + " → " + specResult.doctorName
-            + " (id=" + specResult.doctorId + ", conflict=" + specResult.conflict + ")");
-        }
-      }
-      Logger.log("検体確認結果: " + ym + " → " + Object.keys(specimenByDate).length + " 日");
-    } else {
-      Logger.log("検体確認: セクション '" + section + "' の設定が見つかりません");
-    }
+    // 検体確認担当を週単位で判定（buildSpecimenByDate で統一）
+    var specimenByDate = cfg ? buildSpecimenByDate(cfg, assignments, doctors) : {};
+    Logger.log("検体確認結果: " + ym + " → " + Object.keys(specimenByDate).length + " 日");
 
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
@@ -619,15 +571,10 @@ function syncWeekdayCalendar(data, ssMaster) {
       var spDate = new Date(sd + "T00:00:00+09:00");
       var spTitle, spDesc;
       if (sp.conflict) {
-        var spOther = [];
-        for (var spi = 0; spi < sp.conflictDoctors.length; spi++) {
-          if (sp.conflictDoctors[spi].id !== String(sp.doctorId)) {
-            spOther.push(sp.conflictDoctors[spi].name);
-          }
-        }
-        spTitle = "🧪 同意書・検体確認 - " + sp.doctorName + "（" + spOther.join("、") + "先生と要相談）";
+        var spLabels = buildConflictLabels(sp, sp.doctorId);
+        spTitle = "🧪 同意書・検体確認 - " + sp.doctorName + "（" + spLabels.join("・") + "と相談してください）";
         spDesc = tag + "\n同意書・検体確認\n担当: " + sp.doctorName
-          + "\n※同学年のため" + spOther.join("、") + "先生と要相談";
+          + "\n※同じ優先順位のため" + spLabels.join("・") + "と相談してください";
       } else {
         spTitle = "🧪 同意書・検体確認 - " + sp.doctorName;
         spDesc = tag + "\n同意書・検体確認\n担当: " + sp.doctorName;
@@ -641,8 +588,9 @@ function syncWeekdayCalendar(data, ssMaster) {
         if (allPersonalDoctorIds.indexOf(spDid) === -1) allPersonalDoctorIds.push(spDid);
         var pSpTitle, pSpDesc;
         if (sp.conflict) {
-          pSpTitle = "🧪 同意書・検体確認（" + spOther.join("、") + "先生と要相談）";
-          pSpDesc = tag + "\n同意書・検体確認\n※同学年のため" + spOther.join("、") + "先生と要相談";
+          var pSpLabels = buildConflictLabels(sp, spDid);
+          pSpTitle = "🧪 同意書・検体確認（" + pSpLabels.join("・") + "と相談してください）";
+          pSpDesc = tag + "\n同意書・検体確認\n※同じ優先順位のため" + pSpLabels.join("・") + "と相談してください";
         } else {
           pSpTitle = "🧪 同意書・検体確認";
           pSpDesc = tag + "\n同意書・検体確認";
@@ -746,8 +694,9 @@ function syncShiftSwapCalendar(data, ssMaster) {
 
     var assignments = getWeekdayAssignments(ssSec, ym, dateStr);
 
-    // この日の検体確認担当を判定
-    var swSpecResult = swCfg ? getSpecimenAssignee(swCfg, dateStr, assignments, doctors) : null;
+    // 週単位で検体確認担当を判定（月全体のassignmentsが必要）
+    var allMonthAssignments = getWeekdayAssignments(ssSec, ym, null);
+    var swSpecResult = swCfg ? getSpecimenAssignee(swCfg, dateStr, allMonthAssignments, doctors) : null;
 
     for (var i = 0; i < assignments.length; i++) {
       var a = assignments[i];
@@ -772,15 +721,10 @@ function syncShiftSwapCalendar(data, ssMaster) {
       var swSpDate = new Date(dateStr + "T00:00:00+09:00");
       var swSpTitle, swSpDesc;
       if (swSpecResult.conflict) {
-        var swONames = [];
-        for (var swsci = 0; swsci < swSpecResult.conflictDoctors.length; swsci++) {
-          if (swSpecResult.conflictDoctors[swsci].id !== String(swSpecResult.doctorId)) {
-            swONames.push(swSpecResult.conflictDoctors[swsci].name);
-          }
-        }
-        swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName + "（" + swONames.join("、") + "先生と要相談）";
+        var swLabels = buildConflictLabels(swSpecResult, swSpecResult.doctorId);
+        swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName + "（" + swLabels.join("・") + "と相談してください）";
         swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName
-          + "\n※同学年のため" + swONames.join("、") + "先生と要相談";
+          + "\n※同じ優先順位のため" + swLabels.join("・") + "と相談してください";
       } else {
         swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName;
         swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName;
@@ -824,19 +768,15 @@ function syncShiftSwapCalendar(data, ssMaster) {
       }
 
       // 検体確認を別イベントとして作成（個別カレンダー、自分が担当の場合のみ）
-      var pSwSpec = swCfg ? getSpecimenAssignee(swCfg, dateStr2, wdAssignments, doctors) : null;
+      var pSwAllMonth = getWeekdayAssignments(ssSec, ym2, null);
+      var pSwSpec = swCfg ? getSpecimenAssignee(swCfg, dateStr2, pSwAllMonth, doctors) : null;
       if (pSwSpec && String(pSwSpec.doctorId) === affectedDoctorIds[j]) {
         var pSwDate = new Date(dateStr2 + "T00:00:00+09:00");
         var pSwTitle, pSwDesc;
         if (pSwSpec.conflict) {
-          var pSwONames = [];
-          for (var pswi = 0; pswi < pSwSpec.conflictDoctors.length; pswi++) {
-            if (pSwSpec.conflictDoctors[pswi].id !== affectedDoctorIds[j]) {
-              pSwONames.push(pSwSpec.conflictDoctors[pswi].name);
-            }
-          }
-          pSwTitle = "🧪 同意書・検体確認（" + pSwONames.join("、") + "先生と要相談）";
-          pSwDesc = pTag + "\n同意書・検体確認\n※同学年のため" + pSwONames.join("、") + "先生と要相談";
+          var pSwLabels = buildConflictLabels(pSwSpec, affectedDoctorIds[j]);
+          pSwTitle = "🧪 同意書・検体確認（" + pSwLabels.join("・") + "と相談してください）";
+          pSwDesc = pTag + "\n同意書・検体確認\n※同じ優先順位のため" + pSwLabels.join("・") + "と相談してください";
         } else {
           pSwTitle = "🧪 同意書・検体確認";
           pSwDesc = pTag + "\n同意書・検体確認";
@@ -946,24 +886,8 @@ function resyncCalendarForDoctor(data) {
         var wdAssignments = getWeekdayAssignments(ssSec, ym2, null);
         if (wdAssignments.length === 0) continue;
 
-        // 日付ごとに検体確認担当を判定
-        var rSpecByDate = {};
-        if (rSecCfg) {
-          var rDateSet = {};
-          for (var rdi = 0; rdi < wdAssignments.length; rdi++) {
-            rDateSet[String(wdAssignments[rdi].date)] = true;
-          }
-          var rUniqueDates = Object.keys(rDateSet);
-          for (var rui = 0; rui < rUniqueDates.length; rui++) {
-            var rds = rUniqueDates[rui];
-            var rDayAsgn = [];
-            for (var rdai = 0; rdai < wdAssignments.length; rdai++) {
-              if (String(wdAssignments[rdai].date) === rds) rDayAsgn.push(wdAssignments[rdai]);
-            }
-            var rsr = getSpecimenAssignee(rSecCfg, rds, rDayAsgn, doctors);
-            if (rsr) rSpecByDate[rds] = rsr;
-          }
-        }
+        // 検体確認担当を週単位で判定
+        var rSpecByDate = rSecCfg ? buildSpecimenByDate(rSecCfg, wdAssignments, doctors) : {};
 
         var tag2 = "[外勤調整:weekday:" + section + ":" + ym2 + "]";
         for (var j = 0; j < wdAssignments.length; j++) {
@@ -982,14 +906,9 @@ function resyncCalendarForDoctor(data) {
           var rSpDate = new Date(rsd + "T00:00:00+09:00");
           var rSpTitle, rSpDesc;
           if (rsp.conflict) {
-            var rONames = [];
-            for (var rsci = 0; rsci < rsp.conflictDoctors.length; rsci++) {
-              if (rsp.conflictDoctors[rsci].id !== doctorId) {
-                rONames.push(rsp.conflictDoctors[rsci].name);
-              }
-            }
-            rSpTitle = "🧪 同意書・検体確認（" + rONames.join("、") + "先生と要相談）";
-            rSpDesc = tag2 + "\n同意書・検体確認\n※同学年のため" + rONames.join("、") + "先生と要相談";
+            var rLabels = buildConflictLabels(rsp, doctorId);
+            rSpTitle = "🧪 同意書・検体確認（" + rLabels.join("・") + "と相談してください）";
+            rSpDesc = tag2 + "\n同意書・検体確認\n※同じ優先順位のため" + rLabels.join("・") + "と相談してください";
           } else {
             rSpTitle = "🧪 同意書・検体確認";
             rSpDesc = tag2 + "\n同意書・検体確認";

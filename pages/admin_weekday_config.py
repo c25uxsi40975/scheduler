@@ -214,7 +214,7 @@ def render():
                                 rank_groups.setdefault(rv, []).append(did_s)
                             tied = {r: ids for r, ids in rank_groups.items() if len(ids) > 1}
                             if tied:
-                                st.caption("同列グループ（同日勤務時は要相談）:")
+                                st.caption("同列グループ（同じ週に勤務時は要相談）:")
                                 for r in sorted(tied):
                                     names = ", ".join(
                                         _doc_map_edit.get(int(d), _doc_map_edit.get(d, "?"))

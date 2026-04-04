@@ -44,20 +44,46 @@ function getWeekdayConfigs(ssMaster) {
   return result;
 }
 
+var DOW_LABELS_JA = ["月", "火", "水", "木", "金", "土", "日"];
+
 /**
- * 検体確認担当者を判定
- * @param {Object} cfg - セクション設定 (specimen_enabled, specimen_doctors, specimen_days)
- * @param {string} dateStr - yyyy-MM-dd
- * @param {Array} assignments - その日の割り当て配列
+ * 日付文字列からISO週キー {year, week} を返す
+ */
+function getISOWeekKey(dateStr) {
+  var d = new Date(dateStr + "T00:00:00+09:00");
+  var tmp = new Date(d.getTime());
+  tmp.setDate(tmp.getDate() + 3 - ((tmp.getDay() + 6) % 7));
+  var yearStart = new Date(tmp.getFullYear(), 0, 4);
+  var weekNo = 1 + Math.round(((tmp - yearStart) / 86400000 - 3
+    + ((yearStart.getDay() + 6) % 7)) / 7);
+  return { year: tmp.getFullYear(), week: weekNo };
+}
+
+/**
+ * JS曜日(0=Sun)をPython曜日(0=Mon)に変換
+ */
+function jsDowToPyDow(jsDow) {
+  return (jsDow === 0) ? 6 : jsDow - 1;
+}
+
+/**
+ * 検体確認担当者を週単位で判定
+ *
+ * 同一ISO週に勤務する検体対象メンバーを集め、優先順位でランク付け。
+ * 同優先順位が複数いる場合は conflict=true。
+ *
+ * @param {Object} cfg - セクション設定
+ * @param {string} dateStr - yyyy-MM-dd（対象曜日チェック用）
+ * @param {Array} allAssignments - 月全体（または週を含む範囲）の割り当て配列
  * @param {Object} doctors - getDoctorMap() の結果
  * @returns {Object|null} {doctorId, doctorName, conflict, conflictDoctors}
+ *          conflictDoctors の各要素に weekdays (Python曜日配列) を含む
  */
-function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
+function getSpecimenAssignee(cfg, dateStr, allAssignments, doctors) {
   if (!cfg.specimen_enabled) return null;
 
   var dt = new Date(dateStr + "T00:00:00+09:00");
-  var jsDow = dt.getDay(); // JS: 0=Sun, 1=Mon, ..., 6=Sat
-  var pyDow = (jsDow === 0) ? 6 : jsDow - 1; // Python: 0=Mon, ..., 4=Fri
+  var pyDow = jsDowToPyDow(dt.getDay());
 
   var specimenDays = cfg.specimen_days || [];
   var isSpecimenDay = false;
@@ -71,9 +97,19 @@ function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
     specimenDoctors[String(cfg.specimen_doctors[s])] = true;
   }
 
-  var scheduledIds = {};
-  for (var j = 0; j < assignments.length; j++) {
-    scheduledIds[String(assignments[j].doctor_id)] = true;
+  // 同一ISO週の全日付から候補を収集（週単位判定）
+  var targetWeek = getISOWeekKey(dateStr);
+  var weekScheduled = {}; // {doctorId: {pyDow: true, ...}}
+  for (var j = 0; j < allAssignments.length; j++) {
+    var aDate = String(allAssignments[j].date);
+    var aWeek = getISOWeekKey(aDate);
+    if (aWeek.year === targetWeek.year && aWeek.week === targetWeek.week) {
+      var aDt = new Date(aDate + "T00:00:00+09:00");
+      var aPyDow = jsDowToPyDow(aDt.getDay());
+      var aDid = String(allAssignments[j].doctor_id);
+      if (!weekScheduled[aDid]) weekScheduled[aDid] = {};
+      weekScheduled[aDid][aPyDow] = true;
+    }
   }
 
   var priorityMap = cfg.specimen_priority || {};
@@ -83,16 +119,16 @@ function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
   var allIds = Object.keys(specimenDoctors);
   for (var k = 0; k < allIds.length; k++) {
     var did = allIds[k];
-    if (scheduledIds[did] && doctors[did]) {
+    if (weekScheduled[did] && doctors[did]) {
       var rank;
       if (hasPriority) {
         rank = (priorityMap[did] !== undefined) ? Number(priorityMap[did]) : 9999;
       } else {
-        // フォールバック: 入局年度
         var acct = doctors[did].account || "9999";
         rank = acct.substring(0, 4);
       }
-      candidates.push({ id: did, name: doctors[did].name, rank: rank });
+      var weekdays = Object.keys(weekScheduled[did]).map(Number).sort();
+      candidates.push({ id: did, name: doctors[did].name, rank: rank, weekdays: weekdays });
     }
   }
 
@@ -111,6 +147,59 @@ function getSpecimenAssignee(cfg, dateStr, assignments, doctors) {
     conflict: sameRank.length > 1,
     conflictDoctors: sameRank
   };
+}
+
+/**
+ * 月のassignmentsから検体確認担当を日付ごとにまとめて返す
+ *
+ * @param {Object} cfg - セクション設定
+ * @param {Array} assignments - 月全体の割り当て配列
+ * @param {Object} doctors - getDoctorMap() の結果
+ * @returns {Object} {dateStr: specimenResult, ...}
+ */
+function buildSpecimenByDate(cfg, assignments, doctors) {
+  if (!cfg || !cfg.specimen_enabled) return {};
+
+  var specimenDays = cfg.specimen_days || [];
+  if (specimenDays.length === 0) return {};
+
+  // 対象曜日の日付を収集
+  var dateSet = {};
+  for (var i = 0; i < assignments.length; i++) {
+    dateSet[String(assignments[i].date)] = true;
+  }
+
+  var result = {};
+  var uniqueDates = Object.keys(dateSet);
+  for (var j = 0; j < uniqueDates.length; j++) {
+    var ds = uniqueDates[j];
+    var specResult = getSpecimenAssignee(cfg, ds, assignments, doctors);
+    if (specResult) {
+      result[ds] = specResult;
+    }
+  }
+  return result;
+}
+
+/**
+ * conflict時のメッセージ用: 「{曜日}の{名前}先生」形式の配列を生成
+ * @param {Object} specResult - getSpecimenAssignee の戻り値
+ * @param {string} excludeDoctorId - 除外する医員ID（自分自身）
+ * @returns {Array} ["金曜の田中先生", ...]
+ */
+function buildConflictLabels(specResult, excludeDoctorId) {
+  var labels = [];
+  for (var i = 0; i < specResult.conflictDoctors.length; i++) {
+    var cd = specResult.conflictDoctors[i];
+    if (cd.id === String(excludeDoctorId)) continue;
+    var weekdays = cd.weekdays || [];
+    var dowStr = [];
+    for (var w = 0; w < weekdays.length; w++) {
+      dowStr.push((DOW_LABELS_JA[weekdays[w]] || "?") + "曜");
+    }
+    labels.push(dowStr.join("・") + "の" + cd.name + "先生");
+  }
+  return labels;
 }
 
 /**
@@ -553,8 +642,9 @@ function sendWeekdayDayBeforeReminder() {
     var assignments = getWeekdayAssignments(ssSec, yearMonth, tomorrowStr);
     if (assignments.length === 0) continue;
 
-    // 検体確認担当の判定（セクション単位で1回）
-    var specResult = getSpecimenAssignee(cfg, tomorrowStr, assignments, doctors);
+    // 検体確認担当の判定（週単位のため月全体のassignmentsを使用）
+    var allMonthAsgn = getWeekdayAssignments(ssSec, yearMonth, null);
+    var specResult = getSpecimenAssignee(cfg, tomorrowStr, allMonthAsgn, doctors);
 
     for (var j = 0; j < assignments.length; j++) {
       var a = assignments[j];
@@ -574,13 +664,8 @@ function sendWeekdayDayBeforeReminder() {
       // 検体確認の追記
       if (specResult && String(specResult.doctorId) === String(a.doctor_id)) {
         if (specResult.conflict) {
-          var otherNames = [];
-          for (var sc = 0; sc < specResult.conflictDoctors.length; sc++) {
-            if (specResult.conflictDoctors[sc].id !== String(a.doctor_id)) {
-              otherNames.push(specResult.conflictDoctors[sc].name);
-            }
-          }
-          body += "※ 同意書・検体確認（同学年のため" + otherNames.join("、") + "先生と相談してください）\n\n";
+          var conflictLabels = buildConflictLabels(specResult, a.doctor_id);
+          body += "※ 同意書・検体確認（" + conflictLabels.join("・") + "と相談してください）\n\n";
         } else {
           body += "※ 同意書・検体確認担当日です\n\n";
         }

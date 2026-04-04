@@ -23,6 +23,7 @@ from database import (
     execute_swap, get_swap_history,
     get_specimen_assignee,
 )
+from database.weekday import DOW_LABELS_JA
 from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
 from components.schedule_viewer import _VIEWER_SCRIPT
@@ -299,9 +300,13 @@ def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: st
                 spec = get_specimen_assignee(section, r["date"], schedule)
                 if spec and spec["doctor_id"] == doctor["id"]:
                     if spec["conflict"]:
-                        other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
-                                       if d["doctor_id"] != doctor["id"]]
-                        specimen_mark = f" 🧪同意書・検体確認（{', '.join(other_names)}先生と要相談）"
+                        others = [
+                            f"{DOW_LABELS_JA.get(wd, '?')}曜の{d['doctor_name']}先生"
+                            for d in spec["conflict_doctors"]
+                            if d["doctor_id"] != doctor["id"]
+                            for wd in d.get("weekdays", [])
+                        ]
+                        specimen_mark = f" 🧪同意書・検体確認（{'・'.join(others)}と相談してください）"
                         specimen_alerts.append((date_label, spec))
                     else:
                         specimen_mark = " 🧪同意書・検体確認"
@@ -310,9 +315,13 @@ def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: st
         if specimen_alerts:
             for date_label, spec in specimen_alerts:
                 if spec["conflict"]:
-                    other_names = [d["doctor_name"] for d in spec["conflict_doctors"]
-                                   if d["doctor_id"] != doctor["id"]]
-                    st.warning(f"🧪 {date_label} 同意書・検体確認（同学年のため{', '.join(other_names)}先生と要相談）")
+                    others = [
+                        f"{DOW_LABELS_JA.get(wd, '?')}曜の{d['doctor_name']}先生"
+                        for d in spec["conflict_doctors"]
+                        if d["doctor_id"] != doctor["id"]
+                        for wd in d.get("weekdays", [])
+                    ]
+                    st.warning(f"🧪 {date_label} 同意書・検体確認（{'・'.join(others)}と相談してください）")
                 else:
                     st.info(f"🧪 {date_label} 同意書・検体確認担当日です")
     else:

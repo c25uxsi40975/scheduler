@@ -281,7 +281,7 @@ def _render_specimen_management(section: str, cfg: dict, assigned_doctor_ids: li
             tied = {r: ids for r, ids in rank_groups.items() if len(ids) > 1}
             if tied:
                 st.markdown("---")
-                st.caption("同列グループ（同日勤務時は要相談）:")
+                st.caption("同列グループ（同じ週に勤務時は要相談）:")
                 for r in sorted(tied):
                     names = ", ".join(
                         doc_map.get(int(d), doc_map.get(d, "?"))
@@ -1317,7 +1317,7 @@ def _render_preview_warnings(preview_result: dict, assigned_doctors: list,
 
 def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
                                doc_map: dict):
-    """検体確認メンバーが週内の対象曜日にどちらも割り当てられていない週の警告を表示"""
+    """検体確認の週単位警告を表示（カバレッジ不足 + 同優先順位conflict）"""
     if not cfg.get("specimen_enabled"):
         return
 
@@ -1326,8 +1326,16 @@ def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
     if not specimen_doctor_ids or not specimen_days:
         return
 
+    priority_map = cfg.get("specimen_priority") or {}
+    if not isinstance(priority_map, dict):
+        priority_map = {}
+
+    dow_labels = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
+
     # 週単位でグループ化（ISO週番号）
-    weeks = {}  # {(year, week): [(dt, has_specimen_member), ...]}
+    # {(year, week): {doctor_id: set(weekday, ...), ...}} — 検体対象メンバーのみ
+    weeks_members = {}  # 検体メンバーの勤務曜日
+    weeks_dates = {}    # 対象曜日の日付
     for ds, slots_map in preview_result.items():
         try:
             dt = date.fromisoformat(ds)
@@ -1338,21 +1346,46 @@ def _render_specimen_warnings(preview_result: dict, section: str, cfg: dict,
         assigned_ids = set()
         for sid, doc_ids in slots_map.items():
             assigned_ids.update(did for did in doc_ids if did)
-        has_member = bool(specimen_doctor_ids & assigned_ids)
         week_key = dt.isocalendar()[:2]
-        weeks.setdefault(week_key, []).append((dt, has_member))
+        weeks_dates.setdefault(week_key, []).append(dt)
+        for did in (specimen_doctor_ids & assigned_ids):
+            weeks_members.setdefault(week_key, {}).setdefault(did, set()).add(dt.weekday())
 
-    # 週内のどの対象曜日にもメンバーがいない週を検出
+    # 1) カバレッジ不足: 週内に検体メンバーが一人もいない
     missing_weeks = []
-    for week_key in sorted(weeks):
-        days_in_week = weeks[week_key]
-        if not any(has for _, has in days_in_week):
-            dates_str = "・".join(dt.strftime("%m/%d(%a)") for dt, _ in sorted(days_in_week))
+    for week_key in sorted(weeks_dates):
+        if week_key not in weeks_members:
+            dates_str = "・".join(dt.strftime("%m/%d(%a)") for dt in sorted(weeks_dates[week_key]))
             missing_weeks.append(dates_str)
 
     if missing_weeks:
         st.warning(f"🧪 同意書・検体確認メンバーが週内に割り当てられていない週があります（{len(missing_weeks)}週）: "
                    + "、".join(missing_weeks))
+
+    # 2) 同優先順位conflict: 同じ週に同ランクの検体メンバーが複数いる
+    if not priority_map:
+        return
+    conflict_weeks = []
+    for week_key in sorted(weeks_members):
+        members = weeks_members[week_key]
+        # ランク付け
+        ranked = {}
+        for did, weekdays in members.items():
+            rank = int(priority_map.get(str(did), priority_map.get(did, 9999)))
+            ranked.setdefault(rank, []).append((did, weekdays))
+        top_rank = min(ranked.keys())
+        top_group = ranked[top_rank]
+        if len(top_group) > 1:
+            names = [
+                f"{doc_map.get(did, f'ID:{did}')}[{'・'.join(dow_labels.get(wd, '?') for wd in sorted(wds))}]"
+                for did, wds in top_group
+            ]
+            dates_str = "・".join(dt.strftime("%m/%d") for dt in sorted(weeks_dates[week_key]))
+            conflict_weeks.append(f"{dates_str}週: {', '.join(names)}")
+
+    if conflict_weeks:
+        st.info(f"🧪 同じ優先順位のメンバーが同じ週に勤務しています（要相談）: "
+                + "　".join(conflict_weeks))
 
 
 def _render_calendar_editor(
