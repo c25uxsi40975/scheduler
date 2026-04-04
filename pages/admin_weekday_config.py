@@ -185,7 +185,9 @@ def render():
                         # 優先順位設定
                         if edit_specimen_doctors:
                             st.markdown("**優先順位設定**（数値が小さいほど優先。同じ数値＝同列・要相談）")
-                            cur_priority = cfg.get("specimen_priority", {})
+                            cur_priority = cfg.get("specimen_priority") or {}
+                            if not isinstance(cur_priority, dict):
+                                cur_priority = {}
                             edit_priority = {}
                             sorted_spec_docs = sorted(
                                 edit_specimen_doctors,

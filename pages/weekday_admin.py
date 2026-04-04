@@ -236,7 +236,9 @@ def _render_specimen_management(section: str, cfg: dict, assigned_doctor_ids: li
     member_options = [did for did in assigned_doctor_ids if did in doc_ids]
 
     cur_specimen_docs = cfg.get("specimen_doctors", [])
-    cur_priority = cfg.get("specimen_priority", {})
+    cur_priority = cfg.get("specimen_priority") or {}
+    if not isinstance(cur_priority, dict):
+        cur_priority = {}
 
     with st.form(f"wkadm_specimen_mgmt_{section}"):
         st.markdown("**対象メンバー**")

@@ -57,7 +57,7 @@ def get_weekday_configs():
         r["specimen_enabled"] = _safe_int(r.get("specimen_enabled", 0))
         r["specimen_doctors"] = _safe_json_loads(r.get("specimen_doctors", "[]"))
         r["specimen_days"] = _safe_json_loads(r.get("specimen_days", "[]"))
-        r["specimen_priority"] = _safe_json_loads(r.get("specimen_priority", "{}"))
+        r["specimen_priority"] = _safe_json_loads(r.get("specimen_priority", "{}"), default={})
         r["specimen_subadmin_allowed"] = _safe_int(r.get("specimen_subadmin_allowed", 0))
         result.append(r)
     return result
