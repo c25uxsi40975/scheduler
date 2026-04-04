@@ -142,6 +142,10 @@ function doPost(e) {
       resyncCalendarForDoctor(data);
     } else if (data.action === "calendar_resync_all") {
       resyncCalendarForAllDoctors();
+    } else if (data.action === "weekday_calendar_resync") {
+      // 検体設定変更時などにカレンダーのみ再同期（メール通知なし）
+      var ssMaster = getMasterSpreadsheet();
+      syncWeekdayCalendar(data, ssMaster);
 
     // カレンダー共有更新
     } else if (data.action === "calendar_update_sharing") {

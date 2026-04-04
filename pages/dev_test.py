@@ -11,8 +11,7 @@ from dateutil.relativedelta import relativedelta
 
 # ---- ダミーデータ定義 ----
 
-DUMMY_DOCTORS = [
-    {"id": "D001", "name": "太郎"},
+_OTHER_DUMMY_DOCTORS = [
     {"id": "D002", "name": "花子"},
     {"id": "D003", "name": "一郎"},
     {"id": "D004", "name": "美咲"},
@@ -21,6 +20,14 @@ DUMMY_DOCTORS = [
     {"id": "D007", "name": "翔太"},
     {"id": "D008", "name": "さくら"},
 ]
+
+
+def _get_dummy_doctors() -> list[dict]:
+    """開発者情報が設定されていれば先頭に追加したダミー医員リストを返す"""
+    dev_name = st.session_state.get("dev_my_name", "")
+    if dev_name:
+        return [{"id": "DEV0", "name": dev_name}] + _OTHER_DUMMY_DOCTORS
+    return [{"id": "D001", "name": "太郎"}] + _OTHER_DUMMY_DOCTORS
 
 DUMMY_CLINICS_SAT = [
     {"id": "C001", "name": "テスト外勤A"},
@@ -115,7 +122,13 @@ def _post_to_gas(action: str, payload: dict) -> dict | None:
 
 # ---- メインレンダリング ----
 
-def render():
+def render(dev_doctor: dict | None = None):
+    # dev_doctor からログイン医員の情報を取得
+    if dev_doctor:
+        st.session_state["dev_my_name"] = dev_doctor.get("name", "")
+        st.session_state["dev_my_email"] = dev_doctor.get("email", "")
+        st.session_state["dev_my_line_id"] = dev_doctor.get("line_user_id", "")
+
     tab1, tab2, tab3 = st.tabs(["ダミーデータ設定", "メール通知テスト", "LINE通知テスト"])
 
     with tab1:
@@ -133,6 +146,25 @@ def render():
 def _render_dummy_data_tab():
     st.subheader("ダミーデータ設定")
 
+    # ---- 開発者情報（マスタから自動取得） ----
+    dev_name = st.session_state.get("dev_my_name", "")
+    dev_email = st.session_state.get("dev_my_email", "")
+    dev_line = st.session_state.get("dev_my_line_id", "")
+
+    st.markdown("#### 開発者情報")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.text(f"名前: {dev_name or '（未取得）'}")
+    with c2:
+        st.text(f"メール: {dev_email or '（未設定）'}")
+    with c3:
+        st.text(f"LINE ID: {dev_line or '（未連携）'}")
+
+    if not dev_name:
+        st.warning("医員情報が取得できていません。再ログインしてください。")
+
+    st.markdown("---")
+
     # 対象月
     today = date.today()
     month1 = today.replace(day=1)
@@ -142,7 +174,7 @@ def _render_dummy_data_tab():
 
     # ---- 土曜ダミー ----
     st.markdown("#### 土曜スケジュール")
-    st.caption(f"医員: {', '.join(d['name'] for d in DUMMY_DOCTORS)} / "
+    st.caption(f"医員: {', '.join(d['name'] for d in _get_dummy_doctors())} / "
                f"外勤先: {', '.join(c['name'] for c in DUMMY_CLINICS_SAT)}")
 
     if st.button("土曜ダミースケジュールを生成", key="gen_sat"):
@@ -150,7 +182,7 @@ def _render_dummy_data_tab():
         for ym in target_months:
             sats = _get_saturdays(ym)
             sat_assignments.extend(
-                _generate_dummy_schedule(sats, DUMMY_CLINICS_SAT, DUMMY_DOCTORS)
+                _generate_dummy_schedule(sats, DUMMY_CLINICS_SAT, _get_dummy_doctors())
             )
         st.session_state["dev_sat_assignments"] = sat_assignments
         st.session_state["dev_sat_months"] = target_months
@@ -174,7 +206,7 @@ def _render_dummy_data_tab():
         for ym in target_months:
             wd_dates = _get_weekday_dates(ym, selected_dows)
             wd_assignments.extend(
-                _generate_dummy_schedule(wd_dates, wd_clinics, DUMMY_DOCTORS)
+                _generate_dummy_schedule(wd_dates, wd_clinics, _get_dummy_doctors())
             )
         st.session_state["dev_wd_assignments"] = wd_assignments
         st.session_state["dev_wd_months"] = target_months
@@ -217,6 +249,9 @@ def _render_dummy_data_tab():
 def _render_email_test_tab():
     st.subheader("メール通知テスト")
 
+    dev_email = st.session_state.get("dev_my_email", "")
+    if "dev_test_email" not in st.session_state and dev_email:
+        st.session_state["dev_test_email"] = dev_email
     test_email = st.text_input(
         "送信先メールアドレス", key="dev_test_email",
         placeholder="your-email@example.com",
@@ -229,6 +264,7 @@ def _render_email_test_tab():
     wd_data = st.session_state.get("dev_wd_assignments", [])
     sat_months = st.session_state.get("dev_sat_months", [])
     wd_months = st.session_state.get("dev_wd_months", [])
+    dev_name = st.session_state.get("dev_my_name", "") or "太郎"
 
     if not sat_data and not wd_data:
         st.info("先に「ダミーデータ設定」タブでダミースケジュールを生成してください")
@@ -238,7 +274,8 @@ def _render_email_test_tab():
     def _base_payload():
         return {
             "test_email": test_email,
-            "doctors": [{"id": d["id"], "name": d["name"]} for d in DUMMY_DOCTORS],
+            "doctor_name": dev_name,
+            "doctors": [{"id": d["id"], "name": d["name"]} for d in _get_dummy_doctors()],
         }
 
     # ---- 土曜メール ----
@@ -255,13 +292,11 @@ def _render_email_test_tab():
                 _post_to_gas("test_sat_schedule_confirmed", payload)
 
             if st.button("希望入力確認", key="test_sat_pref"):
-                # 太郎さんの希望確認
                 dates = sorted(set(a["date"] for a in sat_data))[:4]
                 summary = "\n".join(
                     f"  {_format_date_jp(d)}: ○" for d in dates
                 )
                 payload = _base_payload()
-                payload["doctor_name"] = "太郎"
                 payload["year_month"] = sat_months[0] if sat_months else ""
                 payload["date_summary"] = summary
                 payload["free_text"] = "テスト備考コメント"
@@ -270,7 +305,7 @@ def _render_email_test_tab():
             if st.button("全員入力完了", key="test_sat_all"):
                 payload = _base_payload()
                 payload["year_month"] = sat_months[0] if sat_months else ""
-                payload["doctor_count"] = len(DUMMY_DOCTORS)
+                payload["doctor_count"] = len(_get_dummy_doctors())
                 _post_to_gas("test_sat_all_complete", payload)
 
         with col2:
@@ -285,7 +320,7 @@ def _render_email_test_tab():
                 payload = _base_payload()
                 payload["year_month"] = sat_months[0] if sat_months else ""
                 payload["missing_names"] = ["一郎", "美咲", "翔太"]
-                payload["total_count"] = len(DUMMY_DOCTORS)
+                payload["total_count"] = len(_get_dummy_doctors())
                 _post_to_gas("test_sat_deadline_overdue", payload)
 
             if st.button("金曜リマインダー", key="test_sat_friday"):
@@ -294,7 +329,6 @@ def _render_email_test_tab():
                 payload = _base_payload()
                 payload["date"] = tomorrow
                 payload["clinic_name"] = DUMMY_CLINICS_SAT[0]["name"]
-                payload["doctor_name"] = "太郎"
                 _post_to_gas("test_sat_friday_reminder", payload)
 
         if st.button("パスワードリセット", key="test_pw_reset"):
@@ -324,7 +358,6 @@ def _render_email_test_tab():
                 dates = sorted(set(a["date"] for a in wd_data))[:4]
                 summary = "\n".join(f"  {_format_date_jp(d)}: ○" for d in dates)
                 payload = _base_payload()
-                payload["doctor_name"] = "太郎"
                 payload["clinic_name"] = wd_clinic
                 payload["date_summary"] = summary
                 payload["free_text"] = "テスト備考"
@@ -334,14 +367,14 @@ def _render_email_test_tab():
                 payload = _base_payload()
                 payload["section"] = wd_section
                 payload["clinic_name"] = wd_clinic
-                payload["doctor_count"] = len(DUMMY_DOCTORS)
+                payload["doctor_count"] = len(_get_dummy_doctors())
                 _post_to_gas("test_wd_all_complete", payload)
 
             if st.button("シフト交換通知", key="test_wd_swap"):
                 payload = _base_payload()
                 payload["section"] = wd_section
                 payload["clinic_name"] = wd_clinic
-                payload["requester_name"] = "太郎"
+                payload["requester_name"] = dev_name
                 payload["target_name"] = "花子"
                 payload["requester_shift"] = f"{_format_date_jp(wd_data[0]['date'])} スロットA"
                 payload["target_shift"] = f"{_format_date_jp(wd_data[1]['date'])} スロットB" if len(wd_data) > 1 else "なし"
@@ -361,7 +394,7 @@ def _render_email_test_tab():
                 payload["section"] = wd_section
                 payload["clinic_name"] = wd_clinic
                 payload["missing_names"] = ["一郎", "美咲"]
-                payload["total_count"] = len(DUMMY_DOCTORS)
+                payload["total_count"] = len(_get_dummy_doctors())
                 _post_to_gas("test_wd_deadline_overdue", payload)
 
             if st.button("前日リマインダー", key="test_wd_daybefore"):
@@ -369,7 +402,6 @@ def _render_email_test_tab():
                 payload = _base_payload()
                 payload["date"] = tomorrow
                 payload["clinic_name"] = wd_clinic
-                payload["doctor_name"] = "太郎"
                 payload["slot_name"] = "スロットA"
                 _post_to_gas("test_wd_day_before_reminder", payload)
 
@@ -414,6 +446,9 @@ def _render_line_test_tab():
     # LINE Push残数表示
     _show_line_quota()
 
+    dev_line = st.session_state.get("dev_my_line_id", "")
+    if "dev_line_user_id" not in st.session_state and dev_line:
+        st.session_state["dev_line_user_id"] = dev_line
     line_user_id = st.text_input(
         "LINE User ID", key="dev_line_user_id",
         placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -425,6 +460,7 @@ def _render_line_test_tab():
     sat_data = st.session_state.get("dev_sat_assignments", [])
     wd_data = st.session_state.get("dev_wd_assignments", [])
     sat_months = st.session_state.get("dev_sat_months", [])
+    dev_name = st.session_state.get("dev_my_name", "") or "太郎"
 
     if not sat_data and not wd_data:
         st.info("先に「ダミーデータ設定」タブでダミースケジュールを生成してください")
@@ -433,7 +469,8 @@ def _render_line_test_tab():
     def _base_payload():
         return {
             "line_user_id": line_user_id,
-            "doctors": [{"id": d["id"], "name": d["name"]} for d in DUMMY_DOCTORS],
+            "doctor_name": dev_name,
+            "doctors": [{"id": d["id"], "name": d["name"]} for d in _get_dummy_doctors()],
         }
 
     # ---- 土曜LINE ----

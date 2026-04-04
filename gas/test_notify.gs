@@ -19,6 +19,7 @@ function testSatScheduleConfirmed(data) {
   var yearMonth = data.year_month || "";
   var assignments = data.assignments || [];
   var clinics = data.clinics || [];
+  var doctorName = data.doctor_name || "太郎";
 
   // クリニックIDからname引き
   var clinicMap = {};
@@ -28,11 +29,10 @@ function testSatScheduleConfirmed(data) {
 
   var subject = DEV_TEST_PREFIX + "【外勤スケジュール確定】" + yearMonth;
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + yearMonth + " の外勤スケジュールが確定しました。\n\n";
 
-  // 太郎の割り当てのみ表示
-  var myAssignments = assignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var myAssignments = assignments.filter(function(a) { return a.doctor_name === doctorName; });
   if (myAssignments.length > 0) {
     body += "━━━━━━━━━━━━━━━━━━━━\n";
     myAssignments.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
@@ -106,10 +106,11 @@ function testSatDeadlineReminder(data) {
   var yearMonth = data.year_month || "";
   var deadline = data.deadline || "";
   var submitted = data.submitted || false;
+  var doctorName = data.doctor_name || "太郎";
 
   var subject = DEV_TEST_PREFIX + "【入力期限】本日が " + yearMonth + " の希望入力期限です";
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + yearMonth + " の希望入力の期限は本日（" + deadline + "）です。\n\n";
 
   if (submitted) {
@@ -207,14 +208,14 @@ function testWdScheduleConfirmed(data) {
   var clinicName = data.clinic_name || "";
   var yearMonths = data.year_months || [];
   var assignments = data.assignments || [];
+  var doctorName = data.doctor_name || "太郎";
   var periodLabel = yearMonths.length === 1 ? yearMonths[0] : yearMonths[0] + "〜" + yearMonths[yearMonths.length - 1];
 
-  // 太郎の割り当てのみ
-  var myAssignments = assignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var myAssignments = assignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var subject = DEV_TEST_PREFIX + "【平日外勤確定】" + clinicName + " " + periodLabel;
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + clinicName + " の " + periodLabel + " の外勤スケジュールが確定しました。\n\n";
 
   if (myAssignments.length > 0) {
@@ -289,10 +290,11 @@ function testWdDeadlineReminder(data) {
   var clinicName = data.clinic_name || "";
   var deadline = data.deadline || "";
   var submitted = data.submitted || false;
+  var doctorName = data.doctor_name || "太郎";
 
   var subject = DEV_TEST_PREFIX + "【入力期限】" + clinicName + " 本日が希望入力期限です";
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + clinicName + " の希望入力の期限は本日（" + deadline + "）です。\n\n";
 
   if (submitted) {
@@ -390,11 +392,12 @@ function testWdReadjustRequest(data) {
   var deadline = data.deadline || "";
   var dateCount = data.target_date_count || 0;
   var mode = data.mode || "fill";
+  var doctorName = data.doctor_name || "太郎";
   var modeLabel = mode === "fill" ? "補填" : "再構成";
 
   var subject = DEV_TEST_PREFIX + "【希望入力依頼】" + clinicName + " スケジュール再調整（" + modeLabel + "）";
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + clinicName + " の外勤スケジュールが再調整（" + modeLabel + "）されます。\n"
     + "以下の日程について、NG日・避けたい日の希望を入力してください。\n\n"
     + "━━━━━━━━━━━━━━━━━━━━\n"
@@ -416,13 +419,14 @@ function testWdReadjusted(data) {
   var assignments = data.assignments || [];
   var mode = data.mode || "fill";
   var period = data.period || "";
+  var doctorName = data.doctor_name || "太郎";
   var modeLabel = mode === "fill" ? "補填" : "再構成";
 
-  var myAssignments = assignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var myAssignments = assignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var subject = DEV_TEST_PREFIX + "【平日外勤再調整】" + clinicName + "（" + modeLabel + "）";
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + clinicName + " の外勤スケジュールが再調整（" + modeLabel + "）されました。\n"
     + "対象期間: " + period + "\n\n";
 
@@ -455,6 +459,7 @@ function testWeeklyIntegrated(data) {
   var satClinics = data.sat_clinics || [];
   var wdClinicName = data.wd_clinic_name || "";
   var yearMonths = data.year_months || [];
+  var doctorName = data.doctor_name || "太郎";
 
   var periodLabel = yearMonths.length === 1 ? yearMonths[0] : yearMonths[0] + "〜" + yearMonths[yearMonths.length - 1];
 
@@ -464,13 +469,12 @@ function testWeeklyIntegrated(data) {
     clinicMap[satClinics[i].id] = satClinics[i].name;
   }
 
-  // 太郎の割り当てのみ
-  var mySatAssignments = satAssignments.filter(function(a) { return a.doctor_name === "太郎"; });
-  var myWdAssignments = wdAssignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var mySatAssignments = satAssignments.filter(function(a) { return a.doctor_name === doctorName; });
+  var myWdAssignments = wdAssignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var subject = DEV_TEST_PREFIX + "【週間スケジュール】" + periodLabel;
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
-    + "太郎 先生\n\n"
+    + doctorName + " 先生\n\n"
     + periodLabel + " の外勤スケジュール（統合）をお知らせします。\n\n";
 
   // 土曜
@@ -513,6 +517,7 @@ function testLineSatScheduleConfirmed(data) {
   var yearMonth = data.year_month || "";
   var assignments = data.assignments || [];
   var clinics = data.clinics || [];
+  var doctorName = data.doctor_name || "太郎";
 
   var clinicMap = {};
   for (var i = 0; i < clinics.length; i++) {
@@ -520,7 +525,7 @@ function testLineSatScheduleConfirmed(data) {
   }
 
   var monthLabel = yearMonth.replace("-", "年") + "月";
-  var myAssignments = assignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var myAssignments = assignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var lines = [DEV_TEST_PREFIX + "【スケジュール確定】" + monthLabel + "\n"];
   if (myAssignments.length > 0) {
@@ -580,9 +585,10 @@ function testLineWdScheduleConfirmed(data) {
   var clinicName = data.clinic_name || "";
   var assignments = data.assignments || [];
   var yearMonths = data.year_months || [];
+  var doctorName = data.doctor_name || "太郎";
   var periodLabel = yearMonths.length === 1 ? yearMonths[0] : yearMonths[0] + "〜" + yearMonths[yearMonths.length - 1];
 
-  var myAssignments = assignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var myAssignments = assignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var lines = [DEV_TEST_PREFIX + "【平日外勤確定】" + clinicName + " " + periodLabel + "\n"];
   if (myAssignments.length > 0) {
@@ -627,6 +633,7 @@ function testLineWeeklyIntegrated(data) {
   var satClinics = data.sat_clinics || [];
   var wdClinicName = data.wd_clinic_name || "";
   var yearMonths = data.year_months || [];
+  var doctorName = data.doctor_name || "太郎";
 
   var clinicMap = {};
   for (var i = 0; i < satClinics.length; i++) {
@@ -635,8 +642,8 @@ function testLineWeeklyIntegrated(data) {
 
   var periodLabel = yearMonths.length === 1 ? yearMonths[0] : yearMonths[0] + "〜" + yearMonths[yearMonths.length - 1];
 
-  var mySatAssignments = satAssignments.filter(function(a) { return a.doctor_name === "太郎"; });
-  var myWdAssignments = wdAssignments.filter(function(a) { return a.doctor_name === "太郎"; });
+  var mySatAssignments = satAssignments.filter(function(a) { return a.doctor_name === doctorName; });
+  var myWdAssignments = wdAssignments.filter(function(a) { return a.doctor_name === doctorName; });
 
   var lines = [DEV_TEST_PREFIX + "【週間スケジュール】" + periodLabel + "\n"];
 

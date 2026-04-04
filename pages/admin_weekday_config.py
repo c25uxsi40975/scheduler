@@ -1,15 +1,36 @@
 """管理者: 平日外勤セクション管理タブ"""
 import streamlit as st
+import requests
 from database import (
     get_doctors,
     get_weekday_configs, create_weekday_spreadsheet,
     add_weekday_config, update_weekday_config, delete_weekday_config,
     get_weekday_schedule_view_mode, set_weekday_schedule_view_mode,
+    get_weekday_confirmed_months,
 )
 from components.display_utils import build_display_name_map
 
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
+
+
+def _resync_weekday_calendar(section: str, clinic_name: str):
+    """検体設定変更後にカレンダーの検体イベントを再同期（メール通知なし）"""
+    confirmed = get_weekday_confirmed_months(section)
+    if not confirmed:
+        return
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "weekday_calendar_resync",
+            "section": section,
+            "clinic_name": clinic_name,
+            "year_months": confirmed,
+        }, timeout=15)
+    except requests.RequestException:
+        pass
 
 
 def render():
@@ -220,6 +241,20 @@ def render():
                             elif not edit_days:
                                 st.error("曜日を1つ以上選択してください")
                             else:
+                                # 検体設定が変わったか判定
+                                old_spec = (
+                                    cfg.get("specimen_enabled"),
+                                    cfg.get("specimen_doctors", []),
+                                    cfg.get("specimen_days", []),
+                                    cfg.get("specimen_priority", {}),
+                                )
+                                new_spec = (
+                                    bool(edit_specimen_enabled),
+                                    edit_specimen_doctors,
+                                    edit_specimen_days,
+                                    edit_priority,
+                                )
+                                specimen_changed = old_spec != new_spec
                                 update_weekday_config(
                                     section,
                                     clinic_name=edit_name.strip(),
@@ -231,6 +266,8 @@ def render():
                                     specimen_priority=edit_priority,
                                     specimen_subadmin_allowed=1 if edit_specimen_subadmin else 0,
                                 )
+                                if specimen_changed:
+                                    _resync_weekday_calendar(section, edit_name.strip())
                                 st.session_state.pop(f"wk_editing_{section}", None)
                                 st.success("保存しました")
                                 st.rerun()

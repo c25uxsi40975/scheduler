@@ -36,6 +36,25 @@ HOURS = list(range(25))  # 0〜24
 MINUTES = [0, 30]
 
 
+def _resync_weekday_calendar(section: str, clinic_name: str):
+    """検体設定変更後にカレンダーの検体イベントを再同期（メール通知なし）"""
+    confirmed = get_weekday_confirmed_months(section)
+    if not confirmed:
+        return
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "weekday_calendar_resync",
+            "section": section,
+            "clinic_name": clinic_name,
+            "year_months": confirmed,
+        }, timeout=15)
+    except requests.RequestException:
+        pass
+
+
 def _build_target_dates_for_months(
     section: str, selected_months: list[str], days_of_week: list[int],
 ) -> list[date]:
@@ -269,11 +288,15 @@ def _render_specimen_management(section: str, cfg: dict, assigned_doctor_ids: li
                     st.caption(f"　順位 {r}: {names}")
 
         if st.form_submit_button("保存", type="primary", use_container_width=True):
+            old_spec = (cfg.get("specimen_doctors", []), cfg.get("specimen_priority", {}))
+            new_spec = (edit_specimen_doctors, edit_priority)
             update_weekday_config(
                 section,
                 specimen_doctors=edit_specimen_doctors,
                 specimen_priority=edit_priority,
             )
+            if old_spec != new_spec:
+                _resync_weekday_calendar(section, cfg.get("clinic_name", ""))
             st.success("検体管理設定を保存しました")
             st.rerun()
 
