@@ -3,56 +3,35 @@
 スケジュール画像等を Drive にアップロードし公開URLを取得する。
 認証は gspread と同じサービスアカウントを使用。
 """
-import json
 import logging
-import uuid
 
-import requests
 import streamlit as st
-from google.auth.transport.requests import Request as AuthRequest
 from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaInMemoryUpload
 
 _log = logging.getLogger(__name__)
 
 _SCOPES = ["https://www.googleapis.com/auth/drive"]
-_UPLOAD_URL = "https://www.googleapis.com/upload/drive/v3/files"
-_FILES_URL = "https://www.googleapis.com/drive/v3/files"
 
 
-def _get_drive_token() -> str:
-    """サービスアカウントの access token を取得"""
+def _get_drive_service():
+    """サービスアカウントで認証済み Drive サービスを取得"""
     creds = Credentials.from_service_account_info(
         dict(st.secrets["gcp_service_account"]),
         scopes=_SCOPES,
     )
-    creds.refresh(AuthRequest())
-    return creds.token
+    return build("drive", "v3", credentials=creds)
 
 
-def _find_existing_file(token: str, filename: str, folder_id: str | None = None) -> str | None:
+def _find_existing_file(service, filename: str, folder_id: str | None = None) -> str | None:
     """同名ファイルが既にあれば file_id を返す"""
     q = f"name='{filename}' and trashed=false"
     if folder_id:
         q += f" and '{folder_id}' in parents"
-    resp = requests.get(
-        _FILES_URL,
-        headers={"Authorization": f"Bearer {token}"},
-        params={"q": q, "fields": "files(id)", "spaces": "drive"},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    files = resp.json().get("files", [])
+    resp = service.files().list(q=q, fields="files(id)", spaces="drive").execute()
+    files = resp.get("files", [])
     return files[0]["id"] if files else None
-
-
-def _delete_file(token: str, file_id: str):
-    """Drive ファイルを削除"""
-    resp = requests.delete(
-        f"{_FILES_URL}/{file_id}",
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=10,
-    )
-    resp.raise_for_status()
 
 
 def _get_folder_id() -> str | None:
@@ -71,56 +50,32 @@ def upload_schedule_image(png_bytes: bytes, filename: str) -> str | None:
         return None
 
     try:
-        token = _get_drive_token()
+        service = _get_drive_service()
         folder_id = _get_folder_id()
 
         # 既存ファイルを削除
-        existing_id = _find_existing_file(token, filename, folder_id)
+        existing_id = _find_existing_file(service, filename, folder_id)
         if existing_id:
-            _delete_file(token, existing_id)
+            service.files().delete(fileId=existing_id).execute()
 
-        # multipart/related upload (Drive API requires this, not form-data)
+        # アップロード
         meta = {"name": filename, "mimeType": "image/png"}
         if folder_id:
             meta["parents"] = [folder_id]
-        metadata = json.dumps(meta).encode()
 
-        boundary = uuid.uuid4().hex
-        body = (
-            f"--{boundary}\r\n"
-            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
-        ).encode()
-        body += metadata + b"\r\n"
-        body += (
-            f"--{boundary}\r\n"
-            f"Content-Type: image/png\r\n\r\n"
-        ).encode()
-        body += png_bytes + b"\r\n"
-        body += f"--{boundary}--".encode()
-
-        resp = requests.post(
-            _UPLOAD_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": f"multipart/related; boundary={boundary}",
-            },
-            params={"uploadType": "multipart", "fields": "id"},
-            data=body,
-            timeout=30,
-        )
-        resp.raise_for_status()
-        file_id = resp.json()["id"]
+        media = MediaInMemoryUpload(png_bytes, mimetype="image/png")
+        created = service.files().create(
+            body=meta,
+            media_body=media,
+            fields="id",
+        ).execute()
+        file_id = created["id"]
 
         # 公開設定 (anyone with link can view)
-        requests.post(
-            f"{_FILES_URL}/{file_id}/permissions",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={"type": "anyone", "role": "reader"},
-            timeout=10,
-        ).raise_for_status()
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+        ).execute()
 
         _log.info("Drive アップロード完了: %s (id=%s, folder=%s)", filename, file_id, folder_id)
         return file_id
