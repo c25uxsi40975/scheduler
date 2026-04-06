@@ -154,9 +154,15 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
     top_rank = candidate_docs[0]["rank"]
     same_rank = [d for d in candidate_docs if d["rank"] == top_rank]
 
+    # この日に実際に勤務している同ランク医員を特定
+    today_dow = dt.weekday()
+    today_assignees = [d for d in same_rank if today_dow in d.get("weekdays", [])]
+    if not today_assignees:
+        return None  # この日に同ランク医員が勤務していない
+
     return {
-        "doctor_id": same_rank[0]["doctor_id"],
-        "doctor_name": same_rank[0]["doctor_name"],
+        "doctor_id": today_assignees[0]["doctor_id"],
+        "doctor_name": today_assignees[0]["doctor_name"],
         "conflict": len(same_rank) > 1,
         "conflict_doctors": same_rank if len(same_rank) > 1 else [],
     }

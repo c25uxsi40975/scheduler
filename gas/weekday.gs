@@ -141,9 +141,18 @@ function getSpecimenAssignee(cfg, dateStr, allAssignments, doctors) {
     if (candidates[m].rank === topRank) sameRank.push(candidates[m]);
   }
 
+  // この日に実際に勤務している同ランク医員を特定
+  var todayAssignees = [];
+  for (var ta = 0; ta < sameRank.length; ta++) {
+    if (sameRank[ta].weekdays.indexOf(pyDow) !== -1) {
+      todayAssignees.push(sameRank[ta]);
+    }
+  }
+  if (todayAssignees.length === 0) return null;
+
   return {
-    doctorId: sameRank[0].id,
-    doctorName: sameRank[0].name,
+    doctorId: todayAssignees[0].id,
+    doctorName: todayAssignees[0].name,
     conflict: sameRank.length > 1,
     conflictDoctors: sameRank
   };
