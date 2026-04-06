@@ -61,6 +61,13 @@ def _get_operational_spreadsheet():
     return _open_spreadsheet_with_retry(gc, st.secrets["spreadsheet_key_operational"])
 
 
+@st.cache_resource
+def _get_weekday_default_spreadsheet():
+    """平日外勤用スプレッドシートに接続（必須）"""
+    gc = _get_gspread_client()
+    return _open_spreadsheet_with_retry(gc, st.secrets["spreadsheet_key_weekday"])
+
+
 def _open_spreadsheet_with_retry(gc, key, max_retries=5):
     """スプレッドシート接続をリトライ付きで実行（レート制限対応）"""
     for attempt in range(max_retries):
@@ -146,10 +153,14 @@ def _get_ws_cache(sheet_name: str) -> dict:
 
 
 def _get_weekday_spreadsheet(section: str):
-    """セクション別の平日運用スプレッドシートを取得（キャッシュ付き）"""
+    """セクション別の平日運用スプレッドシートを取得（キャッシュ付き）
+
+    セクション固有のキーが「平日外勤設定」シートにあればそちらを使用し、
+    なければ Secrets の spreadsheet_key_weekday をデフォルトとして使用する。
+    """
     if section in _weekday_spreadsheet_cache:
         return _weekday_spreadsheet_cache[section]
-    # 平日外勤設定から spreadsheet_key を取得
+    # 平日外勤設定からセクション固有の spreadsheet_key を取得
     ws = _get_sheet("平日外勤設定")
     records = _get_all_records(ws)
     ss_key = ""
@@ -157,13 +168,12 @@ def _get_weekday_spreadsheet(section: str):
         if str(r.get("section", "")) == section:
             ss_key = str(r.get("spreadsheet_key", "")).strip()
             break
-    if not ss_key:
-        raise ValueError(
-            f"セクション '{section}' のスプレッドシートキーが未設定です。"
-            "主管理者画面でスプレッドシートIDを設定してください。"
-        )
-    gc = _get_gspread_client()
-    ss = _retry(gc.open_by_key, ss_key)
+    if ss_key:
+        gc = _get_gspread_client()
+        ss = _retry(gc.open_by_key, ss_key)
+    else:
+        # セクション固有キーがなければ Secrets のデフォルトを使用
+        ss = _get_weekday_default_spreadsheet()
     _weekday_spreadsheet_cache[section] = ss
     return ss
 
@@ -360,6 +370,16 @@ def init_db():
                             _ws_cache_weekday[sec][ws_item.title] = ws_item
                     except Exception:
                         pass  # SS未作成やアクセス権なしの場合はスキップ
+                elif sec and not ss_key:
+                    # セクション固有キーがない場合は Secrets のデフォルトを使用
+                    try:
+                        ss = _get_weekday_default_spreadsheet()
+                        _weekday_spreadsheet_cache[sec] = ss
+                        _ws_cache_weekday[sec] = {}
+                        for ws_item in _retry(ss.worksheets):
+                            _ws_cache_weekday[sec][ws_item.title] = ws_item
+                    except Exception:
+                        pass
         except Exception:
             pass
 

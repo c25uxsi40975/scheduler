@@ -86,7 +86,8 @@ auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
 client_x509_cert_url = "（JSONキーの client_x509_cert_url）"
 
 spreadsheet_key = "（マスタ用スプレッドシートキー）"
-spreadsheet_key_operational = "（運用データ用スプレッドシートキー）"
+spreadsheet_key_operational = "（土曜運用データ用スプレッドシートキー）"
+spreadsheet_key_weekday = "（平日外勤用スプレッドシートキー）"
 ```
 
 > **JSONキーの貼り付け方:**
