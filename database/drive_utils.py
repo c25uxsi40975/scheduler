@@ -5,6 +5,7 @@
 """
 import json
 import logging
+import uuid
 
 import requests
 import streamlit as st
@@ -78,20 +79,33 @@ def upload_schedule_image(png_bytes: bytes, filename: str) -> str | None:
         if existing_id:
             _delete_file(token, existing_id)
 
-        # multipart upload
+        # multipart/related upload (Drive API requires this, not form-data)
         meta = {"name": filename, "mimeType": "image/png"}
         if folder_id:
             meta["parents"] = [folder_id]
-        metadata = json.dumps(meta)
+        metadata = json.dumps(meta).encode()
+
+        boundary = uuid.uuid4().hex
+        body = (
+            f"--{boundary}\r\n"
+            f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        ).encode()
+        body += metadata + b"\r\n"
+        body += (
+            f"--{boundary}\r\n"
+            f"Content-Type: image/png\r\n\r\n"
+        ).encode()
+        body += png_bytes + b"\r\n"
+        body += f"--{boundary}--".encode()
 
         resp = requests.post(
             _UPLOAD_URL,
-            headers={"Authorization": f"Bearer {token}"},
-            params={"uploadType": "multipart", "fields": "id"},
-            files={
-                "metadata": ("metadata", metadata, "application/json"),
-                "file": (filename, png_bytes, "image/png"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": f"multipart/related; boundary={boundary}",
             },
+            params={"uploadType": "multipart", "fields": "id"},
+            data=body,
             timeout=30,
         )
         resp.raise_for_status()
