@@ -118,8 +118,9 @@ ml_adjuster.py → optimizer.py (get_target_saturdays, get_clinic_dates)
 
 | スプレッドシート | 用途 | Secretsキー |
 |---|---|---|
-| マスタ | 医員・外勤先・優先度・日別設定・設定 | `spreadsheet_key` |
-| 運用データ | 希望_YYYY-MM / スケジュール_YYYY-MM | `spreadsheet_key_operational` |
+| マスタ | 医員・外勤先・優先度・日別設定・設定 | `spreadsheet_key_master` |
+| 土曜運用データ | 希望_YYYY-MM / スケジュール_YYYY-MM | `spreadsheet_key_saturday` |
+| 平日外勤データ | 平日外勤セクション別の運用データ | `spreadsheet_key_weekday` |
 
 ### シート一覧
 

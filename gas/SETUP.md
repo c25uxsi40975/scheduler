@@ -162,8 +162,9 @@ Apps Scriptエディタ左側の **時計アイコン（トリガー）** から
 
 ```toml
 # 必須
-spreadsheet_key = "..."
-spreadsheet_key_operational = "..."
+spreadsheet_key_master = "..."
+spreadsheet_key_saturday = "..."
+spreadsheet_key_weekday = "..."
 [gcp_service_account]
 # ...
 

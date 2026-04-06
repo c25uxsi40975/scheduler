@@ -64,17 +64,19 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# 2スプレッドシート構成の必須チェック
+# 3スプレッドシート構成の必須チェック
 _missing = []
-if not st.secrets.get("spreadsheet_key", ""):
-    _missing.append("spreadsheet_key")
-if not st.secrets.get("spreadsheet_key_operational", ""):
-    _missing.append("spreadsheet_key_operational")
+if not st.secrets.get("spreadsheet_key_master", ""):
+    _missing.append("spreadsheet_key_master")
+if not st.secrets.get("spreadsheet_key_saturday", ""):
+    _missing.append("spreadsheet_key_saturday")
+if not st.secrets.get("spreadsheet_key_weekday", ""):
+    _missing.append("spreadsheet_key_weekday")
 if _missing:
     st.error(
         f"Secrets に以下のキーが未設定です: {', '.join(_missing)}\n\n"
-        "マスタ用 (spreadsheet_key) と運用データ用 (spreadsheet_key_operational) の"
-        "2つのスプレッドシートキーが必要です。"
+        "マスタ用 (spreadsheet_key_master)、土曜運用データ用 (spreadsheet_key_saturday)、"
+        "平日外勤用 (spreadsheet_key_weekday) の3つのスプレッドシートキーが必要です。"
     )
     st.stop()
 
