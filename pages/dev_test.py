@@ -479,11 +479,39 @@ def _render_line_test_tab():
 
         col1, col2, col3 = st.columns(3)
         with col1:
-            if st.button("スケジュール確定 (1-2通)", key="test_line_sat_confirmed"):
+            if st.button("スケジュール確定＋画像 (2通)", key="test_line_sat_confirmed"):
+                # 本番と同じ流れ: 画像生成 → Drive → GAS に URL 付きで送信
+                schedule_image_url = None
+                try:
+                    from components.schedule_image import generate_schedule_image
+                    from database.drive_utils import upload_schedule_image
+                    dummy_sched = {"assignments": [
+                        {"date": a["date"], "doctor_id": a["doctor_id"], "clinic_id": a["clinic_id"]}
+                        for a in sat_data
+                    ]}
+                    dummy_doctors = _get_dummy_doctors()
+                    png_bytes = generate_schedule_image(
+                        dummy_sched, dummy_doctors, DUMMY_CLINICS_SAT,
+                        sat_months[0] if sat_months else "",
+                    )
+                    if png_bytes:
+                        file_id = upload_schedule_image(png_bytes, "dev_test_schedule.png")
+                        if file_id:
+                            schedule_image_url = f"https://drive.google.com/uc?export=view&id={file_id}"
+                            st.info(f"画像アップロード完了 (file_id={file_id})")
+                        else:
+                            st.warning("画像のDriveアップロードに失敗（テキストのみ送信）")
+                    else:
+                        st.warning("画像生成に失敗（テキストのみ送信）")
+                except Exception as e:
+                    st.warning(f"画像処理エラー: {e}（テキストのみ送信）")
+
                 payload = _base_payload()
                 payload["year_month"] = sat_months[0] if sat_months else ""
                 payload["assignments"] = sat_data
                 payload["clinics"] = [{"id": c["id"], "name": c["name"]} for c in DUMMY_CLINICS_SAT]
+                if schedule_image_url:
+                    payload["schedule_image_url"] = schedule_image_url
                 _post_to_gas("test_line_sat_schedule_confirmed", payload)
 
         with col2:

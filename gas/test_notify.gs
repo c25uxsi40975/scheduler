@@ -538,6 +538,11 @@ function testLineSatScheduleConfirmed(data) {
     lines.push("  割り当てなし");
   }
 
+  // 画像URLがあればテキスト＋画像の2通で送信（本番と同じ流れ）
+  var scheduleImageUrl = data.schedule_image_url || null;
+  if (scheduleImageUrl) {
+    return sendTestLinePushWithImage(userId, lines.join("\n"), scheduleImageUrl);
+  }
   return sendTestLinePush(userId, lines.join("\n"));
 }
 
@@ -736,6 +741,37 @@ function sendTestLinePush(userId, text) {
     return { status: "ok", sent_to: userId };
   } catch (e) {
     Logger.log("テストLINE Push送信失敗: " + userId + " - " + e.message);
+    return { status: "error", message: e.message };
+  }
+}
+
+/**
+ * テスト用LINE Push送信（テキスト＋画像の2メッセージ）
+ */
+function sendTestLinePushWithImage(userId, text, imageUrl) {
+  var token = getLineChannelAccessToken();
+  if (!userId || !token) {
+    return { status: "error", message: "LINE User ID またはアクセストークンが未設定" };
+  }
+  try {
+    UrlFetchApp.fetch("https://api.line.me/v2/bot/message/push", {
+      "method": "post",
+      "headers": {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json"
+      },
+      "payload": JSON.stringify({
+        "to": userId,
+        "messages": [
+          {"type": "text", "text": text},
+          {"type": "image", "originalContentUrl": imageUrl, "previewImageUrl": imageUrl}
+        ]
+      })
+    });
+    Logger.log("テストLINE Push(画像付き)送信成功: " + userId);
+    return { status: "ok", sent_to: userId, image: true };
+  } catch (e) {
+    Logger.log("テストLINE Push(画像付き)送信失敗: " + userId + " - " + e.message);
     return { status: "error", message: e.message };
   }
 }
