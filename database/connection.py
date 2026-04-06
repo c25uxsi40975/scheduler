@@ -48,7 +48,7 @@ def _get_gspread_client():
 def _get_master_spreadsheet():
     """マスタ用スプレッドシートに接続"""
     gc = _get_gspread_client()
-    spreadsheet_key = st.secrets.get("spreadsheet_key", "")
+    spreadsheet_key = st.secrets.get("spreadsheet_key_master", "")
     if spreadsheet_key:
         return _open_spreadsheet_with_retry(gc, spreadsheet_key)
     return gc.open(st.secrets.get("spreadsheet_name", "外勤調整データ"))
@@ -58,7 +58,7 @@ def _get_master_spreadsheet():
 def _get_operational_spreadsheet():
     """運用データ用スプレッドシートに接続（必須）"""
     gc = _get_gspread_client()
-    return _open_spreadsheet_with_retry(gc, st.secrets["spreadsheet_key_operational"])
+    return _open_spreadsheet_with_retry(gc, st.secrets["spreadsheet_key_saturday"])
 
 
 @st.cache_resource
