@@ -265,7 +265,20 @@ def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clin
         target_month, confirmed_sched, doctors, clinics,
         all_confirmed, affinities, get_target_saturdays(year, month),
     )
-    _send_confirmation_notification(target_month, confirmed_sched)
+    # スケジュール画像を生成してDriveにアップロード
+    schedule_image_file_id = None
+    try:
+        from components.schedule_image import generate_schedule_image
+        from database.drive_utils import upload_schedule_image
+        png_bytes = generate_schedule_image(confirmed_sched, doctors, clinics, target_month)
+        if png_bytes:
+            schedule_image_file_id = upload_schedule_image(
+                png_bytes, f"schedule_{target_month}.png"
+            )
+    except Exception:
+        _log.warning("スケジュール画像のアップロードに失敗", exc_info=True)
+
+    _send_confirmation_notification(target_month, confirmed_sched, schedule_image_file_id)
     # 確定後もそのまま同月表示（確認タブで確認できるようにする）
     st.session_state["_toast_msg"] = "確定しました！ スケジュール確認タブで確認してください。"
     st.rerun()
@@ -364,17 +377,20 @@ def _append_suitability_training_rows(target_month, sched, doctors, clinics,
         append_suitability_training_data(rows)
 
 
-def _send_confirmation_notification(target_month, sched):
-    """GAS Web App経由で確定通知メールを送信"""
+def _send_confirmation_notification(target_month, sched, schedule_image_file_id=None):
+    """GAS Web App経由で確定通知メール＋LINE通知を送信"""
     gas_url = st.secrets.get("gas_webapp_url", "")
     if not gas_url:
         return
     try:
-        requests.post(gas_url, json={
+        payload = {
             "action": "schedule_confirmed",
             "year_month": target_month,
             "plan_name": sched["plan_name"],
-        }, timeout=10)
+        }
+        if schedule_image_file_id:
+            payload["schedule_image_file_id"] = schedule_image_file_id
+        requests.post(gas_url, json=payload, timeout=10)
     except requests.RequestException:
         st.warning("メール通知の送信に失敗しました。スケジュールは確定済みです。")
 

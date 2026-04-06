@@ -10,7 +10,7 @@
 /**
  * 確定通知メールを全医員に送信
  */
-function sendConfirmationEmails(yearMonth, planName) {
+function sendConfirmationEmails(yearMonth, planName, scheduleImageFileId) {
   var ssOp = getOperationalSpreadsheet();
   var ssMaster = getMasterSpreadsheet();
 
@@ -82,7 +82,11 @@ function sendConfirmationEmails(yearMonth, planName) {
 
   // LINE連携済み医員にPush通知
   try {
-    sendLineScheduleConfirmed(yearMonth, allAssignments, doctors, clinics);
+    var scheduleImageUrl = null;
+    if (scheduleImageFileId) {
+      scheduleImageUrl = "https://drive.google.com/uc?export=view&id=" + scheduleImageFileId;
+    }
+    sendLineScheduleConfirmed(yearMonth, allAssignments, doctors, clinics, scheduleImageUrl);
   } catch (e) {
     Logger.log("LINE確定通知エラー: " + e.message);
   }

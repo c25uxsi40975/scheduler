@@ -102,7 +102,7 @@ function doPost(e) {
 
     // 土曜関連
     if (data.action === "schedule_confirmed") {
-      sendConfirmationEmails(data.year_month, data.plan_name);
+      sendConfirmationEmails(data.year_month, data.plan_name, data.schedule_image_file_id);
     } else if (data.action === "preference_confirmed_to_doctor") {
       sendDoctorConfirmation(data.year_month, data.doctor_name, data.doctor_email, data.date_summary, data.free_text);
     } else if (data.action === "all_preferences_complete") {
