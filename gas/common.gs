@@ -279,6 +279,13 @@ function doPost(e) {
         JSON.stringify(testResult)
       ).setMimeType(ContentService.MimeType.JSON);
 
+    // LINE テキストPush（汎用）
+    } else if (data.action === "test_line_push_text") {
+      pushText(data.line_user_id, data.text);
+      return ContentService.createTextOutput(
+        JSON.stringify({ status: "ok" })
+      ).setMimeType(ContentService.MimeType.JSON);
+
     // LINE Push残数取得
     } else if (data.action === "get_line_quota") {
       var testResult = getLineQuota();
