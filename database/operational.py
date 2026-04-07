@@ -78,10 +78,16 @@ def get_all_preferences(year_month):
 
 
 def get_dev_preferences(year_month):
-    """開発者テスト用の希望データ（dev_希望_YYYY-MM シート）を取得"""
+    """開発者テスト用の希望データ（dev_希望_YYYY-MM シート）を取得
+
+    _get_sheet は存在しないシートを自動作成してしまうため、
+    運用SSから直接ワークシートを取得する。見つからなければ空リストを返す。
+    """
+    import gspread
     try:
-        ws = _get_sheet(f"dev_希望_{year_month}")
-    except Exception:
+        sh = _get_operational_spreadsheet()
+        ws = _retry(sh.worksheet, f"dev_希望_{year_month}")
+    except (gspread.WorksheetNotFound, Exception):
         return []
     records = _get_all_records(ws)
     result = []
@@ -135,8 +141,13 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
 
 def delete_preference(doctor_id, year_month, sheet_prefix=""):
     """指定医員の希望データを削除"""
+    import gspread
     if sheet_prefix:
-        ws = _get_sheet(f"{sheet_prefix}希望_{year_month}")
+        try:
+            sh = _get_operational_spreadsheet()
+            ws = _retry(sh.worksheet, f"{sheet_prefix}希望_{year_month}")
+        except (gspread.WorksheetNotFound, Exception):
+            return False
     else:
         ws = _get_pref_sheet(year_month)
     row_idx = _find_row_index(ws, 1, doctor_id)
