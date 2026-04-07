@@ -926,7 +926,7 @@ def render(target_month, year, month):
     from datetime import date as _date
 
     # 対象月の全土曜を取得（追加/除外なしのベース）
-    _base_sats = get_target_saturdays(year, month)
+    _base_sats = get_target_saturdays(year, month, base_only=True)
     _extra = get_saturday_extra_dates(target_month)
     _excluded = get_saturday_excluded_dates(target_month)
 

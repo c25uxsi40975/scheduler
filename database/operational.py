@@ -305,9 +305,8 @@ def confirm_schedule(schedule_id, year_month=None):
     if ws is None:
         _logger.warning("confirm_schedule: id=%s が見つかりません", schedule_id)
         return
-    values = [[0]] * len(records)
-    values[idx] = [1]
-    _retry(ws.update, values, f"F2:F{len(records)+1}")
+    row_num = idx + 2  # 0-indexed + header row
+    _retry(ws.update, [[1]], f"F{row_num}")
     _clear_data_cache()
     _logger.info("スケジュール確定: schedule_id=%s", schedule_id)
 

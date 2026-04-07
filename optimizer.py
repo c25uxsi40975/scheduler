@@ -21,8 +21,21 @@ PRIORITY_EXCLUDED = 0.0    # 除外: 割当不可
 PRIORITY_FIXED = PRIORITY_MANDATORY
 
 
-def get_target_saturdays(year: int, month: int, excluded=None, extra=None) -> list[date]:
-    """指定月の土曜日を取得（祝日除外）— scheduling_utils の共通関数を利用"""
+def get_target_saturdays(year: int, month: int, excluded=None, extra=None, *, base_only=False) -> list[date]:
+    """指定月の土曜日を取得（祝日除外）— scheduling_utils の共通関数を利用
+
+    base_only=False (デフォルト): 設定シートの追加/除外日を自動反映
+    base_only=True: カレンダー上の土曜日のみ（追加/除外設定を無視）
+    """
+    if base_only:
+        return _get_target_saturdays_base(year, month)
+    if excluded is None or extra is None:
+        from database import get_saturday_extra_dates, get_saturday_excluded_dates
+        year_month = f"{year}-{month:02d}"
+        if extra is None:
+            extra = get_saturday_extra_dates(year_month)
+        if excluded is None:
+            excluded = get_saturday_excluded_dates(year_month)
     return _get_target_saturdays_base(year, month, excluded=excluded, extra=extra)
 
 
