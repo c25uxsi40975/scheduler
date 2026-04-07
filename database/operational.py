@@ -113,6 +113,17 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
     _clear_data_cache()
 
 
+def delete_preference(doctor_id, year_month):
+    """指定医員の希望データを削除"""
+    ws = _get_pref_sheet(year_month)
+    row_idx = _find_row_index(ws, 1, doctor_id)
+    if row_idx:
+        _retry(ws.delete_rows, row_idx)
+        _clear_data_cache()
+        return True
+    return False
+
+
 def batch_upsert_preferences(year_month, items: list[dict]):
     """複数医員の希望を一括保存（API呼び出し最小化）
 

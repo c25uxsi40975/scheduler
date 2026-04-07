@@ -17,7 +17,7 @@ from database.master import (
     set_doctor_line_user_id, get_doctor_by_line_user_id,
 )
 from database.operational import (
-    get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences,
+    get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences, delete_preference,
     get_schedules, save_schedule, confirm_schedule, unconfirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, get_confirmed_months,
@@ -34,6 +34,9 @@ from database.auth import (
     update_doctor_email, update_doctor_notification_settings, update_calendar_shared_emails,
     get_open_month, set_open_month,
     get_input_deadline, set_input_deadline,
+    get_dev_open_month, set_dev_open_month,
+    get_dev_input_deadline, set_dev_input_deadline,
+    get_dev_doctor_ids, set_dev_doctor_ids,
     save_reset_code, verify_reset_code,
     save_line_linking_code, get_line_linking_code, verify_line_linking_code,
     get_doctor_email_by_account, get_doctor_id_by_account,

@@ -235,7 +235,7 @@ function handleLinkCodeInput(userId, text, replyToken, session) {
  * 希望入力開始: 月選択
  */
 function startPreferenceInput(doctor, userId, replyToken) {
-  var openMonth = getOpenMonth();
+  var openMonth = getOpenMonthForUser(doctor);
   if (!openMonth) {
     replyText(replyToken, "現在、受付中の月はありません。");
     return;

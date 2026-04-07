@@ -502,3 +502,37 @@ def get_input_deadline():
 def set_input_deadline(deadline_date: str):
     """希望入力の期限日を設定（YYYY-MM-DD形式）"""
     _set_setting("input_deadline", deadline_date)
+
+
+# ---- Dev Test: 開発者テスト用希望入力設定 ----
+
+def get_dev_open_month():
+    return _get_setting("dev_open_month")
+
+
+def set_dev_open_month(year_month: str | None):
+    _set_setting("dev_open_month", year_month or "")
+
+
+def get_dev_input_deadline():
+    return _get_setting("dev_input_deadline")
+
+
+def set_dev_input_deadline(deadline_date: str | None):
+    _set_setting("dev_input_deadline", deadline_date or "")
+
+
+def get_dev_doctor_ids():
+    import json
+    val = _get_setting("dev_doctor_ids")
+    if not val:
+        return []
+    try:
+        return json.loads(val)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def set_dev_doctor_ids(doctor_ids: list):
+    import json
+    _set_setting("dev_doctor_ids", json.dumps(doctor_ids))

@@ -129,7 +129,7 @@ def render(dev_doctor: dict | None = None):
         st.session_state["dev_my_email"] = dev_doctor.get("email", "")
         st.session_state["dev_my_line_id"] = dev_doctor.get("line_user_id", "")
 
-    tab1, tab2, tab3 = st.tabs(["ダミーデータ設定", "メール通知テスト", "LINE通知テスト"])
+    tab1, tab2, tab3, tab4 = st.tabs(["ダミーデータ設定", "メール通知テスト", "LINE通知テスト", "LINE希望入力テスト"])
 
     with tab1:
         _render_dummy_data_tab()
@@ -139,6 +139,9 @@ def render(dev_doctor: dict | None = None):
 
     with tab3:
         _render_line_test_tab()
+
+    with tab4:
+        _render_line_pref_test_tab(dev_doctor)
 
 
 # ---- タブ1: ダミーデータ設定 ----
@@ -575,3 +578,130 @@ def _show_line_quota():
             st.info(f"当月LINE Push消費数: {used} / 200")
         else:
             st.warning("LINE Push残数の取得に失敗しました")
+
+
+# ---- タブ4: LINE希望入力テスト ----
+
+def _render_line_pref_test_tab(dev_doctor: dict | None):
+    from database import (
+        get_dev_open_month, set_dev_open_month,
+        get_dev_input_deadline, set_dev_input_deadline,
+        get_dev_doctor_ids, set_dev_doctor_ids,
+        get_all_preferences, delete_preference,
+    )
+    from database.connection import _clear_data_cache
+    from optimizer import get_target_saturdays
+
+    st.subheader("LINE希望入力テスト")
+
+    if not dev_doctor:
+        st.warning("医員アカウントでログインしてください")
+        return
+
+    doctor_id = dev_doctor["id"]
+    doctor_name = dev_doctor.get("name", "")
+
+    # ---- 公開設定 ----
+    st.markdown("#### 希望入力 公開設定")
+    st.caption("開発者のみに希望入力を公開します（他の医員には影響しません）")
+
+    current_dev_month = get_dev_open_month()
+    current_dev_deadline = get_dev_input_deadline()
+    current_dev_ids = get_dev_doctor_ids()
+
+    if current_dev_month:
+        is_me = doctor_id in current_dev_ids
+        st.info(f"現在の公開月: **{current_dev_month}**　期限: {current_dev_deadline or '未設定'}　"
+                f"対象: {current_dev_ids}{'（自分を含む）' if is_me else ''}")
+    else:
+        st.info("現在の開発者テスト公開: なし")
+
+    today = date.today()
+    month_options = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(3)]
+    col_month, col_deadline = st.columns(2)
+    with col_month:
+        target_month = st.selectbox("対象月", month_options, key="dev_pref_month")
+    with col_deadline:
+        deadline_date = st.date_input(
+            "期限日", value=today + timedelta(days=14), key="dev_pref_deadline",
+        )
+
+    col_open, col_close = st.columns(2)
+    with col_open:
+        if st.button("公開する", type="primary", key="dev_pref_open"):
+            set_dev_open_month(target_month)
+            set_dev_input_deadline(deadline_date.isoformat())
+            # 開発者IDリストに自分を追加
+            ids = get_dev_doctor_ids()
+            if doctor_id not in ids:
+                ids.append(doctor_id)
+            set_dev_doctor_ids(ids)
+            _clear_data_cache()
+            st.success(f"{target_month} を開発者テスト用に公開しました")
+            st.rerun()
+    with col_close:
+        if st.button("閉じる", key="dev_pref_close"):
+            set_dev_open_month(None)
+            set_dev_input_deadline(None)
+            set_dev_doctor_ids([])
+            _clear_data_cache()
+            st.success("開発者テスト公開を終了しました")
+            st.rerun()
+
+    st.markdown("---")
+
+    # ---- 保存された希望データ確認 ----
+    st.markdown("#### 保存された希望データ")
+
+    view_month = current_dev_month or (month_options[0] if month_options else "")
+    if not view_month:
+        st.info("公開月を設定してください")
+        return
+
+    try:
+        y, m = map(int, view_month.split("-"))
+        saturdays = get_target_saturdays(y, m)
+    except Exception:
+        saturdays = []
+
+    prefs = get_all_preferences(view_month)
+    if not prefs:
+        st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
+    else:
+        # テーブル表示
+        header_cols = ["医員名"] + [f"{date.fromisoformat(s).month}/{date.fromisoformat(s).day}" for s in saturdays] + ["備考", "更新日時"]
+        rows = []
+        for p in prefs:
+            ng = set(p.get("ng_dates") or [])
+            avoid = set(p.get("avoid_dates") or [])
+            post_night = set(p.get("post_night_dates") or [])
+            row = [p.get("doctor_name", "?")]
+            for s in saturdays:
+                if s in ng:
+                    row.append("×")
+                elif s in avoid:
+                    row.append("△")
+                elif s in post_night:
+                    row.append("当○")
+                else:
+                    row.append("○")
+            row.append(p.get("free_text", ""))
+            row.append(p.get("updated_at", ""))
+            rows.append(row)
+
+        import pandas as pd
+        df = pd.DataFrame(rows, columns=header_cols)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ---- テストデータ削除 ----
+    st.markdown("#### テストデータ削除")
+    if st.button(f"自分（{doctor_name}）の希望データを削除", key="dev_pref_delete"):
+        deleted = delete_preference(doctor_id, view_month)
+        _clear_data_cache()
+        if deleted:
+            st.success(f"{doctor_name} の {view_month} の希望データを削除しました")
+        else:
+            st.info("削除対象のデータが見つかりませんでした")
+        st.rerun()

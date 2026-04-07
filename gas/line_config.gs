@@ -291,6 +291,37 @@ function getOpenMonth() {
 }
 
 /**
+ * ユーザーに応じた公開月を返す（開発者テスト分離）
+ * dev_doctor_ids に含まれる医員には dev_open_month を返し、
+ * それ以外には通常の open_month を返す。
+ */
+function getOpenMonthForUser(doctor) {
+  var devMonth = getSettingValue("dev_open_month");
+  if (devMonth && doctor) {
+    var devIdsRaw = getSettingValue("dev_doctor_ids");
+    if (devIdsRaw) {
+      try {
+        var devIds = JSON.parse(devIdsRaw);
+        for (var i = 0; i < devIds.length; i++) {
+          if (String(devIds[i]) === String(doctor.id)) {
+            // dev_open_month を正規化
+            if (devMonth.match && devMonth.match(/^\d{4}-\d{2}$/)) return devMonth;
+            try {
+              var d = new Date(devMonth);
+              if (!isNaN(d.getTime())) {
+                return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
+              }
+            } catch (e) {}
+            return devMonth;
+          }
+        }
+      } catch (e) {}
+    }
+  }
+  return getOpenMonth();
+}
+
+/**
  * 入力期限を取得
  */
 function getInputDeadline() {
