@@ -1,7 +1,10 @@
 """Google Drive ユーティリティ
 
-スケジュール画像等を Drive にアップロードし公開URLを取得する。
+スケジュール画像等を共有ドライブにアップロードし公開URLを取得する。
 認証は gspread と同じサービスアカウントを使用。
+
+NOTE: サービスアカウントにはストレージ割り当てがないため、
+アップロード先は必ず共有ドライブ（Shared Drive）上のフォルダにする。
 """
 import logging
 
@@ -29,7 +32,17 @@ def _find_existing_file(service, filename: str, folder_id: str | None = None) ->
     q = f"name='{filename}' and trashed=false"
     if folder_id:
         q += f" and '{folder_id}' in parents"
-    resp = service.files().list(q=q, fields="files(id)", spaces="drive").execute()
+    resp = (
+        service.files()
+        .list(
+            q=q,
+            fields="files(id)",
+            spaces="drive",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        )
+        .execute()
+    )
     files = resp.get("files", [])
     return files[0]["id"] if files else None
 
@@ -56,41 +69,33 @@ def upload_schedule_image(png_bytes: bytes, filename: str) -> str | None:
         # 既存ファイルを削除
         existing_id = _find_existing_file(service, filename, folder_id)
         if existing_id:
-            service.files().delete(fileId=existing_id).execute()
+            service.files().delete(
+                fileId=existing_id, supportsAllDrives=True
+            ).execute()
 
-        # アップロード
+        # アップロード (共有ドライブ対応)
         meta = {"name": filename, "mimeType": "image/png"}
         if folder_id:
             meta["parents"] = [folder_id]
 
         media = MediaInMemoryUpload(png_bytes, mimetype="image/png")
-        try:
-            created = service.files().create(
+        created = (
+            service.files()
+            .create(
                 body=meta,
                 media_body=media,
                 fields="id",
-            ).execute()
-        except Exception:
-            if folder_id:
-                _log.warning(
-                    "フォルダ %s へのアップロード失敗。フォルダ指定なしで再試行します",
-                    folder_id,
-                )
-                meta.pop("parents", None)
-                media = MediaInMemoryUpload(png_bytes, mimetype="image/png")
-                created = service.files().create(
-                    body=meta,
-                    media_body=media,
-                    fields="id",
-                ).execute()
-            else:
-                raise
+                supportsAllDrives=True,
+            )
+            .execute()
+        )
         file_id = created["id"]
 
         # 公開設定 (anyone with link can view)
         service.permissions().create(
             fileId=file_id,
             body={"type": "anyone", "role": "reader"},
+            supportsAllDrives=True,
         ).execute()
 
         _log.info("Drive アップロード完了: %s (id=%s, folder=%s)", filename, file_id, folder_id)
