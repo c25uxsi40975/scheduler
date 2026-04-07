@@ -64,11 +64,27 @@ def upload_schedule_image(png_bytes: bytes, filename: str) -> str | None:
             meta["parents"] = [folder_id]
 
         media = MediaInMemoryUpload(png_bytes, mimetype="image/png")
-        created = service.files().create(
-            body=meta,
-            media_body=media,
-            fields="id",
-        ).execute()
+        try:
+            created = service.files().create(
+                body=meta,
+                media_body=media,
+                fields="id",
+            ).execute()
+        except Exception:
+            if folder_id:
+                _log.warning(
+                    "フォルダ %s へのアップロード失敗。フォルダ指定なしで再試行します",
+                    folder_id,
+                )
+                meta.pop("parents", None)
+                media = MediaInMemoryUpload(png_bytes, mimetype="image/png")
+                created = service.files().create(
+                    body=meta,
+                    media_body=media,
+                    fields="id",
+                ).execute()
+            else:
+                raise
         file_id = created["id"]
 
         # 公開設定 (anyone with link can view)
