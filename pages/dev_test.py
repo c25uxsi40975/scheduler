@@ -671,6 +671,13 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
         st.info("公開月を設定してください")
         return
 
+    if st.button("データを更新", key="dev_pref_refresh"):
+        _clear_data_cache()
+        # ワークシートキャッシュもクリア
+        from database.connection import _ws_cache_operational
+        _ws_cache_operational.clear()
+        st.rerun()
+
     try:
         y, m = map(int, view_month.split("-"))
         saturdays = get_target_saturdays(y, m)
