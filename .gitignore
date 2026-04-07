@@ -28,6 +28,7 @@ venv/
 
 # IDE / Tools
 .claude/
+CLAUDE.md
 .vscode/
 .idea/
 
