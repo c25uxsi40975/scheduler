@@ -641,10 +641,16 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
             dev_line_id = dev_doctor.get("line_user_id", "") if dev_doctor else ""
             if dev_line_id:
                 month_label = target_month.replace("-", "年") + "月"
-                _post_to_gas("test_line_push_text", {
+                result = _post_to_gas("test_line_push_text", {
                     "line_user_id": dev_line_id,
                     "text": f"【開発テスト】{month_label} の希望入力が公開されました。\n\nメニューの「希望入力」から入力してください。",
                 })
+                if result and result.get("status") == "ok":
+                    st.success("LINEに通知を送信しました")
+                else:
+                    st.warning(f"LINE通知送信失敗: {result}")
+            else:
+                st.warning("LINE User ID が未連携のため通知を送信できませんでした")
             st.success(f"{target_month} を開発者テスト用に公開しました")
             st.rerun()
     with col_close:
