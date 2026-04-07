@@ -693,9 +693,11 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:
         # テーブル表示
-        # saturdays は date オブジェクトのリスト → 文字列に統一
-        sat_strs = [s.isoformat() if hasattr(s, 'isoformat') else str(s) for s in saturdays]
-        header_cols = ["医員名"] + [f"{date.fromisoformat(s).month}/{date.fromisoformat(s).day}" for s in sat_strs] + ["備考", "更新日時"]
+        def _to_date(s):
+            return s if isinstance(s, date) else date.fromisoformat(str(s))
+        sat_dates = [_to_date(s) for s in saturdays]
+        sat_strs = [s.isoformat() for s in sat_dates]
+        header_cols = ["医員名"] + [f"{s.month}/{s.day}" for s in sat_dates] + ["備考", "更新日時"]
         rows = []
         for p in prefs:
             ng = set(p.get("ng_dates") or [])
