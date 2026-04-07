@@ -77,6 +77,26 @@ def get_all_preferences(year_month):
     return result
 
 
+def get_dev_preferences(year_month):
+    """開発者テスト用の希望データ（dev_希望_YYYY-MM シート）を取得"""
+    try:
+        ws = _get_sheet(f"dev_希望_{year_month}")
+    except Exception:
+        return []
+    records = _get_all_records(ws)
+    result = []
+    for r in records:
+        r["doctor_id"] = int(r["doctor_id"])
+        r["ng_dates"] = _safe_json_loads(r.get("ng_dates"))
+        r["avoid_dates"] = _safe_json_loads(r.get("avoid_dates"))
+        r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
+        r["date_clinic_requests"] = _safe_json_loads(r.get("date_clinic_requests"), default={})
+        r["post_night_dates"] = _safe_json_loads(r.get("post_night_dates"))
+        r["free_text"] = str(r.get("free_text", "") or "")
+        result.append(r)
+    return result
+
+
 def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
                       preferred_clinics=None, date_clinic_requests=None, free_text=None,
                       post_night_dates=None):
@@ -113,9 +133,12 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
     _clear_data_cache()
 
 
-def delete_preference(doctor_id, year_month):
+def delete_preference(doctor_id, year_month, sheet_prefix=""):
     """指定医員の希望データを削除"""
-    ws = _get_pref_sheet(year_month)
+    if sheet_prefix:
+        ws = _get_sheet(f"{sheet_prefix}希望_{year_month}")
+    else:
+        ws = _get_pref_sheet(year_month)
     row_idx = _find_row_index(ws, 1, doctor_id)
     if row_idx:
         _retry(ws.delete_rows, row_idx)

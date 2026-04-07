@@ -235,14 +235,17 @@ function handleLinkCodeInput(userId, text, replyToken, session) {
  * 希望入力開始: 月選択
  */
 function startPreferenceInput(doctor, userId, replyToken) {
-  var openMonth = getOpenMonthForUser(doctor);
+  var openMonthResult = getOpenMonthForUser(doctor);
+  var openMonth = openMonthResult.month;
+  var isDevTest = openMonthResult.isDev;
+
   if (!openMonth) {
     replyText(replyToken, "現在、受付中の月はありません。");
     return;
   }
 
-  // 確定済みチェック
-  if (isMonthConfirmed(openMonth)) {
+  // 確定済みチェック（dev_テスト時はスキップ）
+  if (!isDevTest && isMonthConfirmed(openMonth)) {
     replyText(replyToken,
       openMonth.replace("-", "年") + "月 のスケジュールは確定済みです。\n希望の変更はできません。"
     );
@@ -263,7 +266,8 @@ function startPreferenceInput(doctor, userId, replyToken) {
     target_month: openMonth,
     current_date_index: "0",
     preferences_json: "{}",
-    free_text: ""
+    free_text: "",
+    is_dev_test: isDevTest ? "1" : ""
   });
 
   // 最初の日付を聞く
@@ -623,7 +627,8 @@ function formatDateLabel(dateStr) {
  */
 function savePreference(session, doctor) {
   var ss = getOperationalSpreadsheet();
-  var sheetName = "希望_" + session.target_month;
+  var prefix = session.is_dev_test === "1" ? "dev_" : "";
+  var sheetName = prefix + "希望_" + session.target_month;
   var sheet = getSheet(ss, sheetName);
 
   // シートがなければ作成

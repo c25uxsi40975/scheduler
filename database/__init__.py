@@ -17,7 +17,7 @@ from database.master import (
     set_doctor_line_user_id, get_doctor_by_line_user_id,
 )
 from database.operational import (
-    get_preference, get_all_preferences, upsert_preference, batch_upsert_preferences, delete_preference,
+    get_preference, get_all_preferences, get_dev_preferences, upsert_preference, batch_upsert_preferences, delete_preference,
     get_schedules, save_schedule, confirm_schedule, unconfirm_schedule,
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, get_confirmed_months,

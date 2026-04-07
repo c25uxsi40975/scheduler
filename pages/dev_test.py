@@ -587,7 +587,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
         get_dev_open_month, set_dev_open_month,
         get_dev_input_deadline, set_dev_input_deadline,
         get_dev_doctor_ids, set_dev_doctor_ids,
-        get_all_preferences, delete_preference,
+        get_dev_preferences, delete_preference,
     )
     from database.connection import _clear_data_cache
     from optimizer import get_target_saturdays
@@ -664,7 +664,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
     except Exception:
         saturdays = []
 
-    prefs = get_all_preferences(view_month)
+    prefs = get_dev_preferences(view_month)
     if not prefs:
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:
@@ -698,7 +698,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
     # ---- テストデータ削除 ----
     st.markdown("#### テストデータ削除")
     if st.button(f"自分（{doctor_name}）の希望データを削除", key="dev_pref_delete"):
-        deleted = delete_preference(doctor_id, view_month)
+        deleted = delete_preference(doctor_id, view_month, sheet_prefix="dev_")
         _clear_data_cache()
         if deleted:
             st.success(f"{doctor_name} の {view_month} の希望データを削除しました")

@@ -294,6 +294,7 @@ function getOpenMonth() {
  * ユーザーに応じた公開月を返す（開発者テスト分離）
  * dev_doctor_ids に含まれる医員には dev_open_month を返し、
  * それ以外には通常の open_month を返す。
+ * @returns {{month: string|null, isDev: boolean}}
  */
 function getOpenMonthForUser(doctor) {
   var devMonth = getSettingValue("dev_open_month");
@@ -305,20 +306,24 @@ function getOpenMonthForUser(doctor) {
         for (var i = 0; i < devIds.length; i++) {
           if (String(devIds[i]) === String(doctor.id)) {
             // dev_open_month を正規化
-            if (devMonth.match && devMonth.match(/^\d{4}-\d{2}$/)) return devMonth;
-            try {
-              var d = new Date(devMonth);
-              if (!isNaN(d.getTime())) {
-                return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
-              }
-            } catch (e) {}
-            return devMonth;
+            var normalized = devMonth;
+            if (devMonth.match && devMonth.match(/^\d{4}-\d{2}$/)) {
+              normalized = devMonth;
+            } else {
+              try {
+                var d = new Date(devMonth);
+                if (!isNaN(d.getTime())) {
+                  normalized = d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2);
+                }
+              } catch (e) {}
+            }
+            return { month: normalized, isDev: true };
           }
         }
       } catch (e) {}
     }
   }
-  return getOpenMonth();
+  return { month: getOpenMonth(), isDev: false };
 }
 
 /**
