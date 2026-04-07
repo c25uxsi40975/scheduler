@@ -286,6 +286,13 @@ function doPost(e) {
         JSON.stringify(testResult)
       ).setMimeType(ContentService.MimeType.JSON);
 
+    // Drive 画像アップロード（サービスアカウントにはストレージ割り当てがないためGAS経由）
+    } else if (data.action === "upload_drive_image") {
+      var uploadResult = uploadDriveImage(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(uploadResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+
     // LINE LIFF連携完了（Streamlitから呼ばれる）
     } else if (data.action === "line_link_complete") {
       switchToLinkedRichMenu(data.line_user_id);
@@ -498,6 +505,68 @@ function createSpreadsheetForSection(title, shareWith) {
     ss.addEditor(shareWith);
   }
   return { id: ss.getId(), url: ss.getUrl() };
+}
+
+// ---- Drive 画像アップロード ----
+
+/**
+ * base64 エンコードされた PNG 画像を Drive にアップロードし file_id を返す。
+ * 同名ファイルが既にあれば削除してから再アップロードする。
+ * folder_id 指定時はそのフォルダに保存し、直近 keep 枚以外を削除する。
+ *
+ * @param {Object} data - {image_base64, filename, folder_id?, keep?}
+ * @returns {{status: string, file_id?: string, message?: string}}
+ */
+function uploadDriveImage(data) {
+  try {
+    var blob = Utilities.newBlob(
+      Utilities.base64Decode(data.image_base64),
+      "image/png",
+      data.filename
+    );
+
+    var folderId = data.folder_id || null;
+    var keep = data.keep || 3;
+
+    // 保存先フォルダ
+    var folder = folderId
+      ? DriveApp.getFolderById(folderId)
+      : DriveApp.getRootFolder();
+
+    // 同名ファイルを削除
+    var existing = folder.getFilesByName(data.filename);
+    while (existing.hasNext()) {
+      existing.next().setTrashed(true);
+    }
+
+    // アップロード
+    var file = folder.createFile(blob);
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
+    // 古いファイルを整理（直近 keep 枚のみ残す）
+    if (folderId) {
+      var allFiles = folder.getFilesByType("image/png");
+      var fileList = [];
+      while (allFiles.hasNext()) {
+        var f = allFiles.next();
+        if (!f.isTrashed()) {
+          fileList.push({ file: f, date: f.getDateCreated() });
+        }
+      }
+      if (fileList.length > keep) {
+        fileList.sort(function(a, b) { return b.date - a.date; });
+        for (var i = keep; i < fileList.length; i++) {
+          fileList[i].file.setTrashed(true);
+        }
+      }
+    }
+
+    Logger.log("Drive アップロード完了: " + data.filename + " (id=" + file.getId() + ")");
+    return { status: "ok", file_id: file.getId() };
+  } catch (e) {
+    Logger.log("Drive アップロード失敗: " + e.message);
+    return { status: "error", message: e.message };
+  }
 }
 
 // ---- doGet ----
