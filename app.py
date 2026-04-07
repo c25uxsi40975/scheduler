@@ -31,6 +31,7 @@ from security import (
     generate_reset_code, validate_password, validate_email,
 )
 from audit import log_event
+from session_store import save_session, restore_session, clear_session, cleanup_expired
 from pages import (
     admin_master, admin_preferences, admin_generate,
     admin_draft_edit, admin_schedule, doctor_input, doctor_schedule,
@@ -100,6 +101,10 @@ if "subadmin_doctor" not in st.session_state:
 if "dev_authenticated" not in st.session_state:
     st.session_state.dev_authenticated = False
 
+# ---- セッション復元 (query_params トークン) ----
+if not st.session_state.get("role"):
+    restore_session()
+
 # ---- rerun 後のトースト通知 ----
 if "_toast_msg" in st.session_state:
     st.toast(st.session_state.pop("_toast_msg"))
@@ -121,11 +126,13 @@ def _check_session_timeout():
         st.session_state.doctor_id = None
         st.session_state.doctor_section = None
         st.session_state.dev_authenticated = False
+        clear_session()
         st.warning("セッションがタイムアウトしました。再度ログインしてください。")
         st.stop()
     st.session_state["_last_activity"] = now
 
 _check_session_timeout()
+cleanup_expired()
 
 
 def _show_dev_login():
@@ -198,6 +205,7 @@ def _show_dev_login():
                         reset_rate_limit("developer")
                         log_event("dev_login", f"doctor_id={st.session_state.dev_doctor_id}")
                         st.session_state.dev_authenticated = True
+                        save_session()
                         st.rerun()
                     else:
                         record_failed_attempt("developer")
@@ -306,6 +314,7 @@ def _show_admin_login():
                         set_admin_password(pw1)
                         log_event("admin_password_set", "admin", "初回セットアップ")
                         st.session_state.admin_authenticated = True
+                        save_session()
                         st.success("パスワードを設定しました")
                         st.rerun()
         else:
@@ -343,6 +352,7 @@ def _admin_password_form(rate_limit_key: str, verify_fn):
                 reset_rate_limit(rate_limit_key)
                 log_event("admin_login_success", rate_limit_key)
                 st.session_state.admin_authenticated = True
+                save_session()
                 st.rerun()
             else:
                 record_failed_attempt(rate_limit_key)
@@ -368,6 +378,7 @@ def _subadmin_login_form(admin_type: str, subadmin_ids: list):
             log_event("admin_login_success", rate_key, f"doctor_id={doctor['id']}")
             st.session_state.admin_authenticated = True
             st.session_state.subadmin_doctor = doctor
+            save_session()
             st.rerun()
         else:
             record_failed_attempt(rate_key)
@@ -482,6 +493,7 @@ def _show_doctor_login():
                     log_event("doctor_login_success", account.strip())
                     st.session_state.doctor_authenticated = True
                     st.session_state.doctor_id = doctor["id"]
+                    save_session()
                     st.rerun()
                 else:
                     record_failed_attempt("doctor")
@@ -538,6 +550,7 @@ def _show_admin_header():
             st.session_state.doctor_authenticated = False
             st.session_state.doctor_id = None
             st.session_state.doctor_section = None
+            clear_session()
             st.rerun()
 
     year, month = map(int, target_month.split("-"))
@@ -944,6 +957,7 @@ elif st.session_state.role == "doctor":
                     st.session_state.doctor_id = None
                     st.session_state.doctor_section = None
                     st.session_state.pop("show_doctor_settings", None)
+                    clear_session()
                     st.rerun()
 
             if st.session_state.get("show_doctor_settings"):
@@ -977,6 +991,7 @@ elif st.session_state.role == "developer":
                 st.session_state.dev_authenticated = False
                 st.session_state.pop("dev_doctor_verified", None)
                 st.session_state.pop("dev_doctor_id", None)
+                clear_session()
                 st.rerun()
         st.markdown("---")
         dev_test.render(dev_doctor)
