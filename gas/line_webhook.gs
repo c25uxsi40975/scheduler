@@ -351,7 +351,7 @@ function handlePreferenceSelection(doctor, userId, text, replyToken, session) {
       preferences_json: JSON.stringify(prefs)
     });
     replyWithQuickReply(replyToken,
-      "備考・希望があれば教えてください。",
+      "備考・希望があればテキストを入力してください。",
       [{label: "なし", text: "なし"}]
     );
   }

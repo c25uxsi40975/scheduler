@@ -29,7 +29,7 @@ def _safe_json_loads(val, default=None):
 # ---- スプレッドシート接続（3系統: マスタ / 土曜運用 / 平日セクション別） ----
 
 # 土曜運用シートのプレフィクス（平日系はセクション別SSへルーティング）
-_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_")
+_OPERATIONAL_PREFIXES = ("希望_", "スケジュール_", "dev_希望_")
 
 
 def _is_operational_sheet(name: str) -> bool:
