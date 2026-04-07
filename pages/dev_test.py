@@ -684,7 +684,11 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
     except Exception:
         saturdays = []
 
-    prefs = get_dev_preferences(view_month)
+    try:
+        prefs = get_dev_preferences(view_month)
+    except Exception as e:
+        st.error(f"希望データの取得でエラー: {e}")
+        prefs = []
     if not prefs:
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:

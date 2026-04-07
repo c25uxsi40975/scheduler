@@ -92,10 +92,16 @@ def get_dev_preferences(year_month):
         ws = sh.worksheet(f"dev_希望_{year_month}")
     except (gspread.WorksheetNotFound, Exception):
         return []
-    records = _get_all_records(ws)
+    try:
+        records = _get_all_records(ws)
+    except Exception:
+        return []
     result = []
     for r in records:
-        r["doctor_id"] = int(r["doctor_id"])
+        try:
+            r["doctor_id"] = int(r["doctor_id"])
+        except (ValueError, TypeError, KeyError):
+            continue
         r["ng_dates"] = _safe_json_loads(r.get("ng_dates"))
         r["avoid_dates"] = _safe_json_loads(r.get("avoid_dates"))
         r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
