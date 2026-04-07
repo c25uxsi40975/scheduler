@@ -485,9 +485,10 @@ def _render_line_test_tab():
                 try:
                     from components.schedule_image import generate_schedule_image
                     from database.drive_utils import upload_schedule_image
+                    target_ym = sat_months[0] if sat_months else ""
                     dummy_sched = {"assignments": [
                         {"date": a["date"], "doctor_id": a["doctor_id"], "clinic_id": a["clinic_id"]}
-                        for a in sat_data
+                        for a in sat_data if a["date"].startswith(target_ym)
                     ]}
                     dummy_doctors = _get_dummy_doctors()
                     png_bytes = generate_schedule_image(
