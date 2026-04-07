@@ -638,20 +638,15 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
             set_dev_doctor_ids(ids)
             _clear_data_cache()
             # LINEで希望入力を促す通知を送信
-            dev_line_id = dev_doctor.get("line_user_id", "") if dev_doctor else ""
+            dev_line_id = dev_doctor.get("line_user_id", "")
             if dev_line_id:
                 month_label = target_month.replace("-", "年") + "月"
-                result = _post_to_gas("test_line_push_text", {
+                _post_to_gas("test_line_push_text", {
                     "line_user_id": dev_line_id,
                     "text": f"【開発テスト】{month_label} の希望入力が公開されました。\n\nメニューの「希望入力」から入力してください。",
                 })
-                if result and result.get("status") == "ok":
-                    st.success("LINEに通知を送信しました")
-                else:
-                    st.warning(f"LINE通知送信失敗: {result}")
-            else:
-                st.warning("LINE User ID が未連携のため通知を送信できませんでした")
-            st.success(f"{target_month} を開発者テスト用に公開しました（ページを更新してください）")
+            st.success(f"{target_month} を開発者テスト用に公開しました")
+            st.rerun()
     with col_close:
         if st.button("閉じる", key="dev_pref_close"):
             set_dev_open_month(None)
@@ -684,11 +679,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
     except Exception:
         saturdays = []
 
-    try:
-        prefs = get_dev_preferences(view_month)
-    except Exception as e:
-        st.error(f"希望データの取得でエラー: {e}")
-        prefs = []
+    prefs = get_dev_preferences(view_month)
     if not prefs:
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:
