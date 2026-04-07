@@ -689,7 +689,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:
         # テーブル表示
-        header_cols = ["医員名"] + [f"{date.fromisoformat(s).month}/{date.fromisoformat(s).day}" for s in saturdays] + ["備考", "更新日時"]
+        header_cols = ["医員名"] + [f"{s.month}/{s.day}" for s in saturdays] + ["備考", "更新日時"]
         rows = []
         for p in prefs:
             ng = set(p.get("ng_dates") or [])
@@ -697,11 +697,12 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
             post_night = set(p.get("post_night_dates") or [])
             row = [p.get("doctor_name", "?")]
             for s in saturdays:
-                if s in ng:
+                ds = s.isoformat()
+                if ds in ng:
                     row.append("×")
-                elif s in avoid:
+                elif ds in avoid:
                     row.append("△")
-                elif s in post_night:
+                elif ds in post_night:
                     row.append("当○")
                 else:
                     row.append("○")
