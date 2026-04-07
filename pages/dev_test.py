@@ -651,8 +651,7 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
                     st.warning(f"LINE通知送信失敗: {result}")
             else:
                 st.warning("LINE User ID が未連携のため通知を送信できませんでした")
-            st.success(f"{target_month} を開発者テスト用に公開しました")
-            st.rerun()
+            st.success(f"{target_month} を開発者テスト用に公開しました（ページを更新してください）")
     with col_close:
         if st.button("閉じる", key="dev_pref_close"):
             set_dev_open_month(None)
