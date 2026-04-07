@@ -689,15 +689,16 @@ def _render_line_pref_test_tab(dev_doctor: dict | None):
         st.info(f"{view_month} の希望データはまだありません。LINEから「希望入力」を試してください。")
     else:
         # テーブル表示
-        header_cols = ["医員名"] + [f"{s.month}/{s.day}" for s in saturdays] + ["備考", "更新日時"]
+        # saturdays は date オブジェクトのリスト → 文字列に統一
+        sat_strs = [s.isoformat() if hasattr(s, 'isoformat') else str(s) for s in saturdays]
+        header_cols = ["医員名"] + [f"{date.fromisoformat(s).month}/{date.fromisoformat(s).day}" for s in sat_strs] + ["備考", "更新日時"]
         rows = []
         for p in prefs:
             ng = set(p.get("ng_dates") or [])
             avoid = set(p.get("avoid_dates") or [])
             post_night = set(p.get("post_night_dates") or [])
             row = [p.get("doctor_name", "?")]
-            for s in saturdays:
-                ds = s.isoformat()
+            for ds in sat_strs:
                 if ds in ng:
                     row.append("×")
                 elif ds in avoid:
