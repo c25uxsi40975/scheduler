@@ -80,13 +80,16 @@ def get_all_preferences(year_month):
 def get_dev_preferences(year_month):
     """開発者テスト用の希望データ（dev_希望_YYYY-MM シート）を取得
 
-    _get_sheet は存在しないシートを自動作成してしまうため、
-    運用SSから直接ワークシートを取得する。見つからなければ空リストを返す。
+    GASがシートを後から作成するため、キャッシュ済みSpreadsheetの
+    メタデータを更新してからワークシートを取得する。
     """
     import gspread
     try:
         sh = _get_operational_spreadsheet()
-        ws = _retry(sh.worksheet, f"dev_希望_{year_month}")
+        # GASが作成したシートを認識するためメタデータを再取得
+        sh._sheet_metadata = sh.fetch_sheet_metadata()
+        sh._properties.update(sh._sheet_metadata["properties"])
+        ws = sh.worksheet(f"dev_希望_{year_month}")
     except (gspread.WorksheetNotFound, Exception):
         return []
     records = _get_all_records(ws)
