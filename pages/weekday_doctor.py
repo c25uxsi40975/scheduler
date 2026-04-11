@@ -398,17 +398,31 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
         key=f"swap_a_{section}",
     )
 
-    # Step 2: 交換先（交換元と異なる医員のみ）
+    # Step 2: 交換先（同日・同スロットの別医員のみ）
     if selected_a:
-        candidates = [r for r in schedule if r["doctor_id"] != selected_a["doctor_id"]]
+        candidates = [
+            r for r in schedule
+            if r["doctor_id"] != selected_a["doctor_id"]
+            and r["date"] == selected_a["date"]
+            and r["slot_id"] == selected_a["slot_id"]
+        ]
         if not candidates:
-            st.info("交換先の候補がありません。")
+            st.info("同じ日付・スロットに他の医員がいません。")
             return
 
+        def _swap_label(r):
+            did, ds = r["doctor_id"], r["date"]
+            name = r["doctor_name"]
+            if (did, ds) in ng_set:
+                return f"⛔ {name}【NG】"
+            if (did, ds) in avoid_set:
+                return f"⚠ {name}【△】"
+            return name
+
         selected_b = st.selectbox(
-            "交換先のシフト",
+            "交換先の医員",
             candidates,
-            format_func=_label,
+            format_func=_swap_label,
             key=f"swap_b_{section}",
         )
     else:
@@ -418,25 +432,16 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
         st.markdown("---")
         st.write("**交換内容の確認**")
         st.write(f"操作者: {doctor['name']}")
-        # 交換後の相手先日付でNG/△チェック
-        a_did, b_did = selected_a["doctor_id"], selected_b["doctor_id"]
-        a_to_date, b_to_date = selected_b["date"], selected_a["date"]
-        swap_warnings = []
-        if (a_did, a_to_date) in ng_set:
-            swap_warnings.append(f"⛔ {selected_a['doctor_name']} は {a_to_date} がNG日です")
-        elif (a_did, a_to_date) in avoid_set:
-            swap_warnings.append(f"⚠ {selected_a['doctor_name']} は {a_to_date} が△（できれば避けたい）日です")
-        if (b_did, b_to_date) in ng_set:
-            swap_warnings.append(f"⛔ {selected_b['doctor_name']} は {b_to_date} がNG日です")
-        elif (b_did, b_to_date) in avoid_set:
-            swap_warnings.append(f"⚠ {selected_b['doctor_name']} は {b_to_date} が△（できれば避けたい）日です")
 
-        st.write(f"{selected_a['doctor_name']}: {_label(selected_a)} → {_label(selected_b)}")
-        st.write(f"{selected_b['doctor_name']}: {_label(selected_b)} → {_label(selected_a)}")
-
-        if swap_warnings:
-            for w in swap_warnings:
-                st.warning(w)
+        try:
+            dt = date.fromisoformat(selected_a["date"])
+            date_disp = dt.strftime("%m/%d(%a)")
+        except ValueError:
+            date_disp = selected_a["date"]
+        st.write(
+            f"{date_disp} {selected_a['slot_name']}: "
+            f"{selected_a['doctor_name']} ↔ {selected_b['doctor_name']}"
+        )
 
         if st.button("交換を実行", type="primary", key=f"do_swap_{section}"):
             execute_swap(
@@ -472,9 +477,9 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
                         "actor_name": doctor["name"],
                         "actor_id": doctor["id"],
                         "requester_name": selected_a["doctor_name"],
-                        "requester_shift": _label(selected_a),
+                        "requester_shift": f"{selected_a['date']} {selected_a['slot_name']} - {selected_a['doctor_name']}",
                         "target_name": selected_b["doctor_name"],
-                        "target_shift": _label(selected_b),
+                        "target_shift": f"{selected_b['date']} {selected_b['slot_name']} - {selected_b['doctor_name']}",
                         "subadmin_doctors": cfg.get("subadmin_doctors", []),
                     }, timeout=10)
                 except requests.RequestException:
