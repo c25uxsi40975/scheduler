@@ -107,6 +107,8 @@ function doPost(e) {
       sendDoctorConfirmation(data.year_month, data.doctor_name, data.doctor_email, data.date_summary, data.free_text);
     } else if (data.action === "all_preferences_complete") {
       sendAllCompleteNotification(data.year_month, data.doctor_count);
+    } else if (data.action === "saturday_shift_swap_executed") {
+      sendSaturdayShiftSwapNotification(data);
 
     // 共通
     } else if (data.action === "password_reset_code") {

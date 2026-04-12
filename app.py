@@ -838,7 +838,7 @@ def _show_doctor_tabs(doctor):
 
 def _show_doctor_saturday_content(doctor):
     """医員の土曜セクション内容"""
-    tab1, tab2 = st.tabs(["スケジュール確認", "希望入力"])
+    tab1, tab2, tab3 = st.tabs(["スケジュール確認", "希望入力", "シフト交換"])
 
     with tab1:
         confirmed_months = get_confirmed_months()
@@ -865,6 +865,10 @@ def _show_doctor_saturday_content(doctor):
                 doctor_input.render(doctor, open_month, year, month)
         else:
             st.info("管理者が対象月を設定するまでお待ちください。")
+
+    with tab3:
+        from pages import doctor_saturday_swap
+        doctor_saturday_swap.render(doctor)
 
 
 # ---- メインルーティング ----

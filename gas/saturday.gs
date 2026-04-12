@@ -390,6 +390,62 @@ function checkDeadline() {
   }
 }
 
+// ---- 土曜シフト交換通知 ----
+
+/**
+ * 土曜シフト交換通知: 交換相手＋管理者に送信、カレンダー同期
+ */
+function sendSaturdayShiftSwapNotification(data) {
+  var ssMaster = getMasterSpreadsheet();
+  var doctors = getDoctorMap(ssMaster);
+
+  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト交換】土曜外勤";
+  var body = (TEST_MODE ? TEST_NOTICE : "")
+    + "土曜シフト交換が実行されました。\n\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n"
+    + "  依頼者: " + data.requester_name + "\n"
+    + "  依頼者のシフト: " + data.requester_shift + "\n"
+    + "  交換相手: " + data.target_name + "\n"
+    + "  交換相手のシフト: " + data.target_shift + "\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n\n"
+    + "詳細はWebアプリからご確認ください。\n\n"
+    + "※このメールは外勤調整システムから自動送信されています。";
+
+  // 1. 交換相手にメール
+  var targetDoc = null;
+  var allDocs = Object.keys(doctors);
+  for (var i = 0; i < allDocs.length; i++) {
+    if (doctors[allDocs[i]].name === data.target_name) {
+      targetDoc = doctors[allDocs[i]];
+      break;
+    }
+  }
+  if (targetDoc && targetDoc.email) {
+    try {
+      GmailApp.sendEmail(targetDoc.email, subject, body, { name: SENDER_NAME });
+      Logger.log("土曜交換通知 送信成功(相手): " + data.target_name);
+    } catch (e) {
+      Logger.log("土曜交換通知 送信失敗(相手): " + data.target_name + " - " + e.message);
+    }
+  }
+
+  // 2. 管理者にメール（土曜は副管理者の概念がない）
+  try {
+    var sent = sendToAdmins(subject, body);
+    Logger.log("土曜交換通知 送信成功(管理者): " + sent + " 件");
+  } catch (e) {
+    Logger.log("土曜交換通知 送信失敗(管理者): " + e.message);
+  }
+
+  // 3. カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncSaturdayShiftSwapCalendar(data, ssMaster);
+  } catch (e) {
+    Logger.log("土曜シフト交換カレンダー同期エラー: " + e.message);
+  }
+}
+
+
 // ---- 土曜ヘルパー関数 ----
 
 /**
