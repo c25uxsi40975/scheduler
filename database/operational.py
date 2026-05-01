@@ -428,103 +428,102 @@ def has_operational_sheets(year_month):
 
 # ---- Saturday Shift Swap ----
 
-_SATURDAY_SWAP_HEADERS = [
+_SATURDAY_SHIFT_CHANGE_HEADERS = [
     "id",
     "actor_id", "actor_name",
-    "requester_id", "requester_name",
-    "original_date", "original_clinic_id", "original_clinic_name",
-    "target_id", "target_name",
-    "target_date", "target_clinic_id", "target_clinic_name",
+    "original_doctor_id", "original_doctor_name",
+    "new_doctor_id", "new_doctor_name",
+    "date", "clinic_id", "clinic_name",
     "executed_at",
 ]
 
 
-def _get_saturday_swap_sheet(year_month: str):
-    """月別土曜シフト交換シートを取得/作成"""
-    name = f"土曜シフト交換_{year_month}"
-    return _init_monthly_sheet(name, _SATURDAY_SWAP_HEADERS)
+def _get_saturday_shift_change_sheet(year_month: str):
+    """月別土曜シフト変更シートを取得/作成"""
+    name = f"土曜シフト変更_{year_month}"
+    return _init_monthly_sheet(name, _SATURDAY_SHIFT_CHANGE_HEADERS)
 
 
-def execute_saturday_swap(year_month: str, schedule_id: int, swap_date: str,
-                          requester_id: int, requester_clinic_id: int,
-                          target_id: int, target_clinic_id: int,
-                          actor_id: int = 0):
-    """土曜シフト交換を即時実行
+def execute_saturday_shift_change(year_month: str, schedule_id: int,
+                                  change_date: str, clinic_id: int,
+                                  original_doctor_id: int, new_doctor_id: int,
+                                  actor_id: int = 0):
+    """土曜シフト変更を即時実行（一方向の差し替え）
 
-    1. 確定スケジュールの assignments JSON 内の2エントリの doctor_id を入替
+    1. 確定スケジュールの assignments JSON 内の該当エントリの doctor_id を変更
     2. update_schedule_assignments で上書き
-    3. 土曜シフト交換シートにログを記録
+    3. 土曜シフト変更シートにログを記録
     """
     from database.master import get_clinics
 
     ws, idx, records = _find_schedule_row(schedule_id, year_month)
     if ws is None:
-        _logger.warning("execute_saturday_swap: id=%s が見つかりません", schedule_id)
-        return
+        _logger.warning("execute_saturday_shift_change: id=%s が見つかりません", schedule_id)
+        raise ValueError("対象のスケジュールが見つかりませんでした")
 
     assignments = _safe_json_loads(records[idx].get("assignments"))
     if not assignments:
-        _logger.warning("execute_saturday_swap: assignments が空です")
-        return
+        _logger.warning("execute_saturday_shift_change: assignments が空です")
+        raise ValueError("対象のスケジュールが空です")
 
-    # assignments 配列内の doctor_id を入替
-    swapped = 0
+    # 同日に new_doctor_id が既に割り当てられていないか確認（1日1外勤制約）
     for a in assignments:
-        if (str(a.get("date")) == swap_date
-                and int(a.get("doctor_id", 0)) == requester_id
-                and int(a.get("clinic_id", 0)) == requester_clinic_id):
-            a["doctor_id"] = target_id
-            swapped += 1
-        elif (str(a.get("date")) == swap_date
-              and int(a.get("doctor_id", 0)) == target_id
-              and int(a.get("clinic_id", 0)) == target_clinic_id):
-            a["doctor_id"] = requester_id
-            swapped += 1
+        if (str(a.get("date")) == change_date
+                and int(a.get("doctor_id", 0)) == new_doctor_id):
+            raise ValueError("変更後の医員はこの日にすでに別の外勤に割り当てられています")
 
-    if swapped != 2:
-        _logger.warning("execute_saturday_swap: 想定した2エントリが見つかりません (swapped=%d)", swapped)
-        return
+    # 該当エントリの doctor_id を差し替え
+    changed = 0
+    for a in assignments:
+        if (str(a.get("date")) == change_date
+                and int(a.get("clinic_id", 0)) == clinic_id
+                and int(a.get("doctor_id", 0)) == original_doctor_id):
+            a["doctor_id"] = new_doctor_id
+            changed += 1
+            break
+
+    if changed != 1:
+        _logger.warning("execute_saturday_shift_change: 対象エントリが見つかりません")
+        raise ValueError("対象のシフトが見つかりませんでした")
 
     update_schedule_assignments(schedule_id, assignments, year_month=year_month)
 
-    # 交換ログ記録
+    # ログ記録
     doctors = get_doctors(active_only=False)
     name_map = {d["id"]: d["name"] for d in doctors}
     clinics = get_clinics()
     clinic_name_map = {c["id"]: c["name"] for c in clinics}
 
-    ws_swap = _get_saturday_swap_sheet(year_month)
-    swap_id = _next_id(ws_swap)
+    ws_log = _get_saturday_shift_change_sheet(year_month)
+    log_id = _next_id(ws_log)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    swap_headers = _retry(ws_swap.row_values, 1)
-    swap_values = {
-        "id": swap_id,
-        "actor_id": actor_id if actor_id else requester_id,
-        "actor_name": name_map.get(actor_id if actor_id else requester_id, ""),
-        "requester_id": requester_id,
-        "requester_name": name_map.get(requester_id, ""),
-        "original_date": swap_date,
-        "original_clinic_id": requester_clinic_id,
-        "original_clinic_name": clinic_name_map.get(requester_clinic_id, ""),
-        "target_id": target_id,
-        "target_name": name_map.get(target_id, ""),
-        "target_date": swap_date,
-        "target_clinic_id": target_clinic_id,
-        "target_clinic_name": clinic_name_map.get(target_clinic_id, ""),
+    log_headers = _retry(ws_log.row_values, 1)
+    log_values = {
+        "id": log_id,
+        "actor_id": actor_id if actor_id else original_doctor_id,
+        "actor_name": name_map.get(actor_id if actor_id else original_doctor_id, ""),
+        "original_doctor_id": original_doctor_id,
+        "original_doctor_name": name_map.get(original_doctor_id, ""),
+        "new_doctor_id": new_doctor_id,
+        "new_doctor_name": name_map.get(new_doctor_id, ""),
+        "date": change_date,
+        "clinic_id": clinic_id,
+        "clinic_name": clinic_name_map.get(clinic_id, ""),
         "executed_at": now,
     }
-    swap_row = [swap_values.get(h, "") for h in swap_headers]
-    _retry(ws_swap.append_row, swap_row)
+    log_row = [log_values.get(h, "") for h in log_headers]
+    _retry(ws_log.append_row, log_row)
     _clear_data_cache()
-    _logger.info("土曜シフト交換完了: %s %s %s↔%s",
-                 year_month, swap_date, requester_id, target_id)
+    _logger.info("土曜シフト変更完了: %s %s %s→%s (clinic=%s)",
+                 year_month, change_date, original_doctor_id, new_doctor_id, clinic_id)
+    return log_id
 
 
 @_register_cached
 @st.cache_data(ttl=120)
-def get_saturday_swap_history(year_month: str):
-    """土曜シフト交換履歴を取得"""
-    ws = _get_saturday_swap_sheet(year_month)
+def get_saturday_shift_change_history(year_month: str):
+    """土曜シフト変更履歴を取得"""
+    ws = _get_saturday_shift_change_sheet(year_month)
     records = _get_all_records(ws)
     result = []
     for r in records:
@@ -532,11 +531,11 @@ def get_saturday_swap_history(year_month: str):
             r["id"] = int(r["id"])
         except (ValueError, TypeError, KeyError):
             continue
-        try:
-            r["requester_id"] = int(r.get("requester_id", 0))
-            r["target_id"] = int(r.get("target_id", 0))
-        except (ValueError, TypeError):
-            pass
+        for k in ("original_doctor_id", "new_doctor_id", "clinic_id", "actor_id"):
+            try:
+                r[k] = int(r.get(k, 0) or 0)
+            except (ValueError, TypeError):
+                r[k] = 0
         result.append(r)
     return result
 

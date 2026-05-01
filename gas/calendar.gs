@@ -906,28 +906,28 @@ function syncShiftChangeCalendar(data, ssMaster) {
 }
 
 /**
- * 土曜シフト交換時のカレンダー同期
+ * 土曜シフト変更時のカレンダー同期
  *
- * 交換対象の1日のみタグ付きイベントを削除→再作成し、
- * 影響を受けた2医員の個別カレンダーも更新する。
+ * 変更対象の1日のみタグ付きイベントを削除→再作成し、
+ * 影響を受けた2医員（変更前・変更後）の個別カレンダーも更新する。
  */
-function syncSaturdayShiftSwapCalendar(data, ssMaster) {
+function syncSaturdayShiftChangeCalendar(data, ssMaster) {
   var settings = getCalendarSettings(ssMaster);
   var calId = settings["calendar_id_saturday"];
   var calendar = getCalendarSafe(calId);
   if (!calendar) return;
 
   var yearMonth = data.year_month;
-  var swapDate = data.swap_date;
-  if (!yearMonth || !swapDate) {
-    Logger.log("土曜シフト交換カレンダー同期: year_month/swap_date なし");
+  var changeDate = data.date;
+  if (!yearMonth || !changeDate) {
+    Logger.log("土曜シフト変更カレンダー同期: year_month/date なし");
     return;
   }
 
   var ssOp = getOperationalSpreadsheet();
   var schedSheet = getSheet(ssOp, "スケジュール_" + yearMonth);
   if (!schedSheet) {
-    Logger.log("土曜シフト交換カレンダー同期: スケジュールシートなし: " + yearMonth);
+    Logger.log("土曜シフト変更カレンダー同期: スケジュールシートなし: " + yearMonth);
     return;
   }
 
@@ -935,13 +935,13 @@ function syncSaturdayShiftSwapCalendar(data, ssMaster) {
   var clinics = getClinicMap(ssMaster);
 
   var tag = "[外勤調整:saturday:" + yearMonth + "]";
-  var dayStart = new Date(swapDate + "T00:00:00+09:00");
-  var dayEnd = new Date(swapDate + "T00:00:00+09:00");
+  var dayStart = new Date(changeDate + "T00:00:00+09:00");
+  var dayEnd = new Date(changeDate + "T00:00:00+09:00");
 
   // 共有カレンダー: その日のタグ付きイベント削除→再作成
   deleteTaggedEvents(calendar, calId, tag, dayStart, dayEnd);
 
-  var dayAssignments = getConfirmedAssignments(schedSheet, swapDate);
+  var dayAssignments = getConfirmedAssignments(schedSheet, changeDate);
   var createdCount = 0;
   for (var i = 0; i < dayAssignments.length; i++) {
     var a = dayAssignments[i];
@@ -950,14 +950,14 @@ function syncSaturdayShiftSwapCalendar(data, ssMaster) {
     var doctorName = doc ? doc.name : "（不明）";
     var title = doctorName + " - " + clinicName;
     var description = tag + "\nセクション: 土曜外勤\n医員: " + doctorName + "\n外勤先: " + clinicName;
-    if (createAllDayEvent(calId, title, new Date(swapDate + "T00:00:00+09:00"), description)) {
+    if (createAllDayEvent(calId, title, new Date(changeDate + "T00:00:00+09:00"), description)) {
       createdCount++;
     }
   }
-  Logger.log("土曜シフト交換カレンダー同期完了: " + createdCount + " 件作成 (" + swapDate + ")");
+  Logger.log("土曜シフト変更カレンダー同期完了: " + createdCount + " 件作成 (" + changeDate + ")");
 
-  // 影響を受けた2医員の個別カレンダー更新
-  var affectedIds = [String(data.requester_id), String(data.target_id)];
+  // 影響を受けた医員（変更前・変更後）の個別カレンダー更新
+  var affectedIds = [String(data.original_doctor_id), String(data.new_doctor_id)];
   for (var j = 0; j < affectedIds.length; j++) {
     var doc2 = doctors[affectedIds[j]];
     if (!doc2 || !doc2.notify_calendar || !doc2.personal_calendar_id) continue;
@@ -973,7 +973,7 @@ function syncSaturdayShiftSwapCalendar(data, ssMaster) {
       var evTitle = cName + "（土曜）";
       var evDesc = tag + "\n医員: " + doc2.name + "\n外勤先: " + cName;
       createAllDayEvent(doc2.personal_calendar_id, evTitle,
-                        new Date(swapDate + "T00:00:00+09:00"), evDesc);
+                        new Date(changeDate + "T00:00:00+09:00"), evDesc);
     }
   }
 }

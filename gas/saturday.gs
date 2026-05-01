@@ -390,73 +390,73 @@ function checkDeadline() {
   }
 }
 
-// ---- 土曜シフト交換通知 ----
+// ---- 土曜シフト変更通知 ----
 
 /**
- * 土曜シフト調整通知: 医員A・医員B・管理者に送信、カレンダー同期
+ * 土曜シフト変更通知: 元医員・新医員・管理者に送信、カレンダー同期
+ *
+ * data: {
+ *   year_month, date, clinic_id, clinic_name,
+ *   actor_id, actor_name,
+ *   original_doctor_id, original_doctor_name, original_doctor_email,
+ *   new_doctor_id, new_doctor_name, new_doctor_email
+ * }
  */
-function sendSaturdayShiftSwapNotification(data) {
+function sendSaturdayShiftChangeNotification(data) {
   var ssMaster = getMasterSpreadsheet();
   var doctors = getDoctorMap(ssMaster);
 
-  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト調整】土曜外勤";
+  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト変更】土曜外勤";
   var body = (TEST_MODE ? TEST_NOTICE : "")
-    + "土曜シフト調整が実行されました。\n\n"
+    + "土曜シフト変更が実行されました。\n\n"
     + "━━━━━━━━━━━━━━━━━━━━\n"
-    + "  医員A: " + data.requester_name + "\n"
-    + "  医員Aのシフト: " + data.requester_shift + "\n"
-    + "  医員B: " + data.target_name + "\n"
-    + "  医員Bのシフト: " + data.target_shift + "\n"
+    + "  日付: " + data.date + "\n"
+    + "  外勤先: " + data.clinic_name + "\n"
+    + "  変更前の医員: " + data.original_doctor_name + "\n"
+    + "  変更後の医員: " + data.new_doctor_name + "\n"
+    + "  操作者: " + (data.actor_name || "") + "\n"
     + "━━━━━━━━━━━━━━━━━━━━\n\n"
     + "詳細はWebアプリからご確認ください。\n\n"
     + "※このメールは外勤調整システムから自動送信されています。";
 
-  var requesterDoc = data.requester_id != null ? doctors[String(data.requester_id)] : null;
-  var targetDoc = data.target_id != null ? doctors[String(data.target_id)] : null;
+  var originalDoc = data.original_doctor_id != null ? doctors[String(data.original_doctor_id)] : null;
+  var newDoc = data.new_doctor_id != null ? doctors[String(data.new_doctor_id)] : null;
 
-  // 後方互換: ID が無いペイロードは名前で検索
-  if (!requesterDoc || !targetDoc) {
-    var keys = Object.keys(doctors);
-    for (var i = 0; i < keys.length; i++) {
-      var d = doctors[keys[i]];
-      if (!requesterDoc && d.name === data.requester_name) requesterDoc = d;
-      if (!targetDoc && d.name === data.target_name) targetDoc = d;
+  // 1. 元医員（変更で外れる側）に送信
+  var originalEmail = data.original_doctor_email || (originalDoc ? originalDoc.email : "");
+  if (originalEmail) {
+    try {
+      GmailApp.sendEmail(originalEmail, subject, body, { name: SENDER_NAME });
+      Logger.log("土曜変更通知 送信成功(変更元): " + data.original_doctor_name);
+    } catch (e) {
+      Logger.log("土曜変更通知 送信失敗(変更元): " + data.original_doctor_name + " - " + e.message);
     }
   }
 
-  // 1. 医員A（依頼者）に送信
-  if (requesterDoc && requesterDoc.email) {
+  // 2. 新医員（新たに割り当てられる側）に送信
+  var newEmail = data.new_doctor_email || (newDoc ? newDoc.email : "");
+  if (newEmail) {
     try {
-      GmailApp.sendEmail(requesterDoc.email, subject, body, { name: SENDER_NAME });
-      Logger.log("土曜調整通知 送信成功(医員A): " + data.requester_name);
+      GmailApp.sendEmail(newEmail, subject, body, { name: SENDER_NAME });
+      Logger.log("土曜変更通知 送信成功(変更先): " + data.new_doctor_name);
     } catch (e) {
-      Logger.log("土曜調整通知 送信失敗(医員A): " + data.requester_name + " - " + e.message);
-    }
-  }
-
-  // 2. 医員B（相手）に送信
-  if (targetDoc && targetDoc.email) {
-    try {
-      GmailApp.sendEmail(targetDoc.email, subject, body, { name: SENDER_NAME });
-      Logger.log("土曜調整通知 送信成功(医員B): " + data.target_name);
-    } catch (e) {
-      Logger.log("土曜調整通知 送信失敗(医員B): " + data.target_name + " - " + e.message);
+      Logger.log("土曜変更通知 送信失敗(変更先): " + data.new_doctor_name + " - " + e.message);
     }
   }
 
   // 3. 管理者にメール（土曜は副管理者の概念がない）
   try {
     var sent = sendToAdmins(subject, body);
-    Logger.log("土曜調整通知 送信成功(管理者): " + sent + " 件");
+    Logger.log("土曜変更通知 送信成功(管理者): " + sent + " 件");
   } catch (e) {
-    Logger.log("土曜調整通知 送信失敗(管理者): " + e.message);
+    Logger.log("土曜変更通知 送信失敗(管理者): " + e.message);
   }
 
   // 4. カレンダー同期（失敗してもメール通知には影響しない）
   try {
-    syncSaturdayShiftSwapCalendar(data, ssMaster);
+    syncSaturdayShiftChangeCalendar(data, ssMaster);
   } catch (e) {
-    Logger.log("土曜シフト調整カレンダー同期エラー: " + e.message);
+    Logger.log("土曜シフト変更カレンダー同期エラー: " + e.message);
   }
 }
 
