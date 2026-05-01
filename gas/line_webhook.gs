@@ -420,28 +420,22 @@ function handleConfirmation(doctor, userId, text, replyToken, session) {
 
   if (text === "登録する") {
     // Google Sheets に保存
-    var saveResult;
     try {
-      saveResult = savePreference(session, doctor);
+      savePreference(session, doctor);
     } catch (saveErr) {
       Logger.log("savePreference 例外: doctor_id=" + doctor.id
         + " month=" + session.target_month
         + " is_dev=" + session.is_dev_test
         + " err=" + saveErr.message
         + " stack=" + (saveErr.stack || ""));
-      replyText(replyToken,
-        "希望の保存に失敗しました。管理者にご連絡ください。\n(" + saveErr.message + ")"
-      );
+      replyText(replyToken, "希望の保存に失敗しました。管理者にご連絡ください。");
       deleteSession(userId);
       return;
     }
     deleteSession(userId);
 
     var monthLabel = session.target_month.replace("-", "年") + "月";
-    var sheetInfo = saveResult && saveResult.sheetName
-      ? "\n[保存先: " + saveResult.sheetName + " / " + saveResult.action + "]"
-      : "";
-    replyText(replyToken, monthLabel + " の希望を登録しました！" + sheetInfo);
+    replyText(replyToken, monthLabel + " の希望を登録しました！");
     return;
   }
 
