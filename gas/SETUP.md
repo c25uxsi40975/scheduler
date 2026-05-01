@@ -40,7 +40,7 @@ GASは**集中型**（1つのGASプロジェクトで土曜＋全平日セクシ
 平日セクション別SS (N個) ← GASデプロイ不要
 ├── 平日希望_{section}
 ├── 平日スケジュール_YYYY-MM
-└── シフト交換_YYYY-MM
+└── シフト変更_YYYY-MM
 ```
 
 GASは平日セクション別スプレッドシートに `SpreadsheetApp.openById()` でアクセスするため、

@@ -1,6 +1,6 @@
 """
 医員の平日セクションビュー
-希望入力・スケジュール確認・シフト交換
+希望入力・スケジュール確認・シフト変更
 """
 from datetime import date
 from dateutil.relativedelta import relativedelta
@@ -20,7 +20,7 @@ from database import (
     get_weekday_readjust_dates,
     get_weekday_confirmed_months,
     get_weekday_schedule_view_mode,
-    execute_swap, get_swap_history,
+    execute_shift_change, get_shift_change_history,
     get_specimen_assignee,
 )
 from database.weekday import DOW_LABELS_JA
@@ -41,14 +41,16 @@ def render(doctor: dict, section: str):
 
     clinic_name = cfg["clinic_name"]
 
-    tab1, tab2, tab3 = st.tabs(["スケジュール確認", "希望入力", "シフト交換"])
+    tab1, tab2, tab3 = st.tabs(
+        ["スケジュール確認", "希望入力", "シフト変更"]
+    )
 
     with tab1:
         _render_schedule_view(doctor, section, cfg)
     with tab2:
         _render_preference_input(doctor, section, cfg)
     with tab3:
-        _render_shift_swap(doctor, section, cfg)
+        _render_shift_change(doctor, section, cfg)
 
 
 def _render_preference_input(doctor: dict, section: str, cfg: dict):
@@ -349,21 +351,18 @@ def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: st
             components.html(_VIEWER_SCRIPT, height=0)
 
 
-def _render_shift_swap(doctor: dict, section: str, cfg: dict):
-    """シフト交換タブ — 任意の2医員のシフトを交換可能"""
-    st.write("メンバー同士のシフトを交換できます")
+def _render_shift_change(doctor: dict, section: str, cfg: dict):
+    """シフト変更タブ — 指定日の医員を別の医員に差し替える（一方向）"""
+    st.write("指定した日のシフトを別の医員に差し替えできます")
+    st.caption("交換（双方向）と異なり、1人を別の医員に置き換える一方向の更新です。")
 
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(14)]
-    swap_month = st.selectbox("月を選択", months, key=f"wkdoc_swap_month_{section}")
+    change_month = st.selectbox("月を選択", months, key=f"wkdoc_change_month_{section}")
 
-    schedule = get_weekday_schedule(swap_month, section)
+    schedule = get_weekday_schedule(change_month, section)
     if not schedule:
         st.info("この月のスケジュールがありません。")
-        return
-
-    if len(schedule) < 2:
-        st.info("交換可能なシフトがありません。")
         return
 
     # NG/△の事前計算
@@ -390,115 +389,143 @@ def _render_shift_swap(doctor: dict, section: str, cfg: dict):
             return f"⚠ {base}【△】"
         return base
 
-    # Step 1: 交換元のシフトを選択（全メンバー対象）
-    selected_a = st.selectbox(
-        "交換元のシフト",
+    # Step 1: 変更対象のシフトを選択
+    selected_src = st.selectbox(
+        "変更対象のシフト（変更元）",
         schedule,
         format_func=_label,
-        key=f"swap_a_{section}",
+        key=f"change_src_{section}",
     )
-
-    # Step 2: 交換先（同日・同スロットの別医員のみ）
-    if selected_a:
-        candidates = [
-            r for r in schedule
-            if r["doctor_id"] != selected_a["doctor_id"]
-            and r["date"] == selected_a["date"]
-            and r["slot_id"] == selected_a["slot_id"]
-        ]
-        if not candidates:
-            st.info("同じ日付・スロットに他の医員がいません。")
-            return
-
-        def _swap_label(r):
-            did, ds = r["doctor_id"], r["date"]
-            name = r["doctor_name"]
-            if (did, ds) in ng_set:
-                return f"⛔ {name}【NG】"
-            if (did, ds) in avoid_set:
-                return f"⚠ {name}【△】"
-            return name
-
-        selected_b = st.selectbox(
-            "交換先の医員",
-            candidates,
-            format_func=_swap_label,
-            key=f"swap_b_{section}",
-        )
-    else:
+    if not selected_src:
         return
 
-    if selected_a and selected_b:
-        st.markdown("---")
-        st.write("**交換内容の確認**")
-        st.write(f"操作者: {doctor['name']}")
+    # Step 2: 変更後の医員を選択（割り当て対象医員から、変更元と同日同スロットの既存割当者を除外）
+    assigned_ids = cfg.get("assigned_doctors", []) or []
+    all_doctors = get_doctors(active_only=False)
+    name_map = {d["id"]: d["name"] for d in all_doctors}
 
+    occupied_ids = {
+        r["doctor_id"] for r in schedule
+        if r["date"] == selected_src["date"]
+        and r["slot_id"] == selected_src["slot_id"]
+    }
+
+    candidate_ids = [
+        did for did in assigned_ids
+        if did != selected_src["doctor_id"] and did not in occupied_ids
+    ]
+    if not candidate_ids:
+        st.info("差し替え可能な医員がいません（同日同スロットの既存割当者は除外されます）。")
+        return
+
+    def _doc_label(did):
+        ds = selected_src["date"]
+        name = name_map.get(did, f"ID:{did}")
+        if (did, ds) in ng_set:
+            return f"⛔ {name}【NG】"
+        if (did, ds) in avoid_set:
+            return f"⚠ {name}【△】"
+        return name
+
+    new_doctor_id = st.selectbox(
+        "変更後の医員（変更先）",
+        candidate_ids,
+        format_func=_doc_label,
+        key=f"change_dst_{section}",
+    )
+
+    st.markdown("---")
+    st.write("**変更内容の確認**")
+    st.write(f"操作者: {doctor['name']}")
+    try:
+        dt = date.fromisoformat(selected_src["date"])
+        date_disp = dt.strftime("%m/%d(%a)")
+    except ValueError:
+        date_disp = selected_src["date"]
+    new_name = name_map.get(new_doctor_id, "")
+    st.write(
+        f"{date_disp} {selected_src['slot_name']}: "
+        f"{selected_src['doctor_name']} → {new_name}"
+    )
+
+    # NG警告
+    if (new_doctor_id, selected_src["date"]) in ng_set:
+        st.warning(f"⛔ {new_name}先生はこの日をNGに設定しています。")
+    elif (new_doctor_id, selected_src["date"]) in avoid_set:
+        st.info(f"⚠ {new_name}先生はこの日を△（避けたい）に設定しています。")
+
+    if st.button("変更を実行", type="primary", key=f"do_change_{section}"):
         try:
-            dt = date.fromisoformat(selected_a["date"])
-            date_disp = dt.strftime("%m/%d(%a)")
-        except ValueError:
-            date_disp = selected_a["date"]
-        st.write(
-            f"{date_disp} {selected_a['slot_name']}: "
-            f"{selected_a['doctor_name']} ↔ {selected_b['doctor_name']}"
-        )
-
-        if st.button("交換を実行", type="primary", key=f"do_swap_{section}"):
-            execute_swap(
-                swap_month, section,
-                requester_id=selected_a["doctor_id"],
-                original_date=selected_a["date"],
-                original_slot_id=selected_a["slot_id"],
-                target_id=selected_b["doctor_id"],
-                target_date=selected_b["date"],
-                target_slot_id=selected_b["slot_id"],
+            execute_shift_change(
+                change_month, section,
+                date=selected_src["date"],
+                slot_id=selected_src["slot_id"],
+                original_doctor_id=selected_src["doctor_id"],
+                new_doctor_id=new_doctor_id,
                 actor_id=doctor["id"],
             )
+        except ValueError as e:
+            st.error(str(e))
+            return
 
-            # 監査ログ
-            log_event(
-                "shift_swap",
-                actor=doctor["name"],
-                detail=(
-                    f"{cfg['clinic_name']} {swap_month}: "
-                    f"{selected_a['doctor_name']}({selected_a['date']}) ↔ "
-                    f"{selected_b['doctor_name']}({selected_b['date']})"
-                ),
+        # 監査ログ
+        log_event(
+            "shift_change",
+            actor=doctor["name"],
+            detail=(
+                f"{cfg['clinic_name']} {change_month} "
+                f"{selected_src['date']} {selected_src['slot_name']}: "
+                f"{selected_src['doctor_name']} → {new_name}"
+            ),
+        )
+
+        # 通知（GAS webhook）— 変更元・変更先・管理者(副管理者)へ
+        gas_url = st.secrets.get("gas_webapp_url", "")
+        if gas_url:
+            original_doctor = next(
+                (d for d in all_doctors if d["id"] == selected_src["doctor_id"]),
+                {},
             )
+            new_doctor = next(
+                (d for d in all_doctors if d["id"] == new_doctor_id),
+                {},
+            )
+            try:
+                requests.post(gas_url, json={
+                    "action": "shift_change_executed",
+                    "section": section,
+                    "clinic_name": cfg["clinic_name"],
+                    "year_month": change_month,
+                    "date": selected_src["date"],
+                    "slot_name": selected_src["slot_name"],
+                    "actor_id": doctor["id"],
+                    "actor_name": doctor["name"],
+                    "original_doctor_id": selected_src["doctor_id"],
+                    "original_doctor_name": selected_src["doctor_name"],
+                    "original_doctor_email": original_doctor.get("email", ""),
+                    "new_doctor_id": new_doctor_id,
+                    "new_doctor_name": new_name,
+                    "new_doctor_email": new_doctor.get("email", ""),
+                    "subadmin_doctors": cfg.get("subadmin_doctors", []),
+                }, timeout=10)
+            except requests.RequestException:
+                pass
 
-            # 通知（GAS webhook）
-            gas_url = st.secrets.get("gas_webapp_url", "")
-            if gas_url:
-                try:
-                    requests.post(gas_url, json={
-                        "action": "shift_swap_executed",
-                        "section": section,
-                        "clinic_name": cfg["clinic_name"],
-                        "actor_name": doctor["name"],
-                        "actor_id": doctor["id"],
-                        "requester_name": selected_a["doctor_name"],
-                        "requester_shift": f"{selected_a['date']} {selected_a['slot_name']} - {selected_a['doctor_name']}",
-                        "target_name": selected_b["doctor_name"],
-                        "target_shift": f"{selected_b['date']} {selected_b['slot_name']} - {selected_b['doctor_name']}",
-                        "subadmin_doctors": cfg.get("subadmin_doctors", []),
-                    }, timeout=10)
-                except requests.RequestException:
-                    pass
+        st.success("シフト変更が完了しました")
+        st.rerun()
 
-            st.success("シフト交換が完了しました")
-            st.rerun()
-
-    # 交換履歴
-    with st.expander("交換履歴"):
-        history = get_swap_history(swap_month, section)
+    # 変更履歴
+    with st.expander("変更履歴"):
+        history = get_shift_change_history(change_month, section)
         if history:
-            for h in history:
+            for h in sorted(history, key=lambda x: x.get("executed_at", ""), reverse=True):
                 actor = h.get("actor_name", "")
                 actor_info = f"[{actor}] " if actor else ""
                 st.write(
                     f"{h.get('executed_at', '')}　{actor_info}"
-                    f"{h.get('requester_name', '')}({h.get('original_date', '')}) ↔ "
-                    f"{h.get('target_name', '')}({h.get('target_date', '')})"
+                    f"{h.get('date', '')} {h.get('slot_name', '')}: "
+                    f"{h.get('original_doctor_name', '')} → "
+                    f"{h.get('new_doctor_name', '')}"
                 )
         else:
-            st.info("交換履歴はありません")
+            st.info("変更履歴はありません")

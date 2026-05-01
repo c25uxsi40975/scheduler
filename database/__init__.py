@@ -74,5 +74,5 @@ from database.weekday import (
     get_weekday_schedule, batch_save_weekday_assignments,
     merge_save_weekday_assignments,
     delete_weekday_assignment,
-    execute_swap, get_swap_history,
+    execute_shift_change, get_shift_change_history,
 )

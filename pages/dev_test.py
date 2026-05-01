@@ -373,15 +373,19 @@ def _render_email_test_tab():
                 payload["doctor_count"] = len(_get_dummy_doctors())
                 _post_to_gas("test_wd_all_complete", payload)
 
-            if st.button("シフト交換通知", key="test_wd_swap"):
+            if st.button("シフト変更通知", key="test_wd_change"):
                 payload = _base_payload()
                 payload["section"] = wd_section
                 payload["clinic_name"] = wd_clinic
-                payload["requester_name"] = dev_name
-                payload["target_name"] = "花子"
-                payload["requester_shift"] = f"{_format_date_jp(wd_data[0]['date'])} スロットA"
-                payload["target_shift"] = f"{_format_date_jp(wd_data[1]['date'])} スロットB" if len(wd_data) > 1 else "なし"
-                _post_to_gas("test_wd_shift_swap", payload)
+                payload["year_month"] = wd_data[0]["date"][:7] if wd_data else ""
+                payload["date"] = wd_data[0]["date"] if wd_data else ""
+                payload["slot_name"] = "スロットA"
+                payload["actor_name"] = dev_name
+                payload["original_doctor_name"] = dev_name
+                payload["original_doctor_email"] = ""
+                payload["new_doctor_name"] = "花子"
+                payload["new_doctor_email"] = ""
+                _post_to_gas("test_wd_shift_change", payload)
 
         with col2:
             if st.button("入力期限リマインダー", key="test_wd_deadline"):

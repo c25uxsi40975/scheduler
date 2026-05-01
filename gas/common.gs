@@ -130,6 +130,8 @@ function doPost(e) {
       sendWeekdayAllPreferencesComplete(data);
     } else if (data.action === "shift_swap_executed") {
       sendShiftSwapNotification(data);
+    } else if (data.action === "shift_change_executed") {
+      sendShiftChangeNotification(data);
     } else if (data.action === "weekday_readjust_preference_request") {
       sendWeekdayReadjustPreferenceRequest(data);
     } else if (data.action === "weekday_schedule_readjusted") {
@@ -224,6 +226,11 @@ function doPost(e) {
       ).setMimeType(ContentService.MimeType.JSON);
     } else if (data.action === "test_wd_shift_swap") {
       var testResult = testWdShiftSwap(data);
+      return ContentService.createTextOutput(
+        JSON.stringify(testResult)
+      ).setMimeType(ContentService.MimeType.JSON);
+    } else if (data.action === "test_wd_shift_change") {
+      var testResult = testWdShiftChange(data);
       return ContentService.createTextOutput(
         JSON.stringify(testResult)
       ).setMimeType(ContentService.MimeType.JSON);
