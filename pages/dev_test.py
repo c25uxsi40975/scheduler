@@ -385,7 +385,6 @@ def _render_email_test_tab():
                 payload["original_doctor_email"] = ""
                 payload["new_doctor_name"] = "花子"
                 payload["new_doctor_email"] = ""
-                payload["reason"] = "テスト"
                 _post_to_gas("test_wd_shift_change", payload)
 
         with col2:

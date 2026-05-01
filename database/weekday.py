@@ -820,7 +820,6 @@ _change_headers = [
     "original_doctor_id", "original_doctor_name",
     "new_doctor_id", "new_doctor_name",
     "date", "slot_id", "slot_name",
-    "reason",
     "executed_at",
 ]
 
@@ -834,7 +833,7 @@ def _get_change_sheet(year_month: str, section: str):
 def execute_shift_change(year_month: str, section: str,
                          date: str, slot_id: int,
                          original_doctor_id: int, new_doctor_id: int,
-                         actor_id: int = 0, reason: str = ""):
+                         actor_id: int = 0):
     """シフト変更を即時実行
 
     指定した(date, slot_id, original_doctor_id)の割り当てを new_doctor_id に置き換える。
@@ -887,7 +886,6 @@ def execute_shift_change(year_month: str, section: str,
         "date": date,
         "slot_id": slot_id,
         "slot_name": slot_name,
-        "reason": reason or "",
         "executed_at": now,
     }
     change_row = [change_values.get(h, "") for h in change_headers]

@@ -493,7 +493,6 @@ function sendShiftChangeNotification(data) {
   var dateLabel = data.date || "";
   var slotLabel = data.slot_name || "";
   var actorLine = data.actor_name ? ("  操作者: " + data.actor_name + "\n") : "";
-  var reasonLine = data.reason ? ("  理由: " + data.reason + "\n") : "";
   var body = (TEST_MODE ? TEST_NOTICE : "")
     + "シフト変更が実行されました。\n\n"
     + "━━━━━━━━━━━━━━━━━━━━\n"
@@ -503,7 +502,6 @@ function sendShiftChangeNotification(data) {
     + "  変更元: " + (data.original_doctor_name || "") + "\n"
     + "  変更先: " + (data.new_doctor_name || "") + "\n"
     + actorLine
-    + reasonLine
     + "━━━━━━━━━━━━━━━━━━━━\n\n"
     + "詳細はWebアプリからご確認ください。\n\n"
     + "※このメールは外勤調整システムから自動送信されています。";

@@ -434,12 +434,6 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
         key=f"change_dst_{section}",
     )
 
-    reason = st.text_input(
-        "変更理由（任意）",
-        key=f"change_reason_{section}",
-        placeholder="例: 体調不良のため",
-    )
-
     st.markdown("---")
     st.write("**変更内容の確認**")
     st.write(f"操作者: {doctor['name']}")
@@ -469,7 +463,6 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
                 original_doctor_id=selected_src["doctor_id"],
                 new_doctor_id=new_doctor_id,
                 actor_id=doctor["id"],
-                reason=reason or "",
             )
         except ValueError as e:
             st.error(str(e))
@@ -483,7 +476,6 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
                 f"{cfg['clinic_name']} {change_month} "
                 f"{selected_src['date']} {selected_src['slot_name']}: "
                 f"{selected_src['doctor_name']} → {new_name}"
-                + (f" 理由:{reason}" if reason else "")
             ),
         )
 
@@ -515,7 +507,6 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
                     "new_doctor_name": new_name,
                     "new_doctor_email": new_doctor.get("email", ""),
                     "subadmin_doctors": cfg.get("subadmin_doctors", []),
-                    "reason": reason or "",
                 }, timeout=10)
             except requests.RequestException:
                 pass
@@ -530,12 +521,11 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
             for h in sorted(history, key=lambda x: x.get("executed_at", ""), reverse=True):
                 actor = h.get("actor_name", "")
                 actor_info = f"[{actor}] " if actor else ""
-                reason_disp = f"（{h.get('reason')}）" if h.get("reason") else ""
                 st.write(
                     f"{h.get('executed_at', '')}　{actor_info}"
                     f"{h.get('date', '')} {h.get('slot_name', '')}: "
                     f"{h.get('original_doctor_name', '')} → "
-                    f"{h.get('new_doctor_name', '')}{reason_disp}"
+                    f"{h.get('new_doctor_name', '')}"
                 )
         else:
             st.info("変更履歴はありません")

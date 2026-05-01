@@ -392,7 +392,6 @@ function testWdShiftChange(data) {
 
   var subject = DEV_TEST_PREFIX + "【シフト変更】" + clinicName;
   var actorLine = data.actor_name ? ("  操作者: " + data.actor_name + "\n") : "";
-  var reasonLine = data.reason ? ("  理由: " + data.reason + "\n") : "";
   var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
     + "シフト変更が実行されました。\n\n"
     + "━━━━━━━━━━━━━━━━━━━━\n"
@@ -402,7 +401,6 @@ function testWdShiftChange(data) {
     + "  変更元: " + (data.original_doctor_name || "") + "\n"
     + "  変更先: " + (data.new_doctor_name || "") + "\n"
     + actorLine
-    + reasonLine
     + "━━━━━━━━━━━━━━━━━━━━\n\n"
     + "詳細はWebアプリからご確認ください。\n\n"
     + "※このメールは外勤調整システムから自動送信されています。";
