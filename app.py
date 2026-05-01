@@ -838,7 +838,7 @@ def _show_doctor_tabs(doctor):
 
 def _show_doctor_saturday_content(doctor):
     """医員の土曜セクション内容"""
-    tab1, tab2, tab3 = st.tabs(["スケジュール確認", "希望入力", "シフト交換"])
+    tab1, tab2, tab3 = st.tabs(["スケジュール確認", "希望入力", "シフト調整"])
 
     with tab1:
         confirmed_months = get_confirmed_months()

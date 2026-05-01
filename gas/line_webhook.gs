@@ -420,11 +420,28 @@ function handleConfirmation(doctor, userId, text, replyToken, session) {
 
   if (text === "登録する") {
     // Google Sheets に保存
-    savePreference(session, doctor);
+    var saveResult;
+    try {
+      saveResult = savePreference(session, doctor);
+    } catch (saveErr) {
+      Logger.log("savePreference 例外: doctor_id=" + doctor.id
+        + " month=" + session.target_month
+        + " is_dev=" + session.is_dev_test
+        + " err=" + saveErr.message
+        + " stack=" + (saveErr.stack || ""));
+      replyText(replyToken,
+        "希望の保存に失敗しました。管理者にご連絡ください。\n(" + saveErr.message + ")"
+      );
+      deleteSession(userId);
+      return;
+    }
     deleteSession(userId);
 
     var monthLabel = session.target_month.replace("-", "年") + "月";
-    replyText(replyToken, monthLabel + " の希望を登録しました！");
+    var sheetInfo = saveResult && saveResult.sheetName
+      ? "\n[保存先: " + saveResult.sheetName + " / " + saveResult.action + "]"
+      : "";
+    replyText(replyToken, monthLabel + " の希望を登録しました！" + sheetInfo);
     return;
   }
 
@@ -627,12 +644,19 @@ function formatDateLabel(dateStr) {
  */
 function savePreference(session, doctor) {
   var ss = getOperationalSpreadsheet();
+  var ssId = ss.getId();
+  var ssName = ss.getName();
   var prefix = session.is_dev_test === "1" ? "dev_" : "";
   var sheetName = prefix + "希望_" + session.target_month;
+  Logger.log("savePreference 開始: doctor_id=" + doctor.id
+    + " sheet=" + sheetName
+    + " ss_name=" + ssName
+    + " ss_id=" + ssId);
   var sheet = getSheet(ss, sheetName);
 
   // シートがなければ作成
   if (!sheet) {
+    Logger.log("savePreference: シート未存在のため作成 - " + sheetName);
     sheet = ss.insertSheet(sheetName);
     sheet.appendRow([
       "doctor_id", "doctor_name", "ng_dates", "avoid_dates",
@@ -683,11 +707,18 @@ function savePreference(session, doctor) {
     }
   }
 
+  var action;
   if (existingRow > 0) {
     sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+    action = "update(row=" + existingRow + ")";
   } else {
     sheet.appendRow(rowData);
+    action = "append";
   }
+  SpreadsheetApp.flush();
+  Logger.log("savePreference 完了: doctor_id=" + doctor.id
+    + " sheet=" + sheetName + " " + action);
+  return { sheetName: sheetName, action: action, ssName: ssName, ssId: ssId };
 }
 
 /**

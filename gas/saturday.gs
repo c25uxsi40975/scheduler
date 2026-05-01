@@ -393,55 +393,70 @@ function checkDeadline() {
 // ---- 土曜シフト交換通知 ----
 
 /**
- * 土曜シフト交換通知: 交換相手＋管理者に送信、カレンダー同期
+ * 土曜シフト調整通知: 医員A・医員B・管理者に送信、カレンダー同期
  */
 function sendSaturdayShiftSwapNotification(data) {
   var ssMaster = getMasterSpreadsheet();
   var doctors = getDoctorMap(ssMaster);
 
-  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト交換】土曜外勤";
+  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト調整】土曜外勤";
   var body = (TEST_MODE ? TEST_NOTICE : "")
-    + "土曜シフト交換が実行されました。\n\n"
+    + "土曜シフト調整が実行されました。\n\n"
     + "━━━━━━━━━━━━━━━━━━━━\n"
-    + "  依頼者: " + data.requester_name + "\n"
-    + "  依頼者のシフト: " + data.requester_shift + "\n"
-    + "  交換相手: " + data.target_name + "\n"
-    + "  交換相手のシフト: " + data.target_shift + "\n"
+    + "  医員A: " + data.requester_name + "\n"
+    + "  医員Aのシフト: " + data.requester_shift + "\n"
+    + "  医員B: " + data.target_name + "\n"
+    + "  医員Bのシフト: " + data.target_shift + "\n"
     + "━━━━━━━━━━━━━━━━━━━━\n\n"
     + "詳細はWebアプリからご確認ください。\n\n"
     + "※このメールは外勤調整システムから自動送信されています。";
 
-  // 1. 交換相手にメール
-  var targetDoc = null;
-  var allDocs = Object.keys(doctors);
-  for (var i = 0; i < allDocs.length; i++) {
-    if (doctors[allDocs[i]].name === data.target_name) {
-      targetDoc = doctors[allDocs[i]];
-      break;
+  var requesterDoc = data.requester_id != null ? doctors[String(data.requester_id)] : null;
+  var targetDoc = data.target_id != null ? doctors[String(data.target_id)] : null;
+
+  // 後方互換: ID が無いペイロードは名前で検索
+  if (!requesterDoc || !targetDoc) {
+    var keys = Object.keys(doctors);
+    for (var i = 0; i < keys.length; i++) {
+      var d = doctors[keys[i]];
+      if (!requesterDoc && d.name === data.requester_name) requesterDoc = d;
+      if (!targetDoc && d.name === data.target_name) targetDoc = d;
     }
   }
+
+  // 1. 医員A（依頼者）に送信
+  if (requesterDoc && requesterDoc.email) {
+    try {
+      GmailApp.sendEmail(requesterDoc.email, subject, body, { name: SENDER_NAME });
+      Logger.log("土曜調整通知 送信成功(医員A): " + data.requester_name);
+    } catch (e) {
+      Logger.log("土曜調整通知 送信失敗(医員A): " + data.requester_name + " - " + e.message);
+    }
+  }
+
+  // 2. 医員B（相手）に送信
   if (targetDoc && targetDoc.email) {
     try {
       GmailApp.sendEmail(targetDoc.email, subject, body, { name: SENDER_NAME });
-      Logger.log("土曜交換通知 送信成功(相手): " + data.target_name);
+      Logger.log("土曜調整通知 送信成功(医員B): " + data.target_name);
     } catch (e) {
-      Logger.log("土曜交換通知 送信失敗(相手): " + data.target_name + " - " + e.message);
+      Logger.log("土曜調整通知 送信失敗(医員B): " + data.target_name + " - " + e.message);
     }
   }
 
-  // 2. 管理者にメール（土曜は副管理者の概念がない）
+  // 3. 管理者にメール（土曜は副管理者の概念がない）
   try {
     var sent = sendToAdmins(subject, body);
-    Logger.log("土曜交換通知 送信成功(管理者): " + sent + " 件");
+    Logger.log("土曜調整通知 送信成功(管理者): " + sent + " 件");
   } catch (e) {
-    Logger.log("土曜交換通知 送信失敗(管理者): " + e.message);
+    Logger.log("土曜調整通知 送信失敗(管理者): " + e.message);
   }
 
-  // 3. カレンダー同期（失敗してもメール通知には影響しない）
+  // 4. カレンダー同期（失敗してもメール通知には影響しない）
   try {
     syncSaturdayShiftSwapCalendar(data, ssMaster);
   } catch (e) {
-    Logger.log("土曜シフト交換カレンダー同期エラー: " + e.message);
+    Logger.log("土曜シフト調整カレンダー同期エラー: " + e.message);
   }
 }
 

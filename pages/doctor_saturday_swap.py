@@ -1,5 +1,5 @@
 """
-医員: 土曜シフト交換タブ
+医員: 土曜シフト調整タブ
 同日の別医員と外勤先を入れ替える
 """
 from datetime import date
@@ -18,8 +18,8 @@ DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日
 
 
 def render(doctor: dict):
-    """土曜シフト交換タブ — 同日の医員同士で外勤先を交換"""
-    st.write("同じ土曜日に入っている医員同士で外勤先を交換できます")
+    """土曜シフト調整タブ — 同日の医員同士で外勤先を交換"""
+    st.write("同じ土曜日に入っている医員同士で外勤先を調整できます")
 
     confirmed_months = get_confirmed_months()
     if not confirmed_months:
@@ -39,7 +39,7 @@ def render(doctor: dict):
     assignments = sched["assignments"]
 
     if len(assignments) < 2:
-        st.info("交換可能なシフトがありません。")
+        st.info("調整可能なシフトがありません。")
         return
 
     # 外勤先マップ
@@ -83,16 +83,7 @@ def render(doctor: dict):
         except ValueError:
             return ds
 
-    def _source_label(r):
-        base = f"{_date_label(r['date'])} {r['clinic_name']} - {r['doctor_name']}"
-        key = (r["doctor_id"], r["date"])
-        if key in ng_set:
-            return f"⛔ {base}【NG】"
-        if key in avoid_set:
-            return f"⚠ {base}【△】"
-        return base
-
-    def _target_label(r):
+    def _doctor_label(r):
         base = f"{r['clinic_name']} - {r['doctor_name']}"
         key = (r["doctor_id"], r["date"])
         if key in ng_set:
@@ -101,31 +92,45 @@ def render(doctor: dict):
             return f"⚠ {base}【△】"
         return base
 
-    # Step 1: 交換元のシフトを選択（全割当対象）
+    # Step 1: 日付選択
+    dates = sorted({r["date"] for r in rows})
+    selected_date = st.selectbox(
+        "日付を選択",
+        dates,
+        format_func=_date_label,
+        key="sat_swap_date",
+    )
+    if not selected_date:
+        return
+
+    # Step 2: 医員Aを選択（選択日の割当一覧）
+    rows_on_date = [r for r in rows if r["date"] == selected_date]
+    if not rows_on_date:
+        st.info("この日のシフトがありません。")
+        return
+
     selected_a = st.selectbox(
-        "交換元のシフト",
-        rows,
-        format_func=_source_label,
+        "医員Aを選択",
+        rows_on_date,
+        format_func=_doctor_label,
         key="sat_swap_a",
     )
-
-    # Step 2: 交換先（同日・別医員のみ）
     if not selected_a:
         return
 
+    # Step 3: 医員Bを選択（同日の別医員のみ）
     candidates = [
-        r for r in rows
+        r for r in rows_on_date
         if r["doctor_id"] != selected_a["doctor_id"]
-        and r["date"] == selected_a["date"]
     ]
     if not candidates:
         st.info("同じ日付に他の医員がいません。")
         return
 
     selected_b = st.selectbox(
-        "交換先の医員（同日の別医員）",
+        "医員Bを選択",
         candidates,
-        format_func=_target_label,
+        format_func=_doctor_label,
         key="sat_swap_b",
     )
 
@@ -133,7 +138,7 @@ def render(doctor: dict):
         return
 
     st.markdown("---")
-    st.write("**交換内容の確認**")
+    st.write("**調整内容の確認**")
     st.write(f"操作者: {doctor['name']}")
     st.write(
         f"{_date_label(selected_a['date'])}: "
@@ -141,7 +146,7 @@ def render(doctor: dict):
         f"{selected_b['doctor_name']}({selected_b['clinic_name']})"
     )
 
-    if st.button("交換を実行", type="primary", key="sat_do_swap"):
+    if st.button("調整を実行", type="primary", key="sat_do_swap"):
         execute_saturday_swap(
             year_month=swap_month,
             schedule_id=schedule_id,
@@ -186,11 +191,11 @@ def render(doctor: dict):
             except requests.RequestException:
                 pass
 
-        st.success("シフト交換が完了しました")
+        st.success("シフト調整が完了しました")
         st.rerun()
 
-    # 交換履歴
-    with st.expander("交換履歴"):
+    # 調整履歴
+    with st.expander("調整履歴"):
         history = get_saturday_swap_history(swap_month)
         if history:
             for h in history:
@@ -203,4 +208,4 @@ def render(doctor: dict):
                     f"@ {h.get('original_date', '')}"
                 )
         else:
-            st.info("交換履歴はありません")
+            st.info("調整履歴はありません")
