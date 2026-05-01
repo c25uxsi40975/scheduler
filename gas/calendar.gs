@@ -788,6 +788,124 @@ function syncShiftSwapCalendar(data, ssMaster) {
 }
 
 /**
+ * 平日シフト変更時のカレンダー同期
+ *
+ * 変更対象の1日のみタグ付きイベントを削除→再作成し、
+ * 変更元・変更先の個別カレンダーも更新する。
+ * （構造はsyncShiftSwapCalendarと同様だが対象日が1日に限定）
+ */
+function syncShiftChangeCalendar(data, ssMaster) {
+  var settings = getCalendarSettings(ssMaster);
+  var section = data.section;
+  var clinicName = data.clinic_name || "";
+  var calId = settings["calendar_id_weekday_" + section];
+  var calendar = getCalendarSafe(calId);
+  if (!calendar) return;
+
+  var ssSec = getWeekdaySectionSpreadsheet(ssMaster, section);
+  if (!ssSec) return;
+
+  var doctors = getDoctorMap(ssMaster);
+
+  var dateStr = data.date;
+  if (!dateStr) {
+    Logger.log("シフト変更カレンダー同期: 日付が指定されていません");
+    return;
+  }
+  var ym = dateStr.substring(0, 7);
+  var tag = "[外勤調整:weekday:" + section + ":" + ym + "]";
+
+  // 検体確認設定を取得
+  var swConfigs = getWeekdayConfigs(ssMaster);
+  var swCfg = null;
+  for (var swci = 0; swci < swConfigs.length; swci++) {
+    if (swConfigs[swci].section === section) { swCfg = swConfigs[swci]; break; }
+  }
+
+  var dayStart = new Date(dateStr + "T00:00:00+09:00");
+  var dayEnd = new Date(dateStr + "T00:00:00+09:00");
+  deleteTaggedEvents(calendar, calId, tag, dayStart, dayEnd);
+
+  var assignments = getWeekdayAssignments(ssSec, ym, dateStr);
+  var allMonthAssignments = getWeekdayAssignments(ssSec, ym, null);
+  var swSpecResult = swCfg ? getSpecimenAssignee(swCfg, dateStr, allMonthAssignments, doctors) : null;
+
+  var createdCount = 0;
+  for (var i = 0; i < assignments.length; i++) {
+    var a = assignments[i];
+    var title = (a.doctor_name || "") + " - " + (a.slot_name || "");
+    var eventDate = new Date(dateStr + "T00:00:00+09:00");
+    var description = tag + "\nセクション: " + section
+      + "\n外勤先: " + clinicName
+      + "\n医員: " + (a.doctor_name || "")
+      + "\nスロット: " + (a.slot_name || "");
+    if (createAllDayEvent(calId, title, eventDate, description)) createdCount++;
+  }
+
+  if (swSpecResult) {
+    var swSpDate = new Date(dateStr + "T00:00:00+09:00");
+    var swSpTitle, swSpDesc;
+    if (swSpecResult.conflict) {
+      var swLabels = buildConflictLabels(swSpecResult, swSpecResult.doctorId);
+      swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName + "（" + swLabels.join("・") + "と相談してください）";
+      swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName
+        + "\n※同じ優先順位のため" + swLabels.join("・") + "と相談してください";
+    } else {
+      swSpTitle = "🧪 同意書・検体確認 - " + swSpecResult.doctorName;
+      swSpDesc = tag + "\n同意書・検体確認\n担当: " + swSpecResult.doctorName;
+    }
+    if (createAllDayEvent(calId, swSpTitle, swSpDate, swSpDesc)) createdCount++;
+  }
+
+  Logger.log("シフト変更カレンダー同期完了: " + createdCount + " 件作成");
+
+  // 影響を受けた2医員（変更元・変更先）の個別カレンダーを更新
+  var affectedIds = [];
+  if (data.original_doctor_id) affectedIds.push(String(data.original_doctor_id));
+  if (data.new_doctor_id) {
+    var newId = String(data.new_doctor_id);
+    if (affectedIds.indexOf(newId) === -1) affectedIds.push(newId);
+  }
+
+  for (var j = 0; j < affectedIds.length; j++) {
+    var doc = doctors[affectedIds[j]];
+    if (!doc || !doc.notify_calendar || !doc.personal_calendar_id) continue;
+    var pCal = getCalendarSafe(doc.personal_calendar_id);
+    if (!pCal) continue;
+
+    var pTag = "[外勤調整:weekday:" + section + ":" + ym + "]";
+    var pDayStart = new Date(dateStr + "T00:00:00+09:00");
+    var pDayEnd = new Date(dateStr + "T00:00:00+09:00");
+    deleteTaggedEvents(pCal, doc.personal_calendar_id, pTag, pDayStart, pDayEnd);
+
+    for (var k = 0; k < assignments.length; k++) {
+      var wa = assignments[k];
+      if (String(wa.doctor_id) !== affectedIds[j]) continue;
+      var evDate = new Date(dateStr + "T00:00:00+09:00");
+      var evTitle = (wa.slot_name || "") + "（平日）";
+      var evDesc = pTag + "\nセクション: " + section
+        + "\n医員: " + doc.name
+        + "\nスロット: " + (wa.slot_name || "");
+      createAllDayEvent(doc.personal_calendar_id, evTitle, evDate, evDesc);
+    }
+
+    if (swSpecResult && String(swSpecResult.doctorId) === affectedIds[j]) {
+      var pSwDate = new Date(dateStr + "T00:00:00+09:00");
+      var pSwTitle, pSwDesc;
+      if (swSpecResult.conflict) {
+        var pSwLabels = buildConflictLabels(swSpecResult, affectedIds[j]);
+        pSwTitle = "🧪 同意書・検体確認（" + pSwLabels.join("・") + "と相談してください）";
+        pSwDesc = pTag + "\n同意書・検体確認\n※同じ優先順位のため" + pSwLabels.join("・") + "と相談してください";
+      } else {
+        pSwTitle = "🧪 同意書・検体確認";
+        pSwDesc = pTag + "\n同意書・検体確認";
+      }
+      createAllDayEvent(doc.personal_calendar_id, pSwTitle, pSwDate, pSwDesc);
+    }
+  }
+}
+
+/**
  * 土曜シフト交換時のカレンダー同期
  *
  * 交換対象の1日のみタグ付きイベントを削除→再作成し、

@@ -482,6 +482,77 @@ function sendShiftSwapNotification(data) {
   }
 }
 
+/**
+ * シフト変更通知: 変更元・変更先・副管理者に送信
+ */
+function sendShiftChangeNotification(data) {
+  var ssMaster = getMasterSpreadsheet();
+
+  var clinicName = data.clinic_name || "";
+  var subject = (TEST_MODE ? "【テスト】" : "") + "【シフト変更】" + clinicName;
+  var dateLabel = data.date || "";
+  var slotLabel = data.slot_name || "";
+  var actorLine = data.actor_name ? ("  操作者: " + data.actor_name + "\n") : "";
+  var reasonLine = data.reason ? ("  理由: " + data.reason + "\n") : "";
+  var body = (TEST_MODE ? TEST_NOTICE : "")
+    + "シフト変更が実行されました。\n\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n"
+    + "  外勤先: " + clinicName + "\n"
+    + "  対象日: " + dateLabel + "\n"
+    + "  スロット: " + slotLabel + "\n"
+    + "  変更元: " + (data.original_doctor_name || "") + "\n"
+    + "  変更先: " + (data.new_doctor_name || "") + "\n"
+    + actorLine
+    + reasonLine
+    + "━━━━━━━━━━━━━━━━━━━━\n\n"
+    + "詳細はWebアプリからご確認ください。\n\n"
+    + "※このメールは外勤調整システムから自動送信されています。";
+
+  var sentTo = {};
+
+  // 変更元（元の担当者）に通知
+  if (data.original_doctor_email && !sentTo[data.original_doctor_email]) {
+    try {
+      GmailApp.sendEmail(data.original_doctor_email, subject, body, { name: SENDER_NAME });
+      sentTo[data.original_doctor_email] = true;
+      Logger.log("シフト変更通知 送信成功(変更元): " + data.original_doctor_name);
+    } catch (e) {
+      Logger.log("シフト変更通知 送信失敗(変更元): " + data.original_doctor_name + " - " + e.message);
+    }
+  }
+
+  // 変更先（新しい担当者）に通知
+  if (data.new_doctor_email && !sentTo[data.new_doctor_email]) {
+    try {
+      GmailApp.sendEmail(data.new_doctor_email, subject, body, { name: SENDER_NAME });
+      sentTo[data.new_doctor_email] = true;
+      Logger.log("シフト変更通知 送信成功(変更先): " + data.new_doctor_name);
+    } catch (e) {
+      Logger.log("シフト変更通知 送信失敗(変更先): " + data.new_doctor_name + " - " + e.message);
+    }
+  }
+
+  // 副管理者にも通知
+  var subadminEmails = getSubadminEmails(ssMaster, data.section);
+  for (var j = 0; j < subadminEmails.length; j++) {
+    if (sentTo[subadminEmails[j]]) continue;
+    try {
+      GmailApp.sendEmail(subadminEmails[j], subject, body, { name: SENDER_NAME });
+      sentTo[subadminEmails[j]] = true;
+      Logger.log("シフト変更通知 送信成功(副管理者): " + subadminEmails[j]);
+    } catch (e) {
+      Logger.log("シフト変更通知 送信失敗(副管理者): " + subadminEmails[j] + " - " + e.message);
+    }
+  }
+
+  // カレンダー同期（失敗してもメール通知には影響しない）
+  try {
+    syncShiftChangeCalendar(data, ssMaster);
+  } catch (e) {
+    Logger.log("シフト変更カレンダー同期エラー: " + e.message);
+  }
+}
+
 // ---- 平日外勤トリガー関数 ----
 
 /**

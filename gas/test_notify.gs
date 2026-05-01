@@ -384,6 +384,33 @@ function testWdShiftSwap(data) {
 }
 
 /**
+ * テスト: シフト変更通知
+ */
+function testWdShiftChange(data) {
+  var email = data.test_email;
+  var clinicName = data.clinic_name || "";
+
+  var subject = DEV_TEST_PREFIX + "【シフト変更】" + clinicName;
+  var actorLine = data.actor_name ? ("  操作者: " + data.actor_name + "\n") : "";
+  var reasonLine = data.reason ? ("  理由: " + data.reason + "\n") : "";
+  var body = DEV_TEST_PREFIX + "このメールは開発テストです。\n\n"
+    + "シフト変更が実行されました。\n\n"
+    + "━━━━━━━━━━━━━━━━━━━━\n"
+    + "  外勤先: " + clinicName + "\n"
+    + "  対象日: " + (data.date || "") + "\n"
+    + "  スロット: " + (data.slot_name || "") + "\n"
+    + "  変更元: " + (data.original_doctor_name || "") + "\n"
+    + "  変更先: " + (data.new_doctor_name || "") + "\n"
+    + actorLine
+    + reasonLine
+    + "━━━━━━━━━━━━━━━━━━━━\n\n"
+    + "詳細はWebアプリからご確認ください。\n\n"
+    + "※このメールは外勤調整システムから自動送信されています。";
+
+  return sendTestEmail(email, subject, body);
+}
+
+/**
  * テスト: 再調整希望入力依頼
  */
 function testWdReadjustRequest(data) {

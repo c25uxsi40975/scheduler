@@ -1,6 +1,6 @@
 """
 平日外勤のデータ操作
-セクション設定・スロット・対象日・希望・スケジュール・シフト交換
+セクション設定・スロット・対象日・希望・スケジュール・シフト変更
 """
 import json
 from datetime import datetime
@@ -812,32 +812,34 @@ def delete_weekday_assignment(year_month: str, section: str, assignment_id: int)
     _clear_data_cache()
 
 
-# ---- シフト交換 ----
+# ---- シフト変更（一方向：指定日の医員を別の医員に差し替え） ----
 
-_swap_headers = [
+_change_headers = [
     "id", "section",
     "actor_id", "actor_name",
-    "requester_id", "requester_name",
-    "original_date", "original_slot_id",
-    "target_id", "target_name", "target_date", "target_slot_id",
+    "original_doctor_id", "original_doctor_name",
+    "new_doctor_id", "new_doctor_name",
+    "date", "slot_id", "slot_name",
+    "reason",
     "executed_at",
 ]
 
 
-def _get_swap_sheet(year_month: str, section: str):
-    """月別シフト交換シートを取得/作成（セクション別SS）"""
-    name = f"シフト交換_{year_month}"
-    return _init_weekday_sheet(name, section, _swap_headers)
+def _get_change_sheet(year_month: str, section: str):
+    """月別シフト変更シートを取得/作成（セクション別SS）"""
+    name = f"シフト変更_{year_month}"
+    return _init_weekday_sheet(name, section, _change_headers)
 
 
-def execute_swap(year_month: str, section: str,
-                 requester_id: int, original_date: str, original_slot_id: int,
-                 target_id: int, target_date: str, target_slot_id: int,
-                 actor_id: int = 0):
-    """シフト交換を即時実行
+def execute_shift_change(year_month: str, section: str,
+                         date: str, slot_id: int,
+                         original_doctor_id: int, new_doctor_id: int,
+                         actor_id: int = 0, reason: str = ""):
+    """シフト変更を即時実行
 
-    1. 平日スケジュールシートで2つの割り当てを入れ替え
-    2. シフト交換シートにログを記録
+    指定した(date, slot_id, original_doctor_id)の割り当てを new_doctor_id に置き換える。
+    1. 平日スケジュールシートで該当行の doctor_id/name を更新
+    2. シフト変更シートにログを記録
     """
     ws_sched = _get_weekday_sched_sheet(year_month, section)
     records = _get_all_records(ws_sched)
@@ -849,71 +851,65 @@ def execute_swap(year_month: str, section: str,
     doc_id_col = actual_headers.index("doctor_id") + 1
     doc_name_col = actual_headers.index("doctor_name") + 1
     updated_col = actual_headers.index("updated_at") + 1
+    slot_name = ""
 
     updates = []
-    # requester の original → target に変更
     for i, r in enumerate(records):
         if (str(r.get("section", "")) == section
-                and str(r.get("date", "")) == original_date
-                and _safe_int(r.get("slot_id")) == original_slot_id
-                and _safe_int(r.get("doctor_id")) == requester_id):
+                and str(r.get("date", "")) == date
+                and _safe_int(r.get("slot_id")) == slot_id
+                and _safe_int(r.get("doctor_id")) == original_doctor_id):
             row_num = i + 2
-            updates.append({"range": f"{_col_letter(doc_id_col)}{row_num}", "values": [[target_id]]})
-            updates.append({"range": f"{_col_letter(doc_name_col)}{row_num}", "values": [[name_map.get(target_id, "")]]})
+            slot_name = str(r.get("slot_name", ""))
+            updates.append({"range": f"{_col_letter(doc_id_col)}{row_num}", "values": [[new_doctor_id]]})
+            updates.append({"range": f"{_col_letter(doc_name_col)}{row_num}", "values": [[name_map.get(new_doctor_id, "")]]})
             updates.append({"range": f"{_col_letter(updated_col)}{row_num}", "values": [[now]]})
             break
 
-    # target の target_date → requester に変更
-    for i, r in enumerate(records):
-        if (str(r.get("section", "")) == section
-                and str(r.get("date", "")) == target_date
-                and _safe_int(r.get("slot_id")) == target_slot_id
-                and _safe_int(r.get("doctor_id")) == target_id):
-            row_num = i + 2
-            updates.append({"range": f"{_col_letter(doc_id_col)}{row_num}", "values": [[requester_id]]})
-            updates.append({"range": f"{_col_letter(doc_name_col)}{row_num}", "values": [[name_map.get(requester_id, "")]]})
-            updates.append({"range": f"{_col_letter(updated_col)}{row_num}", "values": [[now]]})
-            break
+    if not updates:
+        raise ValueError("対象のシフトが見つかりませんでした")
 
-    if updates:
-        _retry(ws_sched.batch_update, updates)
+    _retry(ws_sched.batch_update, updates)
 
-    # シフト交換ログに記録
-    ws_swap = _get_swap_sheet(year_month, section)
-    swap_id = _next_id(ws_swap)
-    swap_headers = _retry(ws_swap.row_values, 1)
-    swap_values = {
-        "id": swap_id,
+    # シフト変更ログに記録
+    ws_change = _get_change_sheet(year_month, section)
+    change_id = _next_id(ws_change)
+    change_headers = _retry(ws_change.row_values, 1)
+    change_values = {
+        "id": change_id,
         "section": section,
-        "actor_id": actor_id if actor_id else requester_id,
-        "actor_name": name_map.get(actor_id if actor_id else requester_id, ""),
-        "requester_id": requester_id,
-        "requester_name": name_map.get(requester_id, ""),
-        "original_date": original_date,
-        "original_slot_id": original_slot_id,
-        "target_id": target_id,
-        "target_name": name_map.get(target_id, ""),
-        "target_date": target_date,
-        "target_slot_id": target_slot_id,
+        "actor_id": actor_id if actor_id else original_doctor_id,
+        "actor_name": name_map.get(actor_id if actor_id else original_doctor_id, ""),
+        "original_doctor_id": original_doctor_id,
+        "original_doctor_name": name_map.get(original_doctor_id, ""),
+        "new_doctor_id": new_doctor_id,
+        "new_doctor_name": name_map.get(new_doctor_id, ""),
+        "date": date,
+        "slot_id": slot_id,
+        "slot_name": slot_name,
+        "reason": reason or "",
         "executed_at": now,
     }
-    swap_row = [swap_values.get(h, "") for h in swap_headers]
-    _retry(ws_swap.append_row, swap_row)
+    change_row = [change_values.get(h, "") for h in change_headers]
+    _retry(ws_change.append_row, change_row)
     _clear_data_cache()
+    return change_id
 
 
 @_register_cached
 @st.cache_data(ttl=120)
-def get_swap_history(year_month: str, section: str):
-    """シフト交換履歴を取得"""
-    ws = _get_swap_sheet(year_month, section)
+def get_shift_change_history(year_month: str, section: str):
+    """シフト変更履歴を取得"""
+    ws = _get_change_sheet(year_month, section)
     records = _get_all_records(ws)
     result = []
     for r in records:
         r["id"] = _safe_int(r["id"])
         r["section"] = str(r.get("section", ""))
-        r["requester_id"] = _safe_int(r.get("requester_id", 0))
-        r["target_id"] = _safe_int(r.get("target_id", 0))
+        r["actor_id"] = _safe_int(r.get("actor_id", 0))
+        r["original_doctor_id"] = _safe_int(r.get("original_doctor_id", 0))
+        r["new_doctor_id"] = _safe_int(r.get("new_doctor_id", 0))
+        r["slot_id"] = _safe_int(r.get("slot_id", 0))
         if section and r["section"] != section:
             continue
         result.append(r)
