@@ -1,10 +1,8 @@
 """管理者: 下書き編集タブ"""
 import streamlit as st
-import pandas as pd
 import numpy as np
 import requests
 from datetime import date
-from dateutil.relativedelta import relativedelta
 from database import (
     get_doctors, get_clinics, get_all_preferences,
     get_affinities, get_schedules, confirm_schedule,
@@ -19,7 +17,7 @@ from ml_adjuster import (
 )
 from optimizer import get_target_saturdays, PRIORITY_EXCLUDED
 from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
-from components.display_utils import build_display_name_map, build_reverse_display_name_map
+from components.display_utils import build_display_name_map
 
 
 def render(target_month, year, month):
@@ -58,85 +56,36 @@ def render(target_month, year, month):
 
 
 def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_month, year, month, clinics):
-    """スケジュールの手動調整UI（マトリクス形式）"""
-    st.info("マトリクスのセルを直接編集してください")
+    """スケジュールの手動調整UI（セル単位のSelectbox格子）"""
+    st.info("セルをクリックして担当医員を変更してください。⛔ はNG日、⚠ は『できれば避けたい』日の医員です。")
 
     constraints = _build_constraint_data(doctors, prefs, affinities, clinic_map)
     assignments = sched["assignments"]
 
-    # 名前⇔IDマップ
     doc_id_to_name = build_display_name_map(doctors)
-    doc_name_to_id = build_reverse_display_name_map(doctors)
     clinic_id_to_name = {cid: c["name"] for cid, c in clinic_map.items()}
 
-    # 現在の割当に対するNG/△警告を表示
     ng_map = constraints["ng_map"]
     avoid_map = constraints["avoid_map"]
-    ng_hits = []
-    avoid_hits = []
-    for a in assignments:
-        did, ds, cid = a["doctor_id"], a["date"], a["clinic_id"]
-        if ds in ng_map.get(did, set()):
-            d_obj = date.fromisoformat(ds)
-            ng_hits.append(
-                f"⛔ {doc_id_to_name.get(did, '?')} → "
-                f"{d_obj.strftime('%m/%d')} {clinic_id_to_name.get(cid, '?')}【NG】"
-            )
-        elif ds in avoid_map.get(did, set()):
-            d_obj = date.fromisoformat(ds)
-            avoid_hits.append(
-                f"⚠ {doc_id_to_name.get(did, '?')} → "
-                f"{d_obj.strftime('%m/%d')} {clinic_id_to_name.get(cid, '?')}【△】"
-            )
-    if ng_hits:
-        st.error(f"NG日に割り当てがあります（{len(ng_hits)}件）:\n" + "、".join(ng_hits))
-    if avoid_hits:
-        st.warning(f"△（できれば避けたい）日に割り当てがあります（{len(avoid_hits)}件）:\n" + "、".join(avoid_hits))
 
-    # スケジュールの日付と外勤先を抽出
     dates = sorted(set(a["date"] for a in assignments))
     clinics_in_sched = sorted(
         set(a["clinic_id"] for a in assignments),
         key=lambda cid: clinic_map.get(cid, {}).get("name", "")
     )
 
-    # assignments → DataFrame（名前ベース）
     slot_map = {}
     for a in assignments:
         slot_map[(a["date"], a["clinic_id"])] = a["doctor_id"]
 
-    all_doc_names = [""] + [doc_id_to_name[d["id"]] for d in doctors]
-
-    rows = []
-    for ds in dates:
-        d_obj = date.fromisoformat(ds)
-        row = {"日付": d_obj.strftime("%m/%d(%a)")}
-        for cid in clinics_in_sched:
-            cname = clinic_id_to_name.get(cid, "?")
-            did = slot_map.get((ds, cid), "")
-            row[cname] = doc_id_to_name.get(did, "") if did else ""
-        rows.append(row)
-
-    df = pd.DataFrame(rows).set_index("日付")
-
-    # カラム設定: 外勤先ごとのSelectboxColumn
-    col_config = {}
-    for cid in clinics_in_sched:
-        cname = clinic_id_to_name.get(cid, "?")
-        fixed = constraints["fixed_members"].get(cid, set())
-        if fixed:
-            options = [""] + [doc_id_to_name[did] for did in fixed if did in doc_id_to_name]
-        else:
-            options = all_doc_names
-        col_config[cname] = st.column_config.SelectboxColumn(
-            cname, options=options, required=True, width="small",
-        )
-
     edit_ver = st.session_state.get(f"_draft_edit_ver_{target_month}_{sched['id']}", 0)
-    edited_df = st.data_editor(
-        df, column_config=col_config, use_container_width=True,
-        key=f"draft_edit_matrix_{target_month}_{sched['id']}_v{edit_ver}",
+
+    edited_slots = _render_selectbox_grid(
+        dates, clinics_in_sched, slot_map, doctors, doc_id_to_name,
+        clinic_id_to_name, constraints, target_month, sched["id"], edit_ver,
     )
+
+    _render_live_warnings(edited_slots, constraints, doc_id_to_name, clinic_id_to_name)
 
     confirm_save_key = f"confirm_save_warnings_draft_{target_month}_{sched['id']}"
 
@@ -144,8 +93,8 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
     with btn_cols[0]:
         if st.button("下書き保存", key=f"save_draft_{target_month}_{sched['id']}", type="primary"):
             new_assignments, hard_errors = _validate_and_convert(
-                edited_df, dates, clinics_in_sched,
-                doc_name_to_id, clinic_id_to_name, constraints,
+                edited_slots, dates, clinics_in_sched,
+                doc_id_to_name, clinic_id_to_name, constraints,
             )
             if hard_errors:
                 for e in hard_errors:
@@ -168,8 +117,8 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
     with btn_cols[1]:
         if st.button("確定する", key=f"confirm_draft_{target_month}_{sched['id']}"):
             new_assignments, hard_errors = _validate_and_convert(
-                edited_df, dates, clinics_in_sched,
-                doc_name_to_id, clinic_id_to_name, constraints,
+                edited_slots, dates, clinics_in_sched,
+                doc_id_to_name, clinic_id_to_name, constraints,
             )
             if hard_errors:
                 for e in hard_errors:
@@ -442,9 +391,96 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
     }
 
 
+def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
+                            doc_id_to_name, clinic_id_to_name, constraints,
+                            target_month, sched_id, edit_ver):
+    """セル単位のSelectbox格子を描画し、編集後の (date, clinic_id) → doctor_id マップを返す"""
+    ng_map = constraints["ng_map"]
+    avoid_map = constraints["avoid_map"]
+
+    # ヘッダー行
+    header_cols = st.columns([1.2] + [2] * len(clinics_in_sched))
+    header_cols[0].markdown("**日付**")
+    for i, cid in enumerate(clinics_in_sched):
+        header_cols[i + 1].markdown(f"**{clinic_id_to_name.get(cid, '?')}**")
+
+    edited_slots = {}
+    for ds in dates:
+        d_obj = date.fromisoformat(ds)
+        label = d_obj.strftime("%m/%d(%a)")
+        row_cols = st.columns([1.2] + [2] * len(clinics_in_sched))
+        row_cols[0].markdown(label)
+
+        for i, cid in enumerate(clinics_in_sched):
+            fixed = constraints["fixed_members"].get(cid, set())
+            if fixed:
+                available_ids = [did for did in fixed if did in doc_id_to_name]
+            else:
+                available_ids = [d["id"] for d in doctors]
+            available_ids = sorted(available_ids, key=lambda x: doc_id_to_name.get(x, ""))
+            options = [""] + available_ids
+
+            default = slot_map.get((ds, cid), "")
+            try:
+                idx = options.index(default)
+            except ValueError:
+                # 既存割当が候補に含まれない場合は先頭に追加
+                options = [default] + options
+                idx = 0
+
+            ds_local = ds
+            def fmt(opt, _ds=ds_local):
+                if not opt:
+                    return "—"
+                name = doc_id_to_name.get(opt, f"ID:{opt}")
+                if _ds in ng_map.get(opt, set()):
+                    return f"⛔ {name}（×NG）"
+                if _ds in avoid_map.get(opt, set()):
+                    return f"⚠ {name}（△）"
+                return name
+
+            key = f"slot_{target_month}_{sched_id}_{ds}_{cid}_v{edit_ver}"
+            with row_cols[i + 1]:
+                sel = st.selectbox(
+                    f"{label} {clinic_id_to_name.get(cid, '?')}",
+                    options=options,
+                    index=idx,
+                    format_func=fmt,
+                    key=key,
+                    label_visibility="collapsed",
+                )
+            edited_slots[(ds, cid)] = sel if sel else None
+
+    return edited_slots
+
+
+def _render_live_warnings(edited_slots, constraints, doc_id_to_name, clinic_id_to_name):
+    """現在の編集状態に対するNG/△の警告をリアルタイム表示"""
+    ng_map = constraints["ng_map"]
+    avoid_map = constraints["avoid_map"]
+    ng_hits = []
+    avoid_hits = []
+    for (ds, cid), did in sorted(edited_slots.items()):
+        if not did:
+            continue
+        dname = doc_id_to_name.get(did, "?")
+        cname = clinic_id_to_name.get(cid, "?")
+        label = date.fromisoformat(ds).strftime("%m/%d")
+        if ds in ng_map.get(did, set()):
+            ng_hits.append(f"⛔ {label} {cname}：{dname}（×NG日）")
+        elif ds in avoid_map.get(did, set()):
+            avoid_hits.append(f"⚠ {label} {cname}：{dname}（△）")
+
+    if ng_hits:
+        st.error("**NG日に割り当てがあります（保存時に再確認されます）**\n\n" + "\n\n".join(f"- {h}" for h in ng_hits))
+    if avoid_hits:
+        st.warning("**『できれば避けたい』日に割り当てがあります**\n\n" + "\n\n".join(f"- {h}" for h in avoid_hits))
+
+
 def _check_soft_constraints(new_assignments, constraints, doctors):
-    """ソフト制約違反の警告メッセージリストを返す"""
+    """ソフト制約違反の警告メッセージリストを返す（NG/△/希望外/上限超過）"""
     doc_name_map = build_display_name_map(doctors)
+    ng_map = constraints["ng_map"]
     avoid_map = constraints["avoid_map"]
     max_assignments_map = constraints["max_assignments"]
     date_clinic_req_map = constraints["date_clinic_requests"]
@@ -454,14 +490,17 @@ def _check_soft_constraints(new_assignments, constraints, doctors):
     for a in new_assignments:
         did, ds, cid = a["doctor_id"], a["date"], a["clinic_id"]
         dname = doc_name_map.get(did, "?")
-        if ds in avoid_map.get(did, set()):
-            d_obj = date.fromisoformat(ds)
+        d_obj = date.fromisoformat(ds)
+        if ds in ng_map.get(did, set()):
             warnings.append(
-                f"{dname} は {d_obj.strftime('%m/%d')} を「できれば避けたい」に設定しています"
+                f"⛔ {dname} は {d_obj.strftime('%m/%d')} を「×（NG）」に設定しています"
+            )
+        elif ds in avoid_map.get(did, set()):
+            warnings.append(
+                f"⚠ {dname} は {d_obj.strftime('%m/%d')} を「△（できれば避けたい）」に設定しています"
             )
         requested_cid = date_clinic_req_map.get(did, {}).get(ds)
         if requested_cid is not None and int(requested_cid) != cid:
-            d_obj = date.fromisoformat(ds)
             warnings.append(
                 f"{dname} は {d_obj.strftime('%m/%d')} に別の外勤先を希望しています"
             )
@@ -478,9 +517,13 @@ def _check_soft_constraints(new_assignments, constraints, doctors):
     return warnings
 
 
-def _validate_and_convert(edited_df, dates, clinics_in_sched,
-                          doc_name_to_id, clinic_id_to_name, constraints):
-    """編集後DataFrameを assignments に変換 + ハード制約チェック"""
+def _validate_and_convert(edited_slots, dates, clinics_in_sched,
+                          doc_id_to_name, clinic_id_to_name, constraints):
+    """編集状態 (edited_slots) を assignments に変換 + ハード制約チェック
+
+    NG/△ は降格してソフト警告（_check_soft_constraints）で扱う。
+    ここでは保存不可レベルの違反のみエラー化する。
+    """
     new_assignments = []
     errors = []
 
@@ -493,17 +536,12 @@ def _validate_and_convert(edited_df, dates, clinics_in_sched,
 
         for cid in clinics_in_sched:
             cname = clinic_id_to_name.get(cid, "?")
-            cell = edited_df.at[day_label, cname]
-            dname = cell if cell and str(cell).strip() else ""
-            if not dname:
-                continue
-            did = doc_name_to_id.get(dname)
+            did = edited_slots.get((ds, cid))
             if not did:
-                errors.append(f"{day_label} {cname}: 不明な医員「{dname}」")
                 continue
 
-            if ds in constraints["ng_map"].get(did, set()):
-                errors.append(f"{day_label} {cname}: {dname} はNG日です")
+            dname = doc_id_to_name.get(did, f"ID:{did}")
+
             if (did, cid) in constraints["excluded_pairs"]:
                 errors.append(f"{day_label} {cname}: {dname} は除外対象です")
             if ds in constraints["post_night_map"].get(did, set()):
