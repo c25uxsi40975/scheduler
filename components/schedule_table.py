@@ -6,38 +6,77 @@ from components.display_utils import build_display_name_map
 
 
 def render_schedule_table(sched, doctors, clinics):
-    """スケジュールをカレンダー形式のテーブルで表示する"""
+    """スケジュールをカレンダー形式のテーブルで表示する
+
+    休診（枠なし）は赤字「休診」、空き枠（枠あり・未割当）は「空き」で区別表示する。
+    sched に year_month があれば必要スロットを算出して判定し、無ければ従来どおり「-」表示。
+    """
     doc_map = build_display_name_map(doctors)
     clinic_map = {c["id"]: c["name"] for c in clinics}
 
+    # 割当セル: {date_str: {clinic_id: "医員名（掛け持ちは / 連結）"}}
     cal_data = {}
     for a in sched["assignments"]:
         ds = a["date"]
-        cname = clinic_map.get(a["clinic_id"], "?")
+        cid = a["clinic_id"]
         dname = doc_map.get(a["doctor_id"], "?")
-        if ds not in cal_data:
-            cal_data[ds] = {}
-        cal_data[ds][cname] = dname
+        cell = cal_data.setdefault(ds, {})
+        cell[cid] = (cell[cid] + " / " + dname) if cid in cell else dname
 
-    if not cal_data:
+    # 必要スロット（休診/空き枠の判定用）。year_month が無ければ休診判定はスキップ
+    required_pairs = None
+    req_dates = set()
+    req_clinic_ids = set()
+    year_month = sched.get("year_month")
+    if year_month:
+        try:
+            from optimizer import get_required_slots, get_target_saturdays
+            from database import get_clinic_date_overrides
+            y, m = map(int, year_month.split("-"))
+            sats = get_target_saturdays(y, m)
+            ov = get_clinic_date_overrides(year_month)
+            req_slots = get_required_slots(clinics, sats, ov)
+            required_pairs = {(cid, ds) for cid, ds, _ in req_slots}
+            req_dates = {ds for _, ds, _ in req_slots}
+            req_clinic_ids = {cid for cid, _, _ in req_slots}
+        except Exception:
+            required_pairs = None
+
+    if not cal_data and not required_pairs:
         return None
 
-    dates_sorted = sorted(cal_data.keys())
-    all_clinic_names = sorted(set(
-        cn for day_data in cal_data.values() for cn in day_data.keys()
-    ))
+    dates_sorted = sorted(req_dates | set(cal_data.keys()))
+    clinic_ids_shown = req_clinic_ids | {a["clinic_id"] for a in sched["assignments"]}
+    clinic_ids_sorted = sorted(clinic_ids_shown, key=lambda cid: clinic_map.get(cid, "?"))
 
     rows = []
-    for cn in all_clinic_names:
-        row = {"外勤先": cn}
+    for cid in clinic_ids_sorted:
+        row = {"外勤先": clinic_map.get(cid, "?")}
         for ds in dates_sorted:
-            d_obj = date.fromisoformat(ds)
-            col_name = d_obj.strftime("%m/%d(%a)")
-            row[col_name] = cal_data.get(ds, {}).get(cn, "-")
+            col_name = date.fromisoformat(ds).strftime("%m/%d(%a)")
+            assigned = cal_data.get(ds, {}).get(cid)
+            if assigned:
+                row[col_name] = assigned
+            elif required_pairs is None:
+                row[col_name] = "-"
+            elif (cid, ds) in required_pairs:
+                row[col_name] = "空き"
+            else:
+                row[col_name] = "休診"
         rows.append(row)
 
     df = pd.DataFrame(rows)
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    date_cols = [c for c in df.columns if c != "外勤先"]
+
+    def _style_cell(val):
+        if val == "休診":
+            return "color: #d00000; font-weight: bold"
+        if val == "空き":
+            return "color: #e08000"
+        return ""
+
+    styler = df.style.map(_style_cell, subset=date_cols)
+    st.dataframe(styler, use_container_width=True, hide_index=True)
     return df
 
 

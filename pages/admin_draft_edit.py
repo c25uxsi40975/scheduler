@@ -113,9 +113,12 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
 
     edit_ver = st.session_state.get(f"_draft_edit_ver_{target_month}_{sched['id']}", 0)
 
+    required_pairs = {(ds, cid) for cid, ds, _ in required_slots}
+
     edited_slots = _render_selectbox_grid(
         dates, clinics_in_sched, slot_map, doctors, doc_id_to_name,
         clinic_id_to_name, constraints, target_month, sched["id"], edit_ver,
+        required_pairs,
     )
 
     _render_live_warnings(edited_slots, constraints, doc_id_to_name, clinic_id_to_name)
@@ -428,8 +431,12 @@ def _build_constraint_data(doctors, prefs, affinities, clinic_map):
 
 def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
                             doc_id_to_name, clinic_id_to_name, constraints,
-                            target_month, sched_id, edit_ver):
-    """セル単位のSelectbox格子を描画し、編集後の (date, clinic_id) → doctor_id マップを返す"""
+                            target_month, sched_id, edit_ver, required_pairs=None):
+    """セル単位のSelectbox格子を描画し、編集後の (date, clinic_id) → doctor_id マップを返す
+
+    required_pairs: {(date_str, clinic_id)} 枠のある組。ここに無い＝休診として
+    赤字「休診」を表示し、Selectboxは出さない（既存割当がある場合は編集可能に残す）。
+    """
     ng_map = constraints["ng_map"]
     avoid_map = constraints["avoid_map"]
 
@@ -447,6 +454,15 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
         row_cols[0].markdown(label)
 
         for i, cid in enumerate(clinics_in_sched):
+            default = slot_map.get((ds, cid), "")
+            # 休診（枠なし）かつ既存割当も無いセルは赤字「休診」を表示し編集不可
+            if required_pairs is not None and (ds, cid) not in required_pairs and not default:
+                row_cols[i + 1].markdown(
+                    "<span style='color:#d00000;font-weight:bold'>休診</span>",
+                    unsafe_allow_html=True,
+                )
+                continue
+
             fixed = constraints["fixed_members"].get(cid, set())
             if fixed:
                 available_ids = [did for did in fixed if did in doc_id_to_name]
@@ -455,7 +471,6 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
             available_ids = sorted(available_ids, key=lambda x: doc_id_to_name.get(x, ""))
             options = [""] + available_ids
 
-            default = slot_map.get((ds, cid), "")
             try:
                 idx = options.index(default)
             except ValueError:

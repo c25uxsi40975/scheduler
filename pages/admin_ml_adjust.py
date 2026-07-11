@@ -103,7 +103,7 @@ def _render_ml_results(result, doctors, clinics, target_month):
     schedules = get_schedules(target_month)
     confirmed_scheds = [s for s in schedules if s["is_confirmed"]]
 
-    ml_sched = {"assignments": result["assignments"]}
+    ml_sched = {"assignments": result["assignments"], "year_month": target_month}
 
     if confirmed_scheds:
         tab_ml, tab_compare = st.tabs(["ML結果", "確定スケジュールとの比較"])
