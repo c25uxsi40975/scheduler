@@ -539,7 +539,7 @@ function showSchedule(doctor, userId, replyToken) {
       if (myWd.length > 0) {
         myWd.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
         var sectionLabel = cfg.clinic_name || cfg.section;
-        var wdLines = ["■ 平日外勤（" + sectionLabel + "）"];
+        var wdLines = ["■ 平日勤務（" + sectionLabel + "）"];
         myWd.forEach(function(a) {
           var slotLabel = a.slot_name ? " " + a.slot_name : "";
           wdLines.push("  " + formatDateLabel(a.date) + slotLabel);

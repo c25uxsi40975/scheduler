@@ -308,7 +308,7 @@ function sendWeekdayScheduleConfirmed(data) {
     if (!doc || !doc.email || !doc.notify_email) continue;
 
     var assignments = doctorAssignments[String(memberIds[k])] || [];
-    var subject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤確定】" + clinicName + " " + periodLabel;
+    var subject = (TEST_MODE ? "【テスト】" : "") + "【平日勤務確定】" + clinicName + " " + periodLabel;
     var body = (TEST_MODE ? TEST_NOTICE : "")
       + doc.name + " 先生\n\n"
       + clinicName + " の " + periodLabel + " の外勤スケジュールが確定しました。\n\n";
@@ -340,7 +340,7 @@ function sendWeekdayScheduleConfirmed(data) {
   // 副管理者にもサマリを送信
   var subadminEmails = getSubadminEmails(ssMaster, section);
   for (var s = 0; s < subadminEmails.length; s++) {
-    var subSubject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤確定完了】" + clinicName + " " + periodLabel;
+    var subSubject = (TEST_MODE ? "【テスト】" : "") + "【平日勤務確定完了】" + clinicName + " " + periodLabel;
     var subBody = (TEST_MODE ? TEST_NOTICE : "")
       + clinicName + " の " + periodLabel + " のスケジュールが確定されました。\n\n"
       + "送信済み: " + sentCount + " 名\n\n"
@@ -887,7 +887,7 @@ function sendWeekdayScheduleReadjusted(data) {
     if (!doc || !doc.email || !doc.notify_email) continue;
 
     var memberAssignments = doctorAssignments[String(memberIds[k])] || [];
-    var subject = (TEST_MODE ? "【テスト】" : "") + "【平日外勤再調整】" + clinicName + "（" + modeLabel + "）";
+    var subject = (TEST_MODE ? "【テスト】" : "") + "【平日勤務再調整】" + clinicName + "（" + modeLabel + "）";
     var body = (TEST_MODE ? TEST_NOTICE : "")
       + doc.name + " 先生\n\n"
       + clinicName + " の外勤スケジュールが再調整（" + modeLabel + "）されました。\n"
@@ -919,7 +919,7 @@ function sendWeekdayScheduleReadjusted(data) {
 
   // 管理者にもサマリ送信
   sendToAdmins(
-    (TEST_MODE ? "【テスト】" : "") + "【平日外勤再調整完了】" + clinicName,
+    (TEST_MODE ? "【テスト】" : "") + "【平日勤務再調整完了】" + clinicName,
     clinicName + " の平日スケジュールが再調整されました。\n"
     + "モード: " + modeLabel + "\n"
     + "対象期間: " + period + "\n"

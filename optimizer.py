@@ -58,6 +58,48 @@ def get_clinic_dates(clinic: dict, saturdays: list[date]) -> list[date]:
         return saturdays
 
 
+def get_required_slots(clinics: list[dict], saturdays: list[date], date_overrides: dict = None) -> list[tuple]:
+    """必要スロット一覧 [(clinic_id, date_str, required)] を返す
+
+    休診（required=0）は除外。不定期は日別設定で required>0 の日のみ。
+    solve_schedule / diagnose_infeasibility / 下書き編集グリッドで共通利用する。
+    """
+    overrides = date_overrides or {}
+    slots = []
+    for c in clinics:
+        if c.get("frequency") == "irregular":
+            for d in saturdays:
+                ds = d.isoformat()
+                req = overrides.get((c["id"], ds), 0)
+                if req > 0:
+                    slots.append((c["id"], ds, req))
+        else:
+            cd = get_clinic_dates(c, saturdays)
+            for d in cd:
+                ds = d.isoformat()
+                req = overrides.get((c["id"], ds), 1)
+                if req > 0:
+                    slots.append((c["id"], ds, req))
+    return slots
+
+
+def compute_unfilled_slots(assignments: list[dict], required_slots: list[tuple]) -> list[dict]:
+    """必要スロットと割当済みを突き合わせ、未充足分を返す
+
+    Returns: [{"date", "clinic_id", "shortage"}, ...]（不足0のスロットは含めない）
+    """
+    assigned_count = {}
+    for a in assignments:
+        key = (a["clinic_id"], a["date"])
+        assigned_count[key] = assigned_count.get(key, 0) + 1
+    unfilled = []
+    for cid, ds, req in required_slots:
+        filled = assigned_count.get((cid, ds), 0)
+        if filled < req:
+            unfilled.append({"date": ds, "clinic_id": cid, "shortage": req - filled})
+    return unfilled
+
+
 def solve_schedule(
     doctors: list[dict],
     clinics: list[dict],
@@ -70,6 +112,7 @@ def solve_schedule(
     suitability_scores: dict = None,
     relax_must: bool = False,
     double_shift_pairs: list[dict] = None,
+    allow_unfilled: bool = False,
 ) -> dict | None:
     """
     最適化ソルバー
@@ -82,6 +125,8 @@ def solve_schedule(
 
     suitability_scores: {(doctor_id, clinic_id): float} ML適合性スコア行列
     relax_must: Trueの場合、必須メンバーの月1回以上制約をソフト制約（ペナルティ）に緩和
+    allow_unfilled: Trueの場合、スロット必要人数をソフト制約化し、埋められない枠は
+                    未割当のまま許容する（超大ペナルティで最終手段化）
     """
     doc_ids = [d["id"] for d in doctors]
     clinic_list = clinics
@@ -90,29 +135,10 @@ def solve_schedule(
     overrides = date_overrides or {}
 
     # 各外勤先の対象日（休診=0 を除外）
-    clinic_dates = {}
-    slot_required = {}  # スロットごとの必要医員数
-    for c in clinic_list:
-        if c.get("frequency") == "irregular":
-            # 不定期: 日別設定で required_doctors > 0 の日のみスロット化
-            for d in saturdays:
-                ds = d.isoformat()
-                req = overrides.get((c["id"], ds), 0)
-                if req > 0:
-                    clinic_dates[(c["id"], ds)] = True
-                    slot_required[(c["id"], ds)] = req
-        else:
-            cd = get_clinic_dates(c, saturdays)
-            for d in cd:
-                ds = d.isoformat()
-                req = overrides.get((c["id"], ds), 1)
-                if req == 0:
-                    continue  # 休診: スロットを生成しない
-                clinic_dates[(c["id"], ds)] = True
-                slot_required[(c["id"], ds)] = req
-
+    required_slots = get_required_slots(clinic_list, saturdays, overrides)
+    slot_required = {(cid, ds): req for cid, ds, req in required_slots}
     # 全スロット: (clinic_id, date_str)
-    slots = list(clinic_dates.keys())
+    slots = list(slot_required.keys())
     if not slots:
         return None
 
@@ -187,12 +213,24 @@ def solve_schedule(
     # ---- 制約条件 ----
 
     # 1. 各スロットに必要人数を割り当て（通常1人、2人体制の場合2人）
+    #    allow_unfilled=True のときは shortage スラック付きソフト制約に切替
+    slot_shortage = {}
     for (cid, ds) in slots:
         req = slot_required.get((cid, ds), 1)
-        prob += (
-            pulp.lpSum(x[(doc_id, cid, ds)] for doc_id in doc_ids) == req,
-            f"slot_req_{cid}_{ds}"
-        )
+        if allow_unfilled:
+            short = pulp.LpVariable(
+                f"short_{cid}_{ds}", lowBound=0, upBound=req, cat=pulp.LpInteger
+            )
+            slot_shortage[(cid, ds)] = short
+            prob += (
+                pulp.lpSum(x[(doc_id, cid, ds)] for doc_id in doc_ids) + short == req,
+                f"slot_req_{cid}_{ds}"
+            )
+        else:
+            prob += (
+                pulp.lpSum(x[(doc_id, cid, ds)] for doc_id in doc_ids) == req,
+                f"slot_req_{cid}_{ds}"
+            )
 
     # 掛け持ちペアのセット構築: {(am_clinic_id, pm_clinic_id), ...}
     ds_pairs = set()
@@ -439,6 +477,13 @@ def solve_schedule(
                 50.0 * v for v in ds_over.values()
             )
 
+    # 未割当ペナルティ（allow_unfilled時のみ有効）
+    # 他の全項（報酬ばらつき等、最大でも ~1e7 規模）を確実に上回る超大係数にし、
+    # 「埋められる枠は必ず埋める・空きは真の最終手段」を保証する
+    unfilled_penalty = pulp.lpSum(
+        1e9 * s for s in slot_shortage.values()
+    ) if slot_shortage else 0
+
     # モードに応じた重み設定
     #   w_var:  報酬ばらつき
     #   w_pref: 医員希望外勤先
@@ -485,6 +530,7 @@ def solve_schedule(
         + w_suit * suitability_term
         + must_penalty
         + double_shift_penalty
+        + unfilled_penalty
     )
 
     # ---- 求解 ----
@@ -523,6 +569,13 @@ def solve_schedule(
             sat += 1
         sat += priority_map.get((did, cid), 0)
 
+    # 未割当スロット（allow_unfilled時のみ発生しうる）
+    unfilled_slots = []
+    for (cid, ds), s in slot_shortage.items():
+        n = int(round(pulp.value(s) or 0))
+        if n > 0:
+            unfilled_slots.append({"date": ds, "clinic_id": cid, "shortage": n})
+
     return {
         "assignments": assignments,
         "doctor_earnings": doc_earnings,
@@ -530,6 +583,7 @@ def solve_schedule(
         "total_variance": total_var,
         "satisfaction_score": float(sat),
         "status": pulp.LpStatus[status],
+        "unfilled_slots": unfilled_slots,
     }
 
 
@@ -571,7 +625,27 @@ def solve_with_relaxation(
             result["relaxations"] = list(relaxations)
             return result
 
-    return None  # 解なし（◎制約の緩和は行わない）
+    # Step 2: 最終手段 — 一部スロットを未割当として許容し部分解を返す
+    # （掛け持ちも併用して埋まる枠を最大化する。◎必須制約は据え置き）
+    result = solve_schedule(
+        doctors, clinics, saturdays, preferences, affinities,
+        mode=mode, previous_earnings=previous_earnings,
+        date_overrides=date_overrides,
+        suitability_scores=suitability_scores,
+        double_shift_pairs=double_shift_pairs,
+        allow_unfilled=True,
+    )
+    if result and result.get("unfilled_slots"):
+        n = sum(s["shortage"] for s in result["unfilled_slots"])
+        relaxations.append(f"{n}枠を未割当として許容（要手動割当）")
+        result["relaxations"] = list(relaxations)
+        return result
+    if result:
+        # allow_unfilled でも未割当ゼロ（＝実は解けた）ならそのまま返す
+        result["relaxations"] = list(relaxations)
+        return result
+
+    return None  # 解なし（◎必須制約の矛盾など、未割当許容でも解けない）
 
 
 def diagnose_infeasibility(
@@ -586,24 +660,10 @@ def diagnose_infeasibility(
     doc_name = build_display_name_map(doctors)
 
     # スロット一覧を構築: [(clinic_id, date_str, required)]
-    slots = []
+    slots = get_required_slots(clinics, saturdays, overrides)
     slots_by_date = {}
-    for c in clinics:
-        if c.get("frequency") == "irregular":
-            for d in saturdays:
-                ds = d.isoformat()
-                req = overrides.get((c["id"], ds), 0)
-                if req > 0:
-                    slots.append((c["id"], ds, req))
-                    slots_by_date[ds] = slots_by_date.get(ds, 0) + req
-        else:
-            cd = get_clinic_dates(c, saturdays)
-            for d in cd:
-                ds = d.isoformat()
-                req = overrides.get((c["id"], ds), 1)
-                if req > 0:
-                    slots.append((c["id"], ds, req))
-                    slots_by_date[ds] = slots_by_date.get(ds, 0) + req
+    for cid, ds, req in slots:
+        slots_by_date[ds] = slots_by_date.get(ds, 0) + req
 
     total_required = sum(r for _, _, r in slots)
 

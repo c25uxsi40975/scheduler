@@ -39,7 +39,7 @@ var MASTER_SPREADSHEET_ID = "";
 var ADMIN_EMAIL = "";
 
 // テストモード（本番運用時は false に変更してください）
-var TEST_MODE = true;
+var TEST_MODE = false;
 var TEST_NOTICE = "【テスト送信】このメールはテストです。記載の外勤先は実際のものではありません。実際の外勤先は別途ご確認ください。\n\n";
 
 // ---- スプレッドシート取得（リクエスト内キャッシュ） ----

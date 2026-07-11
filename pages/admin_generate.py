@@ -35,6 +35,14 @@ def render(target_month, year, month):
         st.stop()
     st.header(f"スケジュール生成 ({target_month})")
 
+    if st.session_state.get("_unfilled_warn"):
+        warns = st.session_state.pop("_unfilled_warn")
+        st.warning(
+            "人手不足のため一部スロットを未割当のまま生成しました。"
+            "下書き編集タブで手動割当してください:\n\n"
+            + "\n".join(f"- {w}" for w in warns)
+        )
+
     doctors = get_doctors()
     clinics = get_clinics()
     saturdays = get_target_saturdays(year, month)
@@ -82,15 +90,29 @@ def render(target_month, year, month):
                     for line in diag:
                         st.write(f"- {line}")
             else:
+                clinic_name_map = {c["id"]: c["name"] for c in clinics}
+                unfilled_warnings = []
                 for plan in plans:
+                    unfilled = plan.get("unfilled_slots") or []
+                    plan_name = plan["plan_name"]
+                    if unfilled:
+                        n = sum(s["shortage"] for s in unfilled)
+                        plan_name = f"{plan_name} ({n}枠未割当)"
+                        slot_descs = "、".join(
+                            f"{s['date']} {clinic_name_map.get(s['clinic_id'], '?')}"
+                            for s in unfilled
+                        )
+                        unfilled_warnings.append(f"{plan['plan_name']}: {slot_descs}")
                     save_schedule(
                         target_month,
-                        plan["plan_name"],
+                        plan_name,
                         plan["assignments"],
                         plan["total_variance"],
                         plan["satisfaction_score"]
                     )
 
+                if unfilled_warnings:
+                    st.session_state["_unfilled_warn"] = unfilled_warnings
                 st.session_state["_toast_msg"] = f"{len(plans)}件の案を生成しました"
                 st.rerun()
 

@@ -9,13 +9,13 @@ from database import (
     delete_schedule, update_schedule_assignments,
     get_all_confirmed_schedules, delete_old_schedules,
     append_training_data, append_suitability_training_data,
-    get_double_shift_pairs,
+    get_double_shift_pairs, get_clinic_date_overrides,
 )
 from ml_adjuster import (
     compute_doctor_features, FEATURE_COLUMNS, PAIR_FEATURE_COLUMNS,
     _compute_doctor_history, compute_pair_features,
 )
-from optimizer import get_target_saturdays, PRIORITY_EXCLUDED
+from optimizer import get_target_saturdays, get_required_slots, PRIORITY_EXCLUDED
 from components.schedule_table import render_schedule_table, render_doctor_view_table, render_doctor_stats_table
 from components.display_utils import build_display_name_map
 
@@ -68,15 +68,48 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
     ng_map = constraints["ng_map"]
     avoid_map = constraints["avoid_map"]
 
-    dates = sorted(set(a["date"] for a in assignments))
+    # グリッドは「その月の全必要スロット」から構築する。
+    # これにより未割当スロット（assignmentsに無い枠）も空セルとして表示され、
+    # 手動で割当できる。既存assignmentsの日付/外勤先も念のため和集合に含める。
+    saturdays = get_target_saturdays(year, month)
+    overrides = get_clinic_date_overrides(target_month)
+    required_slots = get_required_slots(clinics, saturdays, overrides)
+
+    dates = sorted(
+        set(ds for _, ds, _ in required_slots) | set(a["date"] for a in assignments)
+    )
     clinics_in_sched = sorted(
-        set(a["clinic_id"] for a in assignments),
+        set(cid for cid, _, _ in required_slots) | set(a["clinic_id"] for a in assignments),
         key=lambda cid: clinic_map.get(cid, {}).get("name", "")
     )
 
     slot_map = {}
     for a in assignments:
         slot_map[(a["date"], a["clinic_id"])] = a["doctor_id"]
+
+    # 未割当スロット（必要だが割当が無い）を検出して案内表示
+    assigned_keys = set((a["date"], a["clinic_id"]) for a in assignments)
+    unfilled = [
+        (ds, cid) for cid, ds, _ in required_slots
+        if (ds, cid) not in assigned_keys
+    ]
+    if unfilled:
+        descs = "、".join(
+            f"{ds} {clinic_id_to_name.get(cid, '?')}"
+            for ds, cid in sorted(unfilled)
+        )
+        st.warning(f"未割当のスロットがあります（該当セルで担当医員を選択してください）: {descs}")
+
+    def _unfilled_warnings(new_assignments):
+        """編集後の割当に対する未割当スロット警告を返す（確定はブロックしない）"""
+        assigned = set((a["date"], a["clinic_id"]) for a in new_assignments)
+        left = [(ds, cid) for cid, ds, _ in required_slots if (ds, cid) not in assigned]
+        if not left:
+            return []
+        descs = "、".join(
+            f"{ds} {clinic_id_to_name.get(cid, '?')}" for ds, cid in sorted(left)
+        )
+        return [f"{len(left)}枠が未割当のままです（{descs}）"]
 
     edit_ver = st.session_state.get(f"_draft_edit_ver_{target_month}_{sched['id']}", 0)
 
@@ -101,6 +134,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     st.error(e)
             else:
                 soft_warnings = _check_soft_constraints(new_assignments, constraints, doctors)
+                soft_warnings = _unfilled_warnings(new_assignments) + soft_warnings
                 if soft_warnings:
                     st.session_state[confirm_save_key] = {
                         "warnings": soft_warnings,
@@ -125,6 +159,7 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
                     st.error(e)
             else:
                 soft_warnings = _check_soft_constraints(new_assignments, constraints, doctors)
+                soft_warnings = _unfilled_warnings(new_assignments) + soft_warnings
                 if soft_warnings:
                     st.session_state[confirm_save_key] = {
                         "warnings": soft_warnings,
