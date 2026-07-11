@@ -27,6 +27,7 @@ def render(target_month, year, month):
             if p:
                 ng = set(p.get("ng_dates", []))
                 avoid = set(p.get("avoid_dates", []))
+                post_night = set(p.get("post_night_dates") or [])
                 dcr = p.get("date_clinic_requests", {})
                 for s, s_str in zip(saturdays, sat_strs):
                     ds = s.isoformat()
@@ -34,6 +35,8 @@ def render(target_month, year, month):
                         mark = "×"
                     elif ds in avoid:
                         mark = "△"
+                    elif ds in post_night:
+                        mark = "○(明)"
                     else:
                         mark = "○"
                     # 日別外勤先希望がある場合は追記
@@ -52,6 +55,7 @@ def render(target_month, year, month):
             data.append(row)
 
         df = pd.DataFrame(data)
+        st.caption("○ 可能 ／ ○(明) 当直明け○(PMのみ) ／ △ できれば避けたい ／ × NG")
         st.dataframe(df, use_container_width=True, hide_index=True)
 
         submitted = sum(1 for _ in pref_map.values())
