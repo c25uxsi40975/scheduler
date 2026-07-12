@@ -455,13 +455,18 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
 
         for i, cid in enumerate(clinics_in_sched):
             default = slot_map.get((ds, cid), "")
-            # 休診（枠なし）かつ既存割当も無いセルは赤字「休診」を表示し編集不可
+            # 休診（枠なし）かつ既存割当も無いセルはハイフン表示・編集不可
             if required_pairs is not None and (ds, cid) not in required_pairs and not default:
                 row_cols[i + 1].markdown(
-                    "<span style='color:#d00000;font-weight:bold'>休診</span>",
+                    "<span style='color:#999999'>-</span>",
                     unsafe_allow_html=True,
                 )
                 continue
+
+            # 空き枠（枠あり・未割当）: 赤字「空き」を表示しつつ編集可能にする
+            is_empty_required = (
+                (required_pairs is None or (ds, cid) in required_pairs) and not default
+            )
 
             fixed = constraints["fixed_members"].get(cid, set())
             if fixed:
@@ -491,6 +496,11 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
 
             key = f"slot_{target_month}_{sched_id}_{ds}_{cid}_v{edit_ver}"
             with row_cols[i + 1]:
+                if is_empty_required:
+                    st.markdown(
+                        "<span style='color:#d00000;font-weight:bold'>空き</span>",
+                        unsafe_allow_html=True,
+                    )
                 sel = st.selectbox(
                     f"{label} {clinic_id_to_name.get(cid, '?')}",
                     options=options,

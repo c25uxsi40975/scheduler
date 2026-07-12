@@ -62,17 +62,15 @@ def render_schedule_table(sched, doctors, clinics):
             elif (cid, ds) in required_pairs:
                 row[col_name] = "空き"
             else:
-                row[col_name] = "休診"
+                row[col_name] = "-"  # 休診はハイフン表示（空き枠と区別）
         rows.append(row)
 
     df = pd.DataFrame(rows)
     date_cols = [c for c in df.columns if c != "外勤先"]
 
     def _style_cell(val):
-        if val == "休診":
-            return "color: #d00000; font-weight: bold"
         if val == "空き":
-            return "color: #e08000"
+            return "color: #d00000; font-weight: bold"
         return ""
 
     styler = df.style.map(_style_cell, subset=date_cols)
