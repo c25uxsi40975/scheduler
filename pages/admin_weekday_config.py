@@ -1,12 +1,11 @@
 """管理者: 平日外勤セクション管理タブ"""
 import streamlit as st
-import requests
 from database import (
     get_doctors,
     get_weekday_configs, create_weekday_spreadsheet,
     add_weekday_config, update_weekday_config, delete_weekday_config,
     get_weekday_schedule_view_mode, set_weekday_schedule_view_mode,
-    get_weekday_confirmed_months,
+    resync_weekday_calendar,
 )
 from components.display_utils import build_display_name_map
 
@@ -15,22 +14,8 @@ DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
 
 def _resync_weekday_calendar(section: str, clinic_name: str):
-    """検体設定変更後にカレンダーの検体イベントを再同期（メール通知なし）"""
-    confirmed = get_weekday_confirmed_months(section)
-    if not confirmed:
-        return
-    gas_url = st.secrets.get("gas_webapp_url", "")
-    if not gas_url:
-        return
-    try:
-        requests.post(gas_url, json={
-            "action": "weekday_calendar_resync",
-            "section": section,
-            "clinic_name": clinic_name,
-            "year_months": confirmed,
-        }, timeout=15)
-    except requests.RequestException:
-        pass
+    """検体設定変更後にカレンダー（シフト＋検体イベント）を再同期（メール通知なし）"""
+    resync_weekday_calendar(section, clinic_name)
 
 
 def render():

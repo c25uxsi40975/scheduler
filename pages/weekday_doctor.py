@@ -20,7 +20,7 @@ from database import (
     get_weekday_readjust_dates,
     get_weekday_confirmed_months,
     get_weekday_schedule_view_mode,
-    execute_shift_change, get_shift_change_history,
+    execute_shift_change, get_shift_change_history, resync_weekday_calendar,
     get_specimen_assignee,
 )
 from database.weekday import DOW_LABELS_JA
@@ -467,6 +467,9 @@ def _render_shift_change(doctor: dict, section: str, cfg: dict):
         except ValueError as e:
             st.error(str(e))
             return
+
+        # カレンダー再同期（確定済みならシフト＋検体確認イベントを更新。メール通知なし）
+        resync_weekday_calendar(section, cfg.get("clinic_name", ""), year_months=[change_month])
 
         # 監査ログ
         log_event(

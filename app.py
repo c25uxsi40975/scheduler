@@ -8,7 +8,7 @@ from dateutil.relativedelta import relativedelta
 
 import requests
 from database import (
-    init_db, get_doctors,
+    init_db, get_doctors, is_readonly,
     is_admin_password_set, set_admin_password, verify_admin_password,
     is_dev_password_set, set_dev_password, verify_dev_password,
     is_doctor_individual_password_set, set_doctor_individual_password,
@@ -33,7 +33,7 @@ from security import (
 from audit import log_event
 from session_store import save_session, restore_session, clear_session, cleanup_expired
 from pages import (
-    admin_master, admin_preferences, admin_generate,
+    admin_clinic_master, admin_doctor_master, admin_generate,
     admin_draft_edit, admin_schedule, doctor_input, doctor_schedule,
     admin_weekday_config, admin_calendar,
 )
@@ -82,6 +82,10 @@ if _missing:
     st.stop()
 
 init_db()
+
+# 読み取り専用モードの明示（環境変数 SCHEDULER_READONLY 設定時）
+if is_readonly():
+    st.warning("🔒 読み取り専用モード：実データを表示していますが、保存・通知は無効です（検証用）", icon="🔒")
 
 # ---- セッション状態初期化 ----
 if "role" not in st.session_state:
@@ -885,16 +889,16 @@ elif st.session_state.role == "admin":
         target_month, year, month = _show_admin_header()
 
         tab1, tab2, tab3, tab3b, tab4, tab5, tab6 = st.tabs([
-            "マスタ管理", "希望状況一覧",
+            "外勤先マスタ", "医員マスタ",
             "スケジュール生成", "下書き編集",
             "スケジュール確認",
             "平日外勤設定", "カレンダー",
         ])
 
         with tab1:
-            admin_master.render(target_month, year, month)
+            admin_clinic_master.render(target_month, year, month)
         with tab2:
-            admin_preferences.render(target_month, year, month)
+            admin_doctor_master.render(target_month, year, month)
         with tab3:
             admin_generate.render(target_month, year, month)
         with tab3b:

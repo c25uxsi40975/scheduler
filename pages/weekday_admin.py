@@ -24,6 +24,7 @@ from database import (
     get_weekday_slot_overrides, set_weekday_slot_overrides_batch,
     get_weekday_confirmed_months, add_weekday_confirmed_months,
     remove_weekday_confirmed_month,
+    resync_weekday_calendar,
 )
 from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
@@ -37,22 +38,8 @@ MINUTES = [0, 30]
 
 
 def _resync_weekday_calendar(section: str, clinic_name: str):
-    """検体設定変更後にカレンダーの検体イベントを再同期（メール通知なし）"""
-    confirmed = get_weekday_confirmed_months(section)
-    if not confirmed:
-        return
-    gas_url = st.secrets.get("gas_webapp_url", "")
-    if not gas_url:
-        return
-    try:
-        requests.post(gas_url, json={
-            "action": "weekday_calendar_resync",
-            "section": section,
-            "clinic_name": clinic_name,
-            "year_months": confirmed,
-        }, timeout=15)
-    except requests.RequestException:
-        pass
+    """検体設定変更後にカレンダー（シフト＋検体イベント）を再同期（メール通知なし）"""
+    resync_weekday_calendar(section, clinic_name)
 
 
 def _build_target_dates_for_months(

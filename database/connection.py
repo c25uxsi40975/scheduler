@@ -5,11 +5,105 @@
 import json
 import hashlib
 import hmac
+import os
 import time
 from datetime import datetime
 import bcrypt
 import gspread
 import streamlit as st
+
+
+# ==================== 読み取り専用モード ====================
+# 環境変数 SCHEDULER_READONLY=1 のとき、実データの読み取りは通常どおり行うが、
+# スプレッドシートへの書き込み・シート作成・外部通知(GAS)を一切行わない。
+# 本番データを壊さずにローカル検証・自動スモークテストを行うための安全装置。
+# デフォルト（未設定）では従来どおり読み書きするため本番挙動は不変。
+
+_READONLY_ENV = "SCHEDULER_READONLY"
+_readonly_blocked = 0  # ブロックした書き込み操作の累計回数
+
+# 読み取り系メソッド（読取専用モードでも実 worksheet に委譲する）
+_READ_METHODS = frozenset({
+    "get_all_records", "get_all_values", "get_values", "get", "batch_get",
+    "row_values", "col_values", "acell", "cell", "range", "find", "findall",
+    "get_note", "get_notes",
+})
+
+
+def is_readonly() -> bool:
+    """読み取り専用モードか（環境変数 SCHEDULER_READONLY で切替）"""
+    return os.getenv(_READONLY_ENV, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def readonly_blocked_writes() -> int:
+    """読取専用モードでブロックした書き込み操作の累計回数"""
+    return _readonly_blocked
+
+
+def _blocked_write(*args, **kwargs):
+    """読取専用モードでの書き込みブロック（no-op）"""
+    global _readonly_blocked
+    _readonly_blocked += 1
+    return {}
+
+
+def _empty_reader(attr):
+    """存在しないシート用の空読み取り関数を返す"""
+    def _reader(*args, **kwargs):
+        if attr in ("get_all_records", "get_all_values", "get_values",
+                    "row_values", "col_values", "batch_get", "findall"):
+            return []
+        return None
+    return _reader
+
+
+class _ReadOnlyWorksheet:
+    """読取専用モード用の worksheet プロキシ。
+
+    - 読み取りメソッド (_READ_METHODS) は実 worksheet に委譲する
+    - 非callable属性（title/id 等のプロパティ）は素通し
+    - それ以外（update/append_row/update_cell/batch_update/delete_rows 等の
+      書き込み）は実行せず no-op（{} を返す）にしてブロック回数を記録する
+    - ws=None の場合は「存在しないシート」用の空スタブ（読み取りは空を返す）
+    """
+    __slots__ = ("_ws", "_name")
+
+    def __init__(self, ws=None, name=None):
+        self._ws = ws
+        self._name = name
+
+    def __getattr__(self, attr):
+        ws = self._ws
+        if attr in _READ_METHODS:
+            if ws is not None:
+                return getattr(ws, attr)
+            return _empty_reader(attr)
+        # プロパティ等の非callable属性は素通し
+        if ws is not None:
+            value = getattr(ws, attr)
+            if not callable(value):
+                return value
+        # それ以外（書き込みメソッド）はブロック
+        return _blocked_write
+
+
+def _wrap_readonly(ws, name=None):
+    """読取専用モードなら worksheet をプロキシでラップして返す"""
+    if not is_readonly():
+        return ws
+    if isinstance(ws, _ReadOnlyWorksheet):
+        return ws
+    return _ReadOnlyWorksheet(ws, name=name)
+
+
+def _wrap_all_caches_readonly():
+    """既存キャッシュ内の全 worksheet を読取専用プロキシに置き換える"""
+    for cache in (_ws_cache_master, _ws_cache_operational):
+        for k, v in list(cache.items()):
+            cache[k] = _wrap_readonly(v, name=k)
+    for sec, wsdict in _ws_cache_weekday.items():
+        for k, v in list(wsdict.items()):
+            wsdict[k] = _wrap_readonly(v, name=k)
 
 
 def _safe_json_loads(val, default=None):
@@ -187,7 +281,11 @@ def _get_weekday_sheet(name: str, section: str):
     try:
         ws = _retry(ss.worksheet, name)
     except gspread.WorksheetNotFound:
-        ws = ss.add_worksheet(title=name, rows=100, cols=20)
+        if is_readonly():
+            ws = None  # 読取専用: シートを作成せず空スタブで代替
+        else:
+            ws = ss.add_worksheet(title=name, rows=100, cols=20)
+    ws = _wrap_readonly(ws, name=name)
     cache[name] = ws
     return ws
 
@@ -209,7 +307,11 @@ def _get_sheet(name):
     try:
         ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=name, rows=100, cols=20)
+        if is_readonly():
+            ws = None  # 読取専用: シートを作成せず空スタブで代替
+        else:
+            ws = sh.add_worksheet(title=name, rows=100, cols=20)
+    ws = _wrap_readonly(ws, name=name)
     cache[name] = ws
     return ws
 
@@ -335,6 +437,14 @@ def init_db():
     for ws in _retry(sh_op.worksheets):
         _ws_cache_operational[ws.title] = ws
 
+    # 読取専用モード: これ以降の書き込み（ヘッダー初期化・カラム追加・
+    # 既存医員マイグレーション）は行わず、キャッシュをプロキシ化して終了。
+    # 平日セクションのシートは _get_weekday_sheet が都度ラップして返す。
+    if is_readonly():
+        _wrap_all_caches_readonly()
+        _db_initialized = True
+        return
+
     # マスタシートのヘッダー初期化
     for sheet_name, headers in SHEET_HEADERS.items():
         if sheet_name not in _ws_cache_master:
@@ -457,8 +567,14 @@ def _init_monthly_sheet(name, headers):
     try:
         ws = _retry(sh.worksheet, name)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=name, rows=100, cols=len(headers))
-    if not _retry(ws.row_values, 1):
-        _retry(ws.update, [headers], "A1")
+        if is_readonly():
+            ws = None  # 読取専用: シートを作成せず空スタブで代替
+        else:
+            ws = sh.add_worksheet(title=name, rows=100, cols=len(headers))
+    if is_readonly():
+        ws = _wrap_readonly(ws, name=name)
+    else:
+        if not _retry(ws.row_values, 1):
+            _retry(ws.update, [headers], "A1")
     cache[name] = ws
     return ws

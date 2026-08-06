@@ -3,7 +3,9 @@ database パッケージ
 旧 database.py を分割したモジュールの再エクスポート
 既存の from database import ... を維持する
 """
-from database.connection import init_db, SHEET_HEADERS
+from database.connection import (
+    init_db, SHEET_HEADERS, is_readonly, readonly_blocked_writes,
+)
 from database.master import (
     get_doctors, add_doctor, update_doctor, delete_doctor,
     get_clinics, add_clinic, update_clinic, delete_clinic,
@@ -74,5 +76,5 @@ from database.weekday import (
     get_weekday_schedule, batch_save_weekday_assignments,
     merge_save_weekday_assignments,
     delete_weekday_assignment,
-    execute_shift_change, get_shift_change_history,
+    execute_shift_change, get_shift_change_history, resync_weekday_calendar,
 )

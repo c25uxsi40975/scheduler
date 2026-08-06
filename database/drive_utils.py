@@ -11,6 +11,8 @@ import logging
 import requests
 import streamlit as st
 
+from .connection import is_readonly
+
 _log = logging.getLogger(__name__)
 
 
@@ -25,6 +27,10 @@ def upload_schedule_image(png_bytes: bytes, filename: str) -> str | None:
     失敗時は None を返す。
     """
     if not png_bytes:
+        return None
+
+    if is_readonly():
+        _log.info("読取専用モード: Drive アップロードをスキップしました")
         return None
 
     gas_url = st.secrets.get("gas_webapp_url", "")

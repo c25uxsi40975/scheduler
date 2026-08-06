@@ -5,6 +5,45 @@ last_name が未設定の既存医員は name（フルネーム）にフォー�
 """
 from collections import Counter
 
+import streamlit as st
+
+
+def inject_master_css():
+    """マスタ管理画面の共通CSS（行カラー + スマホ向けコンパクト化）を注入する。
+
+    外勤先マスタ・医員マスタの両ページが render 冒頭で呼ぶ。
+    """
+    st.markdown("""<style>
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.row-active) {
+        background-color: #e8f5e9 !important;
+    }
+    [data-testid="stVerticalBlockBorderWrapper"]:has(.row-inactive) {
+        background-color: #ffebee !important;
+    }
+    .row-active, .row-inactive { display: none; }
+
+    /* スマホ向けコンパクト化 */
+    @media (max-width: 768px) {
+        .stMainBlockContainer { padding: 0.5rem !important; }
+        h2 { font-size: 1.2rem !important; }
+        h3 { font-size: 1rem !important; }
+        p, .stMarkdown, .stText { font-size: 0.85rem !important; }
+        .stButton > button {
+            font-size: 0.75rem !important;
+            padding: 0.2rem 0.5rem !important;
+            min-height: 1.8rem !important;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            padding: 0.3rem !important;
+        }
+        [data-testid="stFormSubmitButton"] > button {
+            font-size: 0.8rem !important;
+        }
+        .stRadio label { font-size: 0.8rem !important; }
+        .stSelectbox label, .stTextInput label { font-size: 0.8rem !important; }
+    }
+    </style>""", unsafe_allow_html=True)
+
 
 def build_display_name_map(doctors: list[dict]) -> dict[int, str]:
     """doctor_id → 表示名 のマップを構築する。

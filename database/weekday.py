@@ -12,6 +12,7 @@ from database.connection import (
     _col_letter, _retry, _clear_data_cache, _register_cached,
     _safe_json_loads, _sanitize_cell_value,
     _get_weekday_sheet, _init_weekday_sheet, _clear_weekday_ss_cache,
+    is_readonly,
 )
 from database.master import get_doctors
 
@@ -170,6 +171,8 @@ def get_specimen_assignee(section: str, date_str: str, schedule: list = None):
 
 def create_weekday_spreadsheet(title: str) -> str:
     """GAS Web App経由で平日セクション用スプレッドシートを作成し、IDを返す"""
+    if is_readonly():
+        raise RuntimeError("読取専用モードのためスプレッドシートを作成できません")
     gas_url = st.secrets.get("gas_webapp_url", "")
     if not gas_url:
         raise RuntimeError("gas_webapp_url が Secrets に設定されていません")
@@ -892,6 +895,45 @@ def execute_shift_change(year_month: str, section: str,
     _retry(ws_change.append_row, change_row)
     _clear_data_cache()
     return change_id
+
+
+def resync_weekday_calendar(section: str, clinic_name: str = "", year_months=None):
+    """平日カレンダー（シフト＋検体確認イベント）を GAS 経由で再同期する。
+
+    確定済みスケジュールのみ対象。GAS の syncWeekdayCalendar はシートから
+    最新の割り当てを読み直し、タグ付きイベントを再生成し、検体確認担当も
+    週単位で再計算するため、これ1回でシフト変更・検体設定変更の両方が反映される。
+
+    Args:
+        year_months: 再同期する月のリスト。未指定なら確定済み全月、
+                     指定時はそのうち確定済みの月のみを対象にする。
+
+    読取専用モード・gas_url未設定・確定月なしのときは何もしない（メール通知なし）。
+    """
+    if is_readonly():
+        return
+    from database.auth import get_weekday_confirmed_months
+    confirmed = get_weekday_confirmed_months(section)
+    if not confirmed:
+        return
+    if year_months is not None:
+        targets = [ym for ym in year_months if ym in confirmed]
+    else:
+        targets = list(confirmed)
+    if not targets:
+        return
+    gas_url = st.secrets.get("gas_webapp_url", "")
+    if not gas_url:
+        return
+    try:
+        requests.post(gas_url, json={
+            "action": "weekday_calendar_resync",
+            "section": section,
+            "clinic_name": clinic_name,
+            "year_months": targets,
+        }, timeout=15)
+    except requests.RequestException:
+        pass
 
 
 @_register_cached
