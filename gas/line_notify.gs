@@ -60,7 +60,7 @@ function sendLineFridayReminder(assignments, doctorMap, clinicMap) {
     var lineUserId = String(doc.line_user_id || "").trim();
     if (!lineUserId) continue;
 
-    var lines = ["【外勤リマインダー】明日の予定\n"];
+    var lines = ["【外勤リマインダー】\n明日は外勤の予定があります。\n"];
     byDoctor[doctorId].forEach(function(a) {
       var clinicName = clinicMap[String(a.clinic_id)] || "不明";
       var dateLabel = formatDateLabel(a.date);

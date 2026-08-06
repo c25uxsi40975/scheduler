@@ -3,6 +3,7 @@ admin_password.txt
 *.json
 credentials/
 .streamlit/secrets.toml
+gas/config.gs
 
 # ML model & reference data
 model.pkl
@@ -39,3 +40,9 @@ archive/
 
 # Documentation generator
 doc_generator/
+
+# Backups
+backups/
+
+# GAS deployment id (=webhook url, keep out of git)
+scripts/.gas_deploy_id

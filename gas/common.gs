@@ -27,19 +27,15 @@
  */
 
 // ---- 設定 ----
+// 環境依存の設定値（MASTER_SPREADSHEET_ID / ADMIN_EMAIL / TEST_MODE）は
+// config.gs に分離している。config.gs は git 管理外（実値はローカルのみ）だが
+// clasp では push されるため本番の設定は保持される。
+// 新規セットアップ時は config.gs.example をコピーして config.gs を作成すること。
 
 // 送信者として表示する名前
 var SENDER_NAME = "外勤調整システム";
 
-// マスタデータ用スプレッドシートID（必須）
-var MASTER_SPREADSHEET_ID = "";
-
-// 管理者メールアドレス（カンマ区切りで複数指定可）
-// 例: "admin1@example.com, admin2@example.com"
-var ADMIN_EMAIL = "";
-
-// テストモード（本番運用時は false に変更してください）
-var TEST_MODE = false;
+// テスト送信時の注記
 var TEST_NOTICE = "【テスト送信】このメールはテストです。記載の外勤先は実際のものではありません。実際の外勤先は別途ご確認ください。\n\n";
 
 // ---- スプレッドシート取得（リクエスト内キャッシュ） ----

@@ -1,0 +1,4 @@
+# 本番 /exec の deploymentId をこのファイル(scripts/.gas_deploy_id)に1行で記載する。
+# = secrets の gas_webapp_url  https://script.google.com/macros/s/【ここ】/exec の【ここ】部分。
+# このファイル(.gas_deploy_id)は git 管理外。.example の方をコミットする。
+AKfycb....................................................

@@ -1,0 +1,20 @@
+/**
+ * 環境依存の設定値テンプレート。
+ *
+ * このファイルをコピーして config.gs を作成し、実際の値を設定すること。
+ *   cp gas/config.gs.example gas/config.gs
+ *
+ * config.gs は git 管理外（.gitignore 済み）。clasp では push されるため、
+ * 本番の設定（MASTER_SPREADSHEET_ID 等）はこのファイル経由で保持される。
+ */
+
+// マスタデータ用スプレッドシートID（必須）
+// スプレッドシートURL https://docs.google.com/spreadsheets/d/【ここがID】/edit
+var MASTER_SPREADSHEET_ID = "";
+
+// 管理者メールアドレス（カンマ区切りで複数指定可）
+// 例: "admin1@example.com, admin2@example.com"
+var ADMIN_EMAIL = "";
+
+// テストモード（本番運用時は false に変更してください）
+var TEST_MODE = false;
