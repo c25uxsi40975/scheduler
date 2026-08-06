@@ -394,7 +394,10 @@ function getSheet(ss, name) {
 /**
  * 医員マスタを {id: {name, email}} のマップで取得
  */
-function getDoctorMap(ss) {
+// includeInactive=true のとき is_active=0 の医員も含める（平日カレンダー同期用。
+// 平日は土曜の無効化に依存しないため、名前解決・個人カレンダーで必要）。
+// 既定(false)では従来どおり無効医員を除外（通知等が無効医員に届かないように）。
+function getDoctorMap(ss, includeInactive) {
   var sheet = getSheet(ss, "医員マスタ");
   if (!sheet) return {};
 
@@ -415,7 +418,7 @@ function getDoctorMap(ss) {
   var map = {};
   for (var i = 1; i < data.length; i++) {
     var row = data[i];
-    if (String(row[colActive]) === "0") continue;
+    if (!includeInactive && String(row[colActive]) === "0") continue;
     map[String(row[colId])] = {
       name: String(row[colName]),
       email: String(row[colEmail] || "").trim(),

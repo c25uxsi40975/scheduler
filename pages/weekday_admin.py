@@ -186,7 +186,7 @@ def _render_members(section: str, cfg: dict, assigned_doctor_ids: list):
     """メンバー管理タブ"""
     st.subheader("所属メンバー")
 
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     doc_map = build_display_name_map(all_doctors)
     doc_ids = [d["id"] for d in all_doctors]
 
@@ -216,7 +216,7 @@ def _render_specimen_management(section: str, cfg: dict, assigned_doctor_ids: li
     days_label = "・".join(DAY_NAMES.get(d, str(d)) for d in specimen_days) if specimen_days else "未設定"
     st.info(f"検体確認機能: **有効**　｜　対象曜日: **{days_label}**（主管理者が設定）")
 
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     doc_map = build_display_name_map(all_doctors)
     doc_ids = [d["id"] for d in all_doctors]
 
@@ -914,7 +914,7 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
 
     slots = get_weekday_slots(section)
     active_slots = [s for s in slots if s.get("is_active", 1)]
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     doc_map = build_display_name_map(all_doctors)
     assigned_doctors = [d for d in all_doctors if d["id"] in assigned_doctor_ids]
 
@@ -1002,7 +1002,7 @@ def _render_schedule(section: str, cfg: dict, assigned_doctor_ids: list, days_of
         st.info("スロットが登録されていません。「スロット管理」タブで設定してください。")
         return
 
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     doc_map = build_display_name_map(all_doctors)
     assigned_doctors = [d for d in all_doctors if d["id"] in assigned_doctor_ids]
 
@@ -1549,7 +1549,7 @@ def _render_readjust(section: str, cfg: dict, assigned_doctor_ids: list, days_of
     st.subheader("スケジュール再調整")
 
     # ---- 共通データ取得（1回のみ） ----
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     doc_map = build_display_name_map(all_doctors)
     assigned_doctors = [d for d in all_doctors if d["id"] in assigned_doctor_ids]
 

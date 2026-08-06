@@ -242,7 +242,7 @@ def _render_schedule_all(doctor: dict, section: str, cfg: dict):
 
     # 全月の自分の割り当て数を集計
     all_my_count = 0
-    all_doctors = get_doctors()
+    all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
     slots = get_weekday_slots(section)
 
     for ym in confirmed_months:
@@ -337,7 +337,7 @@ def _render_month_schedule(doctor: dict, section: str, cfg: dict, view_month: st
 
     if view_mode == "calendar":
         # カレンダー表示（全メンバー表示）
-        all_doctors = get_doctors()
+        all_doctors = get_doctors(active_only=False)  # 平日は土曜の無効化(is_active)に波及させない
         render_weekday_calendar(schedule, slots, view_month, all_doctors,
                                 highlight_doctor_id=doctor["id"])
     else:

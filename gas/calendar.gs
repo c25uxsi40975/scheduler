@@ -514,7 +514,8 @@ function syncWeekdayCalendar(data, ssMaster) {
     return;
   }
 
-  var doctors = getDoctorMap(ssMaster);
+  // 平日は土曜の無効化(is_active)に依存しない → 無効医員も名前解決・個人カレンダー対象に含める
+  var doctors = getDoctorMap(ssMaster, true);
   var createdCount = 0;
   var allPersonalEvents = [];
   var allPersonalDoctorIds = [];
