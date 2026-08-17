@@ -88,6 +88,7 @@ OPERATIONAL_SHEETS_INFO = {
     "希望_YYYY-MM": [
         "doctor_id", "doctor_name", "ng_dates", "avoid_dates",
         "preferred_clinics", "date_clinic_requests", "free_text", "updated_at",
+        "post_night_dates", "unset_dates",
     ],
     "スケジュール_YYYY-MM": [
         "id", "plan_name", "assignments", "total_variance",

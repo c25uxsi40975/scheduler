@@ -72,6 +72,8 @@ def render(doctor, target_month, year, month):
     existing_ng = set(existing["ng_dates"]) if existing else set()
     existing_avoid = set(existing["avoid_dates"]) if existing else set()
     existing_post_night = set(existing["post_night_dates"]) if existing else set()
+    # 管理者の代理入力で「-」のまま残された日（○ とは区別して表示する）
+    existing_unset = set(existing.get("unset_dates") or []) if existing else set()
 
     # 日程の希望入力（○/当直明け○/△/×）
     st.subheader("日程の希望")
@@ -156,6 +158,8 @@ def render(doctor, target_month, year, month):
                 sat_strs.append(f"**{label}** △")
             elif ds in existing_post_night:
                 sat_strs.append(f"**{label}** 当直明け○")
+            elif ds in existing_unset:
+                sat_strs.append(f"**{label}** -（未入力）")
             else:
                 sat_strs.append(f"**{label}** ○")
         st.write("　".join(sat_strs))
