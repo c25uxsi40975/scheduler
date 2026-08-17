@@ -26,7 +26,7 @@ _pref_header_order = {}  # {year_month: [実際のヘッダー順]}
 
 _PREF_HEADERS = ["doctor_id", "doctor_name", "ng_dates", "avoid_dates",
                  "preferred_clinics", "date_clinic_requests", "free_text", "updated_at",
-                 "post_night_dates"]
+                 "post_night_dates", "unset_dates"]
 
 
 def _get_pref_sheet(year_month):
@@ -72,6 +72,8 @@ def get_all_preferences(year_month):
         r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
         r["date_clinic_requests"] = _safe_json_loads(r.get("date_clinic_requests"), default={})
         r["post_night_dates"] = _safe_json_loads(r.get("post_night_dates"))
+        # 未入力日（代理入力で「-」のまま残された日付）。○ とは区別する
+        r["unset_dates"] = _safe_json_loads(r.get("unset_dates"))
         r["free_text"] = str(r.get("free_text", "") or "")
         result.append(r)
     return result
@@ -107,6 +109,7 @@ def get_dev_preferences(year_month):
         r["preferred_clinics"] = _safe_json_loads(r.get("preferred_clinics"))
         r["date_clinic_requests"] = _safe_json_loads(r.get("date_clinic_requests"), default={})
         r["post_night_dates"] = _safe_json_loads(r.get("post_night_dates"))
+        r["unset_dates"] = _safe_json_loads(r.get("unset_dates"))
         r["free_text"] = str(r.get("free_text", "") or "")
         result.append(r)
     return result
@@ -114,7 +117,7 @@ def get_dev_preferences(year_month):
 
 def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
                       preferred_clinics=None, date_clinic_requests=None, free_text=None,
-                      post_night_dates=None):
+                      post_night_dates=None, unset_dates=None):
     ws = _get_pref_sheet(year_month)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -133,6 +136,7 @@ def upsert_preference(doctor_id, year_month, ng_dates=None, avoid_dates=None,
         "free_text": _sanitize_cell_value(free_text or ""),
         "updated_at": now,
         "post_night_dates": json.dumps(post_night_dates or []),
+        "unset_dates": json.dumps(unset_dates or []),
     }
 
     # シートの実際のヘッダー順に合わせてデータを配置
@@ -172,7 +176,7 @@ def batch_upsert_preferences(year_month, items: list[dict]):
 
     items: [{"doctor_id": int, "ng_dates": [...], "avoid_dates": [...],
              "preferred_clinics": [...], "date_clinic_requests": {...},
-             "free_text": str}, ...]
+             "free_text": str, "unset_dates": [...]}, ...]
     """
     if not items:
         return
@@ -207,6 +211,7 @@ def batch_upsert_preferences(year_month, items: list[dict]):
             "free_text": item.get("free_text") or "",
             "updated_at": now,
             "post_night_dates": json.dumps(item.get("post_night_dates") or []),
+            "unset_dates": json.dumps(item.get("unset_dates") or []),
         }
         row_data = [data_map.get(h, "") for h in actual_headers]
         row_idx = id_to_row.get(str(did))

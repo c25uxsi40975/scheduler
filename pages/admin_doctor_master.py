@@ -12,9 +12,13 @@ from database import (
     batch_update_max_assignments,
     get_clinics,
     get_all_preferences, upsert_preference, batch_upsert_preferences,
+    delete_preference,
 )
 from optimizer import get_target_saturdays
 from components.display_utils import build_display_name_map, inject_master_css
+
+# 日程希望マトリクスの「未入力」を表す表示値（○=可能 とは区別する）
+PREF_UNSET = "-"
 
 
 def render(target_month, year, month):
@@ -285,7 +289,14 @@ def _render_pref_overview(target_month, year, month):
     data = []
     for d in doctors:
         p = pref_map.get(d["id"])
-        row = {"医員": _dmap.get(d["id"], d["name"]), "入力済": "済" if p else "-"}
+        unset = set(p.get("unset_dates") or []) if p else set()
+        if not p:
+            input_status = "-"
+        elif unset & {s.isoformat() for s in saturdays}:
+            input_status = "一部"  # 「-」のまま残っている日がある
+        else:
+            input_status = "済"
+        row = {"医員": _dmap.get(d["id"], d["name"]), "入力済": input_status}
         if p:
             ng = set(p.get("ng_dates", []))
             avoid = set(p.get("avoid_dates", []))
@@ -293,6 +304,10 @@ def _render_pref_overview(target_month, year, month):
             dcr = p.get("date_clinic_requests", {})
             for s, s_str in zip(saturdays, sat_strs):
                 ds = s.isoformat()
+                if ds in unset:
+                    # 代理入力で「-」のまま残された日。○ 扱いにはしない
+                    row[s_str] = "-"
+                    continue
                 if ds in ng:
                     mark = "×"
                 elif ds in avoid:
@@ -317,7 +332,7 @@ def _render_pref_overview(target_month, year, month):
         data.append(row)
 
     df = pd.DataFrame(data)
-    st.caption("○ 可能 ／ ○(明) 当直明け○(PMのみ) ／ △ できれば避けたい ／ × NG")
+    st.caption("○ 可能 ／ ○(明) 当直明け○(PMのみ) ／ △ できれば避けたい ／ × NG ／ - 未入力")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     submitted = sum(1 for _ in pref_map.values())
@@ -335,10 +350,82 @@ def _render_pref_overview(target_month, year, month):
             st.write(f"**{name}**: {text}")
 
 
+def _classify_pref_row(doctor_id, pref, cell_map):
+    """代理入力1行分の編集結果を保存内容に変換する（純粋関数・UI非依存）
+
+    「-」は未入力を意味し、○（可能）としては保存しない。
+
+    Args:
+        doctor_id: 医員ID
+        pref: 既存の希望レコード（未入力なら None）
+        cell_map: {date_str: "○" / "当○" / "△" / "×" / "-"} 編集後のセル値
+
+    Returns:
+        (action, payload)
+          "skip"  … 保存不要（未入力のまま／変更なし）
+          "save"  … payload を batch_upsert_preferences に渡す
+          "reset" … 希望レコードを削除して未入力へ戻す
+    """
+    new_ng, new_avoid, new_pn, new_unset = [], [], [], []
+    answered = False
+    for ds, val in cell_map.items():
+        if val == "×":
+            new_ng.append(ds)
+        elif val == "△":
+            new_avoid.append(ds)
+        elif val == "当○":
+            new_pn.append(ds)
+        elif val == "○":
+            pass  # ○ はどのリストにも入れない（= 可能）
+        else:
+            # 「-」および空値は未入力。○ には変換しない
+            new_unset.append(ds)
+            continue
+        answered = True
+
+    if not answered:
+        if pref is None:
+            # 触っていない未入力者。行を作らない（全日 ○ での誤登録を防ぐ）
+            return "skip", None
+        has_other_input = bool(
+            pref.get("free_text")
+            or pref.get("date_clinic_requests")
+            or pref.get("preferred_clinics")
+        )
+        if not has_other_input:
+            # 日程が全て「-」で他の入力もない → 未入力へ戻す
+            return "reset", None
+
+    payload = {
+        "doctor_id": doctor_id,
+        "ng_dates": new_ng,
+        "avoid_dates": new_avoid,
+        "post_night_dates": new_pn,
+        "unset_dates": new_unset,
+        "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
+        "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
+        "free_text": pref.get("free_text", "") if pref else "",
+    }
+    if pref is None:
+        return "save", payload
+
+    unchanged = (
+        set(new_ng) == set(pref.get("ng_dates") or [])
+        and set(new_avoid) == set(pref.get("avoid_dates") or [])
+        and set(new_pn) == set(pref.get("post_night_dates") or [])
+        and set(new_unset) == set(pref.get("unset_dates") or [])
+    )
+    if unchanged:
+        return "skip", None
+    return "save", payload
+
+
 def _render_pref_matrix(target_month, year, month):
     """日程希望の代理入力（医員×日付 ○/当○/△/×）"""
     st.subheader("日程希望 — 代理入力")
     st.caption("管理者が医員の日程希望をまとめて入力できます（○=可能 当○=当直明け(PMのみ) △=できれば避けたい ×=NG）")
+    st.caption("「-」は未入力です。「-」のままの日は ○ として登録されません。"
+               "全ての日を「-」に戻して保存すると、その医員は未入力の状態に戻ります。")
 
     doctors = get_doctors()
     if not doctors:
@@ -387,11 +474,15 @@ def _render_pref_matrix(target_month, year, month):
         ng_set = set(pref.get("ng_dates", [])) if pref else set()
         avoid_set = set(pref.get("avoid_dates", [])) if pref else set()
         pn_set = set(pref.get("post_night_dates", [])) if pref else set()
+        unset_set = set(pref.get("unset_dates") or []) if pref else set()
         row = {}
         for s in saturdays:
             ds = s.isoformat()
             col_label = s.strftime("%m/%d(%a)")
-            if ds in ng_set:
+            if ds in unset_set:
+                # 「-」で保存された日は「-」のまま表示する
+                row[col_label] = PREF_UNSET
+            elif ds in ng_set:
                 row[col_label] = "×"
             elif ds in avoid_set:
                 row[col_label] = "△"
@@ -400,13 +491,13 @@ def _render_pref_matrix(target_month, year, month):
             elif submitted:
                 row[col_label] = "○"
             else:
-                row[col_label] = "-"
+                row[col_label] = PREF_UNSET
         matrix_data[row_label] = row
 
     df_schedule = pd.DataFrame.from_dict(matrix_data, orient="index")
     schedule_col_config = {
         col: st.column_config.SelectboxColumn(
-            col, options=["-"] + SCHEDULE_STATUS, default="-", width="small",
+            col, options=[PREF_UNSET] + SCHEDULE_STATUS, default=PREF_UNSET, width="small",
         )
         for col in df_schedule.columns
     }
@@ -417,10 +508,16 @@ def _render_pref_matrix(target_month, year, month):
         key="schedule_matrix",
     )
 
-    # ---- ヘルパー: 編集結果から batch_items を構築 ----
-    def _build_batch_items(target_docs):
-        """target_docs に含まれる医員の変更を収集"""
+    # ---- ヘルパー: 編集結果から保存対象を収集 ----
+    def _collect_changes(target_docs):
+        """target_docs に含まれる医員の変更を収集
+
+        Returns: (items, reset_ids)
+          items     … batch_upsert_preferences へ渡す保存内容
+          reset_ids … 未入力へ戻す（希望レコードを削除する）医員ID
+        """
         items = []
+        reset_ids = []
         for d in target_docs:
             pref = pref_map_3b.get(d["id"])
             submitted = pref is not None
@@ -428,36 +525,31 @@ def _render_pref_matrix(target_month, year, month):
             row_label = f"{_dmap_3b.get(d['id'], d['name'])}({rank_labels_3b.get(d.get('job_rank', 0), '')}){suffix}"
             if row_label not in edited_schedule_df.index:
                 continue
-            old_ng = set(pref.get("ng_dates", [])) if pref else set()
-            old_avoid = set(pref.get("avoid_dates", [])) if pref else set()
-            old_pn = set(pref.get("post_night_dates", [])) if pref else set()
 
-            new_ng = []
-            new_avoid = []
-            new_pn = []
-            for s in saturdays:
-                ds = s.isoformat()
-                col_label = s.strftime("%m/%d(%a)")
-                val = edited_schedule_df.at[row_label, col_label]
-                if val == "×":
-                    new_ng.append(ds)
-                elif val == "△":
-                    new_avoid.append(ds)
-                elif val == "当○":
-                    new_pn.append(ds)
-                # "-" と "○" は何もリストに追加しない（=可能）
+            cell_map = {
+                s.isoformat(): edited_schedule_df.at[row_label, s.strftime("%m/%d(%a)")]
+                for s in saturdays
+            }
+            action, payload = _classify_pref_row(d["id"], pref, cell_map)
+            if action == "save":
+                items.append(payload)
+            elif action == "reset":
+                reset_ids.append(d["id"])
+        return items, reset_ids
 
-            if not pref or set(new_ng) != old_ng or set(new_avoid) != old_avoid or set(new_pn) != old_pn:
-                items.append({
-                    "doctor_id": d["id"],
-                    "ng_dates": new_ng,
-                    "avoid_dates": new_avoid,
-                    "post_night_dates": new_pn,
-                    "preferred_clinics": pref.get("preferred_clinics", []) if pref else [],
-                    "date_clinic_requests": pref.get("date_clinic_requests", {}) if pref else {},
-                    "free_text": pref.get("free_text", "") if pref else "",
-                })
-        return items
+    def _apply_changes(target_docs):
+        """収集した変更を保存し、結果メッセージを返す"""
+        items, reset_ids = _collect_changes(target_docs)
+        if items:
+            batch_upsert_preferences(target_month, items)
+        for did in reset_ids:
+            delete_preference(did, target_month)
+        parts = []
+        if items:
+            parts.append(f"{len(items)}名を保存")
+        if reset_ids:
+            parts.append(f"{len(reset_ids)}名を未入力に戻しました")
+        return "／".join(parts) if parts else "変更はありませんでした"
 
     # ---- 保存ボタン ----
     btn_cols = st.columns(2)
@@ -468,22 +560,33 @@ def _render_pref_matrix(target_month, year, month):
             key="save_schedule_unsubmitted",
             disabled=len(unsubmitted_docs) == 0,
         ):
-            batch_items = _build_batch_items(unsubmitted_docs)
-            if batch_items:
-                batch_upsert_preferences(target_month, batch_items)
-                st.session_state["_save_msg"] = f"未入力者の日程希望を保存しました（{len(batch_items)}名）"
-            else:
-                st.session_state["_save_msg"] = "変更はありませんでした"
+            st.session_state["_save_msg"] = _apply_changes(unsubmitted_docs)
             st.rerun()
     with btn_cols[1]:
         if st.button("全員を一括保存", key="save_schedule_matrix"):
-            batch_items = _build_batch_items(display_docs)
-            if batch_items:
-                batch_upsert_preferences(target_month, batch_items)
-                st.session_state["_save_msg"] = f"日程希望を保存しました（{len(batch_items)}名変更）"
-            else:
-                st.session_state["_save_msg"] = "変更はありませんでした"
+            st.session_state["_save_msg"] = _apply_changes(display_docs)
             st.rerun()
+
+    # ---- 誤登録を未入力に戻す ----
+    with st.expander("誤って登録された希望を未入力に戻す", expanded=False):
+        st.caption("代理入力で誤って登録された医員を選び、未入力（全て「-」）の状態に戻します。"
+                   "選んだ医員の希望データは削除されます。")
+        if not submitted_docs:
+            st.info("入力済みの医員はいません")
+        else:
+            reset_targets = st.multiselect(
+                "対象医員",
+                [d["id"] for d in submitted_docs],
+                format_func=lambda did: _dmap_3b.get(did, str(did)),
+                key="pref_reset_targets",
+            )
+            if reset_targets:
+                st.warning(f"{len(reset_targets)}名の希望データ（備考・外勤先希望を含む）を削除します。元に戻せません。")
+                if st.button("未入力に戻す", key="pref_reset_exec"):
+                    for did in reset_targets:
+                        delete_preference(did, target_month)
+                    st.session_state["_save_msg"] = f"{len(reset_targets)}名を未入力に戻しました"
+                    st.rerun()
 
 
 def _render_pref_detail(target_month, year, month):
@@ -515,6 +618,8 @@ def _render_pref_detail(target_month, year, month):
 
         existing_ng = set(pref.get("ng_dates", [])) if pref else set()
         existing_avoid = set(pref.get("avoid_dates", [])) if pref else set()
+        existing_pn = set(pref.get("post_night_dates") or []) if pref else set()
+        existing_unset = set(pref.get("unset_dates") or []) if pref else set()
         existing_dcr = pref.get("date_clinic_requests", {}) if pref else {}
         existing_free_text = pref.get("free_text", "") if pref else ""
 
@@ -534,7 +639,14 @@ def _render_pref_detail(target_month, year, month):
                     if ds in existing_ng:
                         st.caption(s.strftime("%m/%d") + " ×NG")
                         continue
-                    status = "△" if ds in existing_avoid else "○"
+                    if ds in existing_avoid:
+                        status = "△"
+                    elif ds in existing_pn:
+                        status = "当○"
+                    elif ds in existing_unset:
+                        status = "-"
+                    else:
+                        status = "○"
                     existing_cid = existing_dcr.get(ds, 0)
                     if isinstance(existing_cid, str):
                         existing_cid = int(existing_cid) if existing_cid.isdigit() else 0
@@ -571,6 +683,8 @@ def _render_pref_detail(target_month, year, month):
                     preferred_clinics=pref.get("preferred_clinics", []) if pref else [],
                     date_clinic_requests=new_dcr,
                     free_text=new_free_text,
+                    post_night_dates=list(existing_pn),
+                    unset_dates=list(existing_unset),
                 )
                 st.session_state["_save_msg"] = f"「{selected_doctor_dcr['name']}」の外勤先希望・備考を保存しました"
                 st.rerun()

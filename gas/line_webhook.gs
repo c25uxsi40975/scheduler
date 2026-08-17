@@ -655,7 +655,7 @@ function savePreference(session, doctor) {
     sheet.appendRow([
       "doctor_id", "doctor_name", "ng_dates", "avoid_dates",
       "preferred_clinics", "date_clinic_requests", "free_text",
-      "updated_at", "post_night_dates"
+      "updated_at", "post_night_dates", "unset_dates"
     ]);
   }
 
@@ -686,7 +686,9 @@ function savePreference(session, doctor) {
     "date_clinic_requests": "{}",
     "free_text": session.free_text || "",
     "updated_at": now,
-    "post_night_dates": JSON.stringify(postNightDates)
+    "post_night_dates": JSON.stringify(postNightDates),
+    // LINE入力では全日程を回答するため、未入力日は残さない
+    "unset_dates": "[]"
   };
   var rowData = headers.map(function(h) { return dataMap[h] !== undefined ? dataMap[h] : ""; });
 

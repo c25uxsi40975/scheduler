@@ -131,7 +131,7 @@ ml_adjuster.py → optimizer.py (get_target_saturdays, get_clinic_dates)
 | 優先度マスタ | 医員-外勤先の優先度 | doctor_id, clinic_id, weight(◎=2.0/○=1.0/×=0.0) |
 | 日別設定 | 外勤先の日別オーバーライド | clinic_id, date, required_doctors(0=休診/1=通常/2=2人体制) |
 | 設定 | アプリ設定 | key, value（admin_password, open_month, input_deadline 等） |
-| 希望_YYYY-MM | 医員の月次希望（月ごと自動作成） | doctor_id, doctor_name, ng_dates, avoid_dates, preferred_clinics, date_clinic_requests, free_text, updated_at |
+| 希望_YYYY-MM | 医員の月次希望（月ごと自動作成） | doctor_id, doctor_name, ng_dates, avoid_dates, preferred_clinics, date_clinic_requests, free_text, updated_at, post_night_dates, unset_dates |
 | スケジュール_YYYY-MM | 生成スケジュール（月ごと自動作成） | id, plan_name, assignments(JSON), total_variance, satisfaction_score, is_confirmed, created_at |
 
 ### 重要: カラム順序の安全性
@@ -172,8 +172,13 @@ ml_adjuster.py → optimizer.py (get_target_saturdays, get_clinic_dates)
 | 記号 | 保存先 | 意味 | 最適化への反映 |
 |---|---|---|---|
 | ○ | (該当なし) | 出勤可能 | 制約なし |
+| 当○ | post_night_dates | 当直明け（PMのみ可） | PM以外の外勤先へは割り当て禁止 |
 | △ | avoid_dates | できれば避けたい | ソフトペナルティ |
 | × | ng_dates | NG（出勤不可） | ハード制約（割り当て禁止） |
+| - | unset_dates | 未入力（代理入力で「-」のまま） | 制約なし（○ と同じ扱い。表示のみ区別） |
+
+> 代理入力（管理者→医員）では「-」は未入力を意味し、○ として保存されない。
+> 全ての日を「-」に戻して保存すると、その医員の希望レコードは削除され未入力に戻る。
 
 ---
 
