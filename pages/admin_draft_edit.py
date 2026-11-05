@@ -57,7 +57,7 @@ def render(target_month, year, month):
 
 def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_month, year, month, clinics):
     """スケジュールの手動調整UI（セル単位のSelectbox格子）"""
-    st.info("担当医員を選択してください。⛔ はNG日、⚠ は『できれば避けたい』日の医員です。スマホでは「タップ編集（スマホ向け）」表示が便利です。")
+    st.info("担当医員を選択してください。⛔ はNG日、⚠ は『できれば避けたい』日の医員です。スマホでは「月表で編集（スマホ向け）」表示が便利です。")
 
     constraints = _build_constraint_data(doctors, prefs, affinities, clinic_map)
     assignments = sched["assignments"]
@@ -436,7 +436,7 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
 
     表示形式は2種類:
       - 表形式（PC向け）: 日付×外勤先のSelectbox格子
-      - タップ編集（スマホ向け）: 外勤先×日付の表のセルをタップし、ダイアログで医員を選択
+      - 月表で編集（スマホ向け）: 外勤先×日付の表のセルを直接タップして医員を選択
 
     編集中の値は表示形式をまたいで保持するため session_state の辞書に集約する。
 
@@ -510,18 +510,20 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
 
     layout = st.radio(
         "表示形式",
-        ["表形式（PC向け）", "タップ編集（スマホ向け）"],
+        ["表形式（PC向け）", "月表で編集（スマホ向け）"],
         horizontal=True,
         key="_draft_edit_layout",
     )
 
-    if layout.startswith("タップ"):
-        _render_tap_table(
+    if layout.startswith("月表"):
+        _render_table_editor(
             dates, clinics_in_sched, clinic_id_to_name, doc_id_to_name,
-            edits, _is_closed, _make_fmt, _options_for,
+            edits, _is_closed, ng_map, avoid_map, _options_for,
             target_month, sched_id, edit_ver,
         )
     else:
+        # 表編集の元データは表示を離れたら破棄（戻ったときに最新内容で作り直す）
+        st.session_state.pop(f"_draft_table_base_{target_month}_{sched_id}_v{edit_ver}", None)
         # ヘッダー行
         header_cols = st.columns([1.2] + [2] * len(clinics_in_sched))
         header_cols[0].markdown("**日付**")
@@ -565,133 +567,131 @@ def _render_selectbox_grid(dates, clinics_in_sched, slot_map, doctors,
 _WEEKDAY_JA = "月火水木金土日"
 
 
-def _render_tap_table(dates, clinics_in_sched, clinic_id_to_name, doc_id_to_name,
-                      edits, is_closed, make_fmt, options_for,
-                      target_month, sched_id, edit_ver):
-    """スマホ向け: 月全体の表（行=外勤先, 列=日付）を表示し、セルをタップして医員を選ぶ
+def _render_table_editor(dates, clinics_in_sched, clinic_id_to_name, doc_id_to_name,
+                         edits, is_closed, ng_map, avoid_map, options_for,
+                         target_month, sched_id, edit_ver):
+    """スマホ向け: 月全体の表（行=外勤先, 列=日付）をそのまま編集する
 
-    日付（土曜）は月4〜5列程度なので、行を外勤先にするとスマホ幅に収まりやすい。
-    セルをタップするとダイアログが開き、大きなボタンで医員を選べる。
+    セルをタップ（ダブルタップ）すると、その場に医員の候補リストが出る。
+    日付（土曜）は月4〜5列なので、行を外勤先にするとスマホ幅に収まりやすい。
     """
+    import pandas as pd
+
+    EMPTY = "（空き）"
+    CLOSED = "-"
+
     def _short(ds):
         return date.fromisoformat(ds).strftime("%m/%d")
 
     def _col_label(ds):
+        # 列幅を節約するため、土曜は曜日を省略する
         d = date.fromisoformat(ds)
+        if d.weekday() == 5:
+            return f"{d.month}/{d.day}"
         return f"{d.month}/{d.day}({_WEEKDAY_JA[d.weekday()]})"
 
-    col_to_ds = {_col_label(ds): ds for ds in dates}
+    # 同名の医員がいても区別できるようにする
+    name_count = {}
+    for n in doc_id_to_name.values():
+        name_count[n] = name_count.get(n, 0) + 1
 
-    # 医員ごとの今月の割当（編集中の値ベース）
+    def _name(did):
+        n = doc_id_to_name.get(did, f"ID:{did}")
+        return f"{n}({did})" if name_count.get(n, 0) > 1 else n
+
+    def _cell_label(ds, did):
+        if ds in ng_map.get(did, set()):
+            return f"⛔{_name(did)}"
+        if ds in avoid_map.get(did, set()):
+            return f"⚠{_name(did)}"
+        return _name(did)
+
+    all_ids = sorted(doc_id_to_name, key=lambda x: doc_id_to_name.get(x, ""))
+    col_to_ds = {_col_label(ds): ds for ds in dates}
+    # 列（日付）ごとの選択肢。NG/△ はその日付の候補名に印を付ける
+    label_to_id = {}
+    column_config = {"_index": st.column_config.TextColumn(width="small", disabled=True)}
+    for col, ds in col_to_ds.items():
+        mapping = {EMPTY: ""}
+        for did in all_ids:
+            mapping[_cell_label(ds, did)] = did
+        label_to_id[col] = mapping
+        column_config[col] = st.column_config.SelectboxColumn(
+            col, options=list(mapping.keys()), width="small",
+        )
+
+    def _snapshot():
+        rows = []
+        for cid in clinics_in_sched:
+            row = {}
+            for col, ds in col_to_ds.items():
+                did = edits.get((ds, cid))
+                if is_closed(ds, cid):
+                    row[col] = CLOSED
+                elif not did:
+                    row[col] = EMPTY
+                else:
+                    row[col] = _cell_label(ds, did)
+            rows.append(row)
+        index = [clinic_id_to_name.get(cid, "?") for cid in clinics_in_sched]
+        return pd.DataFrame(rows, index=index, columns=list(col_to_ds.keys()))
+
+    # data_editor は「元の表＋差分」で状態を持つため、元の表は表示中は固定しておく。
+    # 他の表示形式から戻ってきたときは最新の編集内容で作り直す。
+    base_key = f"_draft_table_base_{target_month}_{sched_id}_v{edit_ver}"
+    nonce_key = f"_draft_table_nonce_{target_month}_{sched_id}"
+    if base_key not in st.session_state:
+        st.session_state[base_key] = _snapshot()
+        st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
+    base = st.session_state[base_key]
+
+    st.caption("セルをタップ（2回）すると医員を選べます。⛔＝NG日、⚠＝『できれば避けたい』日。")
+    out = st.data_editor(
+        base,
+        key=f"_draft_table_{target_month}_{sched_id}_v{edit_ver}_{st.session_state[nonce_key]}",
+        column_config=column_config,
+        num_rows="fixed",
+        height=min(35 * (len(clinics_in_sched) + 1) + 3, 800),
+    )
+
+    # 編集結果を edits に反映
+    problems = []
+    for r, cid in enumerate(clinics_in_sched):
+        cname = clinic_id_to_name.get(cid, "?")
+        for col, ds in col_to_ds.items():
+            val = out.iloc[r][col]
+            if is_closed(ds, cid):
+                if val not in (CLOSED, None, EMPTY) and not pd.isna(val):
+                    problems.append(f"{_short(ds)} {cname} は休診のため変更できません")
+                continue
+            if val is None or (isinstance(val, float) and pd.isna(val)):
+                val = EMPTY
+            did = label_to_id[col].get(val)
+            if did is None:
+                continue
+            if did and did not in options_for(cid, edits.get((ds, cid)) or ""):
+                problems.append(f"{_short(ds)} {cname}：{_name(did)} はこの外勤先の担当対象外です")
+                continue
+            edits[(ds, cid)] = did
+    for msg in problems:
+        st.error(msg)
+
+    # 医員ごとの今月の割当回数（月内の偏り確認用）
     doc_slots = {}
     for ds in dates:
         for cid in clinics_in_sched:
             did = edits.get((ds, cid))
             if did and not is_closed(ds, cid):
                 doc_slots.setdefault(did, []).append((ds, cid))
-
-    # ---- 表の構築 ----
-    import pandas as pd
-    rows, styles = [], []
-    for cid in clinics_in_sched:
-        row, style = {}, {}
-        for ds in dates:
-            col = _col_label(ds)
-            did = edits.get((ds, cid))
-            if is_closed(ds, cid):
-                row[col], style[col] = "-", "color:#999999"
-            elif not did:
-                row[col], style[col] = "空き", "color:#d00000;font-weight:bold"
-            else:
-                label = make_fmt(ds)(did).replace("（×NG）", "").replace("（△）", "")
-                row[col] = label
-                if label.startswith("⛔"):
-                    style[col] = "background-color:#ffd6d6"
-                elif label.startswith("⚠"):
-                    style[col] = "background-color:#fff3c4"
-                else:
-                    style[col] = ""
-        rows.append(row)
-        styles.append(style)
-    index = [clinic_id_to_name.get(cid, "?") for cid in clinics_in_sched]
-    df = pd.DataFrame(rows, index=index, columns=list(col_to_ds.keys()))
-    style_df = pd.DataFrame(styles, index=index, columns=list(col_to_ds.keys()))
-    styled = df.style.apply(lambda _: style_df, axis=None)
-
-    # セル選択でダイアログを開く。選択は1回ごとにリセットする（同じセルを再タップできるように）
-    nonce_key = f"_draft_tap_nonce_{target_month}_{sched_id}"
-    pending_key = f"_draft_tap_pending_{target_month}_{sched_id}"
-    nonce = st.session_state.get(nonce_key, 0)
-    table_key = f"_draft_tap_table_{target_month}_{sched_id}_v{edit_ver}_{nonce}"
-
-    def _on_select():
-        cells = st.session_state[table_key].selection.cells
-        if cells:
-            r, col = cells[0]
-            ds = col_to_ds.get(col)
-            if ds is not None and 0 <= r < len(clinics_in_sched):
-                cid = clinics_in_sched[r]
-                if not is_closed(ds, cid):
-                    st.session_state[pending_key] = (ds, cid)
-                    st.session_state[nonce_key] = nonce + 1
-
-    st.caption("セルをタップすると医員を選べます。赤背景＝NG日、黄背景＝『できれば避けたい』日。")
-    st.dataframe(
-        styled,
-        key=table_key,
-        on_select=_on_select,
-        selection_mode="single-cell",
-        height=min(35 * (len(clinics_in_sched) + 1) + 3, 800),
-        column_config={
-            "_index": st.column_config.TextColumn(width="small"),
-            **{c: st.column_config.TextColumn(width="small") for c in col_to_ds},
-        },
-    )
-
-    with st.expander("医員ごとの割当状況（今月）"):
+    with st.expander("医員ごとの割当回数（今月）", expanded=False):
         lines = []
-        for did, name in sorted(doc_id_to_name.items(), key=lambda x: x[1]):
+        for did in all_ids:
             slots = doc_slots.get(did, [])
             detail = "、".join(
                 f"{_short(ds)} {clinic_id_to_name.get(cid, '?')}" for ds, cid in slots
             )
-            lines.append(f"- **{name}**：{len(slots)}回" + (f"（{detail}）" if detail else ""))
+            lines.append(f"- **{_name(did)}**：{len(slots)}回" + (f"（{detail}）" if detail else ""))
         st.markdown("\n".join(lines))
-
-    pending = st.session_state.pop(pending_key, None)
-    if not pending:
-        return
-    p_ds, p_cid = pending
-
-    def _picker():
-        current = edits.get((p_ds, p_cid)) or ""
-        fmt = make_fmt(p_ds)
-        if current:
-            st.markdown(f"現在：**{fmt(current)}**")
-        else:
-            st.markdown("現在：:red[**空き**]")
-        for did in options_for(p_cid, current):
-            if not did:
-                label = "（未割当にする）"
-            else:
-                slots = doc_slots.get(did, [])
-                others = [d for d, _ in slots if d != p_ds]
-                label = f"{fmt(did)}　今月{len(slots)}回"
-                if others:
-                    label += f"（{'・'.join(_short(d) for d in others)}）"
-            if did == current:
-                label = "✓ " + label
-            if st.button(
-                label,
-                key=f"_draft_pick_{p_ds}_{p_cid}_{did}",
-                use_container_width=True,
-                type="primary" if did == current else "secondary",
-            ):
-                edits[(p_ds, p_cid)] = did
-                st.rerun()
-
-    title = f"{_col_label(p_ds)} {clinic_id_to_name.get(p_cid, '?')}"
-    st.dialog(title)(_picker)()
 
 
 def _render_live_warnings(edited_slots, constraints, doc_id_to_name, clinic_id_to_name):
