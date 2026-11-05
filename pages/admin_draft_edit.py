@@ -111,6 +111,8 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
         )
         return [f"{len(left)}枠が未割当のままです（{descs}）"]
 
+    _render_pref_notes(prefs, doctors, doc_id_to_name)
+
     edit_ver = st.session_state.get(f"_draft_edit_ver_{target_month}_{sched['id']}", 0)
 
     required_pairs = {(ds, cid) for cid, ds, _ in required_slots}
@@ -224,6 +226,31 @@ def _render_edit_mode(sched, doctors, clinic_map, prefs, affinities, target_mont
         render_schedule_table(sched, doctors, list(clinic_map.values()))
         render_doctor_view_table(sched, doctors)
         render_doctor_stats_table(sched, doctors, list(clinic_map.values()))
+
+
+def _md_escape(text):
+    """利用者入力をMarkdownとして解釈させずに表示するためのエスケープ"""
+    import re
+    escaped = re.sub(r"([\\`*_{}\[\]()#+\-.!|~<>$:])", r"\\\1", str(text))
+    return escaped.replace("\n", "  \n")
+
+
+def _render_pref_notes(prefs, doctors, doc_id_to_name):
+    """希望入力の備考を、編集しながら確認できるように表示する"""
+    notes = []
+    for p in prefs:
+        text = (p.get("free_text") or "").strip()
+        if text:
+            notes.append((doc_id_to_name.get(p["doctor_id"], f"ID:{p['doctor_id']}"), text))
+    if not notes:
+        st.caption("📝 メンバーの備考はありません")
+        return
+    # 医員マスタの並び順に合わせる
+    order = {doc_id_to_name.get(d["id"]): i for i, d in enumerate(doctors)}
+    notes.sort(key=lambda x: order.get(x[0], len(order)))
+    with st.expander(f"📝 メンバーの備考（{len(notes)}件）", expanded=True):
+        for name, text in notes:
+            st.markdown(f"**{_md_escape(name)}**：{_md_escape(text)}")
 
 
 def _do_confirm(sched, new_assignments, target_month, year, month, doctors, clinics, affinities):
