@@ -879,16 +879,13 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
 
     st.subheader("スケジュール確認")
 
-    view_kind = st.radio(
-        "表示", ["月別スケジュール", "年間アサイン数"],
-        horizontal=True, key=f"wkadm_view_kind_{section}",
-    )
-    if view_kind == "年間アサイン数":
+    with st.expander("📅 年度アサイン数（4月〜翌3月）", expanded=True):
         render_yearly_summary(
             section, get_doctors(active_only=False), assigned_doctor_ids,
             key_prefix="wkadm_yearly",
         )
-        return
+
+    st.markdown("---")
 
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]
