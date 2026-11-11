@@ -28,6 +28,7 @@ from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
 from components.schedule_viewer import _VIEWER_SCRIPT
 from components.weekday_calendar import render_weekday_calendar
+from components.weekday_yearly_summary import render_yearly_summary
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
 
@@ -211,12 +212,18 @@ def _render_schedule_view(doctor: dict, section: str, cfg: dict):
     # 表示モード切替: 月ごと / すべて表示
     display_mode = st.radio(
         "表示範囲",
-        ["月ごと", "すべて表示"],
+        ["月ごと", "すべて表示", "年間アサイン数"],
         horizontal=True,
         key=f"wkdoc_display_mode_{section}",
     )
 
-    if display_mode == "すべて表示":
+    if display_mode == "年間アサイン数":
+        render_yearly_summary(
+            section, get_doctors(active_only=False), cfg.get("assigned_doctors", []),
+            confirmed_only=True, highlight_doctor_id=doctor["id"],
+            key_prefix="wkdoc_yearly",
+        )
+    elif display_mode == "すべて表示":
         _render_schedule_all(doctor, section, cfg)
     else:
         _render_schedule_monthly(doctor, section, cfg)

@@ -30,6 +30,7 @@ from scheduling_utils import get_weekday_target_dates, solve_weekday_schedule
 from components.display_utils import build_display_name_map
 from components.schedule_image import generate_weekday_schedule_image
 from components.weekday_calendar import render_weekday_calendar
+from components.weekday_yearly_summary import render_yearly_summary
 
 DAY_NAMES = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金"}
 
@@ -877,6 +878,17 @@ def _render_schedule_view(section: str, cfg: dict, assigned_doctor_ids: list, da
     from database import get_weekday_schedule_view_mode
 
     st.subheader("スケジュール確認")
+
+    view_kind = st.radio(
+        "表示", ["月別スケジュール", "年間アサイン数"],
+        horizontal=True, key=f"wkadm_view_kind_{section}",
+    )
+    if view_kind == "年間アサイン数":
+        render_yearly_summary(
+            section, get_doctors(active_only=False), assigned_doctor_ids,
+            key_prefix="wkadm_yearly",
+        )
+        return
 
     today = date.today()
     months = [(today + relativedelta(months=i)).strftime("%Y-%m") for i in range(-1, 14)]

@@ -12,6 +12,7 @@ from database.connection import (
     _col_letter, _retry, _clear_data_cache, _register_cached,
     _safe_json_loads, _sanitize_cell_value,
     _get_weekday_sheet, _init_weekday_sheet, _clear_weekday_ss_cache,
+    _get_weekday_spreadsheet,
     is_readonly,
 )
 from database.master import get_doctors
@@ -681,6 +682,31 @@ def get_weekday_schedule(year_month: str, section: str):
             continue
         result.append(r)
     result.sort(key=lambda x: (x["date"], x["slot_id"]))
+    return result
+
+
+@_register_cached
+@st.cache_data(ttl=300)
+def get_weekday_schedules_for_months(section: str, year_months: tuple) -> dict:
+    """複数月の平日スケジュールをまとめて取得（年間集計用）
+
+    存在しない月のシートは作成せずスキップする（空シートの量産を防ぐ）。
+
+    Returns:
+        {year_month: [schedule records]}
+    """
+    try:
+        ss = _get_weekday_spreadsheet(section)
+        existing = {ws.title for ws in _retry(ss.worksheets)}
+    except Exception:
+        return {}
+    result = {}
+    for ym in year_months:
+        if f"平日スケジュール_{ym}" not in existing:
+            continue
+        records = get_weekday_schedule(ym, section)
+        if records:
+            result[ym] = records
     return result
 
 
