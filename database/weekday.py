@@ -699,10 +699,10 @@ def get_weekday_schedules_for_months(section: str, year_months: tuple) -> dict:
         ss = _get_weekday_spreadsheet(section)
         existing = {ws.title for ws in _retry(ss.worksheets)}
     except Exception:
-        return {}
+        existing = None  # 一覧取得に失敗した場合は全月を個別に取得する
     result = {}
     for ym in year_months:
-        if f"平日スケジュール_{ym}" not in existing:
+        if existing is not None and f"平日スケジュール_{ym}" not in existing:
             continue
         records = get_weekday_schedule(ym, section)
         if records:
